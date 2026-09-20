@@ -161,6 +161,49 @@ docker run --rm ghcr.io/routewarden/cli:latest schema > routewarden.schema.json
 
 ---
 
+### 4. Generate Gateway Configs (`generate`)
+
+Convert `routewarden.json` into native gateway configuration — no manual translation required.
+
+**CLI:**
+```bash
+# Traefik: dynamic YAML middleware definition
+rwarden generate --target traefik --config routewarden.json > dynamic.yml
+
+# Traefik: Docker Compose labels block
+rwarden generate --target traefik-labels --config routewarden.json
+
+# Caddy: Caddyfile directive block
+rwarden generate --target caddy --config routewarden.json
+
+# NGINX / OpenResty: Lua init table for nginx.conf
+rwarden generate --target nginx --config routewarden.json
+```
+
+**Docker:**
+```bash
+# Traefik: dynamic YAML middleware definition
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik --config /routewarden.json > dynamic.yml
+
+# Traefik: Docker Compose labels block
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-labels --config /routewarden.json
+
+# Caddy: Caddyfile directive block
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target caddy --config /routewarden.json
+
+# NGINX / OpenResty: Lua init table for nginx.conf
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target nginx --config /routewarden.json
+```
+
+| `--target` | Output |
+|:---|:---|
+| `traefik` | Traefik dynamic YAML middleware definition (`dynamic.yml`) |
+| `traefik-labels` | Docker Compose `labels:` block |
+| `caddy` | Caddyfile `routewarden { ... }` directive block |
+| `nginx` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+
+---
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
