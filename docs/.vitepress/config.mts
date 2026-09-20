@@ -1,5 +1,12 @@
 import { defineConfig } from 'vitepress'
 
+// Declare process ambiently for Node build-time environment in VitePress config
+declare const process: { env: Record<string, string | undefined> }
+
+// Cloudflare Web Analytics token — only set in CI via GitHub Actions environment secret/variable.
+// When absent (local dev), the beacon script is omitted to prevent CORS rejections.
+const CF_ANALYTICS_TOKEN = process.env.CLOUDFLARE_ANALYTICS_TOKEN || ''
+
 export default defineConfig({
   title: 'RouteWarden CLI',
   description: 'Developer CLI, path anti-evasion tester, config validator, and official JSON Schema for RouteWarden.',
@@ -12,7 +19,15 @@ export default defineConfig({
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'RouteWarden CLI (`rwarden`)' }],
     ['meta', { property: 'og:description', content: 'Developer CLI, path anti-evasion tester, config validator, and official JSON Schema for RouteWarden.' }],
-    ['meta', { property: 'og:url', content: 'https://routewarden.github.io/cli/' }]
+    ['meta', { property: 'og:url', content: 'https://routewarden.github.io/cli/' }],
+    ...(CF_ANALYTICS_TOKEN ? [[
+      'script' as const,
+      {
+        defer: '',
+        src: 'https://static.cloudflareinsights.com/beacon.min.js',
+        'data-cf-beacon': JSON.stringify({ token: CF_ANALYTICS_TOKEN })
+      }
+    ] as [string, Record<string, string>]] : [])
   ],
   themeConfig: {
     logo: '/icon.svg',

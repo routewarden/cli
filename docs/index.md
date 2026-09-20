@@ -24,7 +24,17 @@ curl -fsSL https://routewarden.github.io/cli/install.sh | INSTALL_DIR=$HOME/.loc
 
 ### 2. Pre-built Release Binaries
 
-Download standalone, statically compiled binaries for **Linux** (`amd64`, `arm64`), **macOS** (Apple Silicon `arm64` & Intel `amd64`), and **Windows** directly from [GitHub Releases](https://github.com/routewarden/cli/releases/latest).
+Download standalone, statically compiled binaries for **Linux**, **macOS**, and **Windows** directly from [GitHub Releases](https://github.com/routewarden/cli/releases/latest):
+
+| Platform | Architecture | Archive |
+|:---|:---|:---|
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_windows_amd64.zip](https://github.com/routewarden/cli/releases/latest/download/rwarden_windows_amd64.zip) |
+
+All downloads and checksums are verified on the [Releases Page](https://github.com/routewarden/cli/releases/latest).
 
 ---
 
@@ -183,7 +193,54 @@ docker run --rm ghcr.io/routewarden/cli:latest schema > routewarden.schema.json
 
 ---
 
-### 4. Check CLI Version (`version`)
+### 4. Generate Gateway Configs (`generate`)
+
+Convert a `routewarden.json` specification into native gateway configuration format — no manual translation required:
+
+::: code-group
+
+```bash [CLI]
+# Traefik: output as dynamic YAML middleware definition
+rwarden generate --target traefik --config routewarden.json > dynamic.yml
+
+# Traefik: output as Docker Compose label block
+rwarden generate --target traefik-labels --config routewarden.json
+
+# Caddy: output as Caddyfile directive block
+rwarden generate --target caddy --config routewarden.json
+
+# NGINX / OpenResty: output as Lua init table for nginx.conf
+rwarden generate --target nginx --config routewarden.json
+```
+
+```bash [Docker]
+# Traefik: output as dynamic YAML middleware definition
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik --config /routewarden.json > dynamic.yml
+
+# Traefik: output as Docker Compose label block
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-labels --config /routewarden.json
+
+# Caddy: output as Caddyfile directive block
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target caddy --config /routewarden.json
+
+# NGINX / OpenResty: output as Lua init table for nginx.conf
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target nginx --config /routewarden.json
+```
+
+:::
+
+**Available `--target` values:**
+
+| Target | Output |
+| :--- | :--- |
+| `traefik` | Traefik dynamic YAML middleware definition (mountable as `dynamic.yml`) |
+| `traefik-labels` | Docker Compose `labels:` block for direct service configuration |
+| `caddy` | Caddyfile `routewarden { ... }` directive block |
+| `nginx` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+
+---
+
+### 5. Check CLI Version (`version`)
 
 ::: code-group
 

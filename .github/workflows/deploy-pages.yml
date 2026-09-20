@@ -26,6 +26,7 @@ jobs:
   build:
     name: Build CLI VitePress Site
     runs-on: ubuntu-latest
+    environment: github-pages   # needed to access environment-scod variables (vars.*)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,6 +47,8 @@ jobs:
 
       - name: Build VitePress Docs
         run: npm run docs:build
+        env:
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ vars.CLOUDFLARE_ANALYTICS_TOKEN }}
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
