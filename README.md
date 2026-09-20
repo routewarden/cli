@@ -11,14 +11,16 @@
 Download and install the latest pre-compiled release binary automatically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | bash
+curl -fsSL https://routewarden.github.io/cli/install.sh | bash
 ```
 
 Custom installation directory (e.g. `~/.local/bin`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | INSTALL_DIR=$HOME/.local/bin bash
+curl -fsSL https://routewarden.github.io/cli/install.sh | INSTALL_DIR=$HOME/.local/bin bash
 ```
+
+*(Or via raw GitHub fallback: `curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | bash`)*
 
 ---
 
