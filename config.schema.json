@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json",
+  "title": "RouteWarden Configuration",
+  "description": "JSON schema for RouteWarden HTTP security middleware (Traefik, Caddy, NGINX / OpenResty).",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Master switch to enable or bypass RouteWarden inspection."
+    },
+    "enableDefaultPatterns": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable built-in sensitive path patterns (.env, .git, .aws, keys, credentials, db dumps, actuator, container configs, wp-config, etc.)."
+    },
+    "enableDefaultAllowPatterns": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable built-in whitelist rules (/robots.txt, /sitemap*.xml, /ads.txt, /security.txt, /.well-known/*)."
+    },
+    "pathPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Custom regular expressions for paths to block (synonym for blockPatterns)."
+    },
+    "blockPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Custom regular expressions for paths to block."
+    },
+    "allowPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Whitelisted regular expressions that take precedence over block patterns."
+    },
+    "allowedIps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of client IP addresses or CIDR blocks exempted from all security rules."
+    },
+    "methods": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["GET"],
+      "description": "HTTP request methods to inspect (e.g. GET, POST, HEAD, PUT, DELETE)."
+    },
+    "checkQuery": {
+      "type": "boolean",
+      "default": false,
+      "description": "Inspect URL query strings and individual query parameters against block patterns."
+    },
+    "checkHeaders": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional list of HTTP request headers to inspect for path smuggling (e.g. X-Forwarded-Uri, X-Rewrite-URL, X-Original-URL)."
+    },
+    "statusCode": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599,
+      "default": 403,
+      "description": "Default HTTP status code when blocking a request."
+    },
+    "customResponseText": {
+      "type": "string",
+      "description": "Custom response body text when blocking requests."
+    },
+    "silentDrop": {
+      "type": "boolean",
+      "default": false,
+      "description": "Immediately terminate TCP connection without sending an HTTP response."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "text",
+        "json",
+        "html",
+        "captcha",
+        "redirect",
+        "silentDrop",
+        "gzipBomb",
+        "tarpit",
+        "fakeSuccess",
+        "rateLimitChallenge",
+        "proxy",
+        "infiniteStream",
+        "xml"
+      ],
+      "description": "Shorthand alias for response.mode action."
+    },
+    "action": {
+      "type": "string",
+      "description": "Shorthand alias for response.mode action."
+    },
+    "debug": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable verbose inspection and candidate-path evaluation logs."
+    },
+    "securityLog": {
+      "type": "boolean",
+      "default": true,
+      "description": "Emit structured CrowdSec/SIEM-compatible JSON log events on every block event."
+    },
+    "response": {
+      "$ref": "#/$defs/ResponseConfig"
+    }
+  },
+  "$defs": {
+    "ResponseConfig": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "default": "text",
+          "enum": [
+            "text",
+            "json",
+            "html",
+            "captcha",
+            "redirect",
+            "silentDrop",
+            "gzipBomb",
+            "tarpit",
+            "fakeSuccess",
+            "rateLimitChallenge",
+            "proxy",
+            "infiniteStream",
+            "xml"
+          ],
+          "description": "Response action when a request is blocked."
+        },
+        "statusCode": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599,
+          "description": "HTTP status code to return."
+        },
+        "contentType": {
+          "type": "string",
+          "description": "Custom Content-Type header override."
+        },
+        "body": {
+          "type": "string",
+          "description": "Custom response body payload."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Custom key-value HTTP headers sent with the blocked response."
+        },
+        "redirectUrl": {
+          "type": "string",
+          "description": "Target URL when mode is 'redirect'."
+        },
+        "proxyUrl": {
+          "type": "string",
+          "description": "Honeypot upstream backend URL when mode is 'proxy'."
+        },
+        "captcha": {
+          "$ref": "#/$defs/CaptchaConfig"
+        },
+        "gzipBombMB": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "description": "Decompressed size in megabytes for gzipBomb mode."
+        },
+        "retryAfterSeconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Retry-After header duration in seconds for rateLimitChallenge mode."
+        },
+        "tarpitDelayMs": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 10,
+          "description": "Delay in milliseconds between bytes for tarpit mode."
+        },
+        "tarpitMaxDurationSeconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1,
+          "description": "Maximum connection duration in seconds for tarpit mode."
+        },
+        "streamSizeMB": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 1,
+          "description": "Maximum payload size in megabytes for infiniteStream mode."
+        }
+      }
+    },
+    "CaptchaConfig": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["turnstile", "hcaptcha", "recaptcha", "custom"],
+          "default": "turnstile",
+          "description": "Captcha challenge provider."
+        },
+        "siteKey": {
+          "type": "string",
+          "description": "Public site key for the captcha widget."
+        },
+        "title": {
+          "type": "string",
+          "default": "Security Verification",
+          "description": "HTML page title for the challenge page."
+        },
+        "template": {
+          "type": "string",
+          "description": "Custom Go HTML template string for the captcha page."
+        }
+      }
+    }
+  }
+}

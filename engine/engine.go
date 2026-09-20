@@ -1,0 +1,421 @@
+package engine
+
+import (
+	"fmt"
+	"net"
+	"net/url"
+	"path"
+	"regexp"
+	"strings"
+)
+
+// DefaultBlockPatterns contains well-known sensitive endpoints and file extensions.
+var DefaultBlockPatterns = []string{
+	// Sensitive extensions & environment files (e.g. .env, .env.local, .txt, .log, .bak, .backup, .sql, .conf, .config, .ini, .yaml, .yml)
+	`(?i)(^|/)(\.env.*|.*\.(txt|log|bak|backup|sql|conf|config|ini|yaml|yml))$`,
+	// Version control & sensitive hidden directories
+	`(?i)(^|/)\.(git|svn|hg|bzr|cvs)(/.*|$)`,
+	// Cloud & infra credentials
+	`(?i)(^|/)\.(aws|ssh|kube|docker)(/.*|$)`,
+	// Database & server dump files / archives
+	`(?i).*\.(tar|tar\.gz|tgz|zip|rar|7z|gz|bz2|iso|dump|sqlite|sqlite3|db)$`,
+	// Common sensitive admin & debug endpoints
+	`(?i)(^|/)(phpinfo\.php|info\.php|server-status|server-info|actuator(/.*)?|metrics|heapdump|trace|env)$`,
+	// Package manager files & lockfiles
+	`(?i)(^|/)(composer\.(json|lock)|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Pipfile|Pipfile\.lock|requirements\.txt)$`,
+	// TLS & cryptographic private keys, certificates, keystores
+	`(?i).*\.(pem|key|crt|pfx|p12|jks|kdb)$`,
+	// Container & orchestration manifests and configs
+	`(?i)(^|/)(dockerfile.*|docker-compose.*\.ya?ml)$`,
+	// System & macOS metadata files
+	`(?i)(^|/)\.ds_store$`,
+	// Web framework and CMS sensitive configuration files
+	`(?i)(^|/)(wp-config\.php.*|configuration\.php.*|settings\.py|local_settings\.py)$`,
+}
+
+// DefaultAllowPatterns contains typical legitimate endpoints that might otherwise match broad patterns.
+var DefaultAllowPatterns = []string{
+	`(?i)^/robots\.txt$`,
+	`(?i)^/sitemap.*\.xml$`,
+	`(?i)^/ads\.txt$`,
+	`(?i)^/security\.txt$`,
+	`(?i)^/\.well-known(/.*)?$`,
+}
+
+// CaptchaConfig holds captcha configuration options.
+type CaptchaConfig struct {
+	Provider string `json:"provider,omitempty"`
+	SiteKey  string `json:"siteKey,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Template string `json:"template,omitempty"`
+}
+
+// ResponseConfig defines how blocked requests should be answered.
+type ResponseConfig struct {
+	Mode                     string            `json:"mode,omitempty"`
+	StatusCode               int               `json:"statusCode,omitempty"`
+	ContentType              string            `json:"contentType,omitempty"`
+	Body                     string            `json:"body,omitempty"`
+	Headers                  map[string]string `json:"headers,omitempty"`
+	RedirectURL              string            `json:"redirectUrl,omitempty"`
+	ProxyURL                 string            `json:"proxyUrl,omitempty"`
+	Captcha                  *CaptchaConfig    `json:"captcha,omitempty"`
+	GzipBombMB               int               `json:"gzipBombMB,omitempty"`
+	RetryAfterSeconds        int               `json:"retryAfterSeconds,omitempty"`
+	TarpitDelayMs            int               `json:"tarpitDelayMs,omitempty"`
+	TarpitMaxDurationSeconds int               `json:"tarpitMaxDurationSeconds,omitempty"`
+	StreamSizeMB             int               `json:"streamSizeMB,omitempty"`
+}
+
+// Config holds the RouteWarden configuration.
+type Config struct {
+	Enabled                    bool            `json:"enabled,omitempty"`
+	EnableDefaultPatterns      bool            `json:"enableDefaultPatterns,omitempty"`
+	EnableDefaultAllowPatterns bool            `json:"enableDefaultAllowPatterns,omitempty"`
+	PathPatterns               []string        `json:"pathPatterns,omitempty"`
+	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
+	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
+	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
+	Methods                    []string        `json:"methods,omitempty"`
+	StatusCode                 int             `json:"statusCode,omitempty"`
+	CustomResponseText         string          `json:"customResponseText,omitempty"`
+	SilentDrop                 bool            `json:"silentDrop,omitempty"`
+	Action                     string          `json:"action,omitempty"`
+	Mode                       string          `json:"mode,omitempty"`
+	CheckQuery                 bool            `json:"checkQuery,omitempty"`
+	CheckHeaders               []string        `json:"checkHeaders,omitempty"`
+	Debug                      bool            `json:"debug,omitempty"`
+	SecurityLog                bool            `json:"securityLog,omitempty"`
+	Response                   *ResponseConfig `json:"response,omitempty"`
+}
+
+// CreateConfig creates default RouteWarden configuration.
+func CreateConfig() *Config {
+	return &Config{
+		Enabled:                    true,
+		EnableDefaultPatterns:      true,
+		EnableDefaultAllowPatterns: true,
+		PathPatterns:               []string{},
+		BlockPatterns:              []string{},
+		AllowPatterns:              []string{},
+		AllowedIPs:                 []string{},
+		Methods:                    []string{"GET"},
+		StatusCode:                 403,
+		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
+		SilentDrop:                 false,
+		CheckQuery:                 false,
+		CheckHeaders:               []string{},
+		Debug:                      false,
+		SecurityLog:                true,
+		Response: &ResponseConfig{
+			Mode: "text",
+		},
+	}
+}
+
+// ExtractCandidatePaths normalizes and extracts all representations of a request URI path.
+func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
+	pathsToCheck := []string{path.Clean(pathStr)}
+
+	rawURIPath := requestURI
+	if idx := strings.IndexByte(rawURIPath, '?'); idx != -1 {
+		rawURIPath = rawURIPath[:idx]
+	}
+	if rawURIPath != "" {
+		pathsToCheck = append(pathsToCheck, path.Clean(rawURIPath))
+	}
+
+	if rawPath != "" && rawPath != pathStr {
+		pathsToCheck = append(pathsToCheck, path.Clean(rawPath))
+	}
+
+	curPath := pathStr
+	for i := 0; i < 3; i++ {
+		unescaped, err := url.PathUnescape(curPath)
+		if err != nil || unescaped == curPath {
+			break
+		}
+		pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
+		curPath = unescaped
+	}
+
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.ContainsRune(p, '\\') {
+			slashConverted := strings.ReplaceAll(p, "\\", "/")
+			pathsToCheck = append(pathsToCheck, path.Clean(slashConverted))
+		}
+	}
+
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.ContainsRune(p, ';') {
+			parts := strings.Split(p, "/")
+			cleanedSegments := make([]string, len(parts))
+			paramSegments := make([]string, 0)
+			for i, seg := range parts {
+				if semiIdx := strings.IndexByte(seg, ';'); semiIdx != -1 {
+					cleanedSegments[i] = seg[:semiIdx]
+					paramSegments = append(paramSegments, seg[semiIdx+1:])
+				} else {
+					cleanedSegments[i] = seg
+				}
+			}
+			matrixStripped := strings.Join(cleanedSegments, "/")
+			pathsToCheck = append(pathsToCheck, path.Clean(matrixStripped))
+
+			for _, param := range paramSegments {
+				if param != "" {
+					pathsToCheck = append(pathsToCheck, "/"+param, path.Clean("/"+param))
+				}
+			}
+
+			semiAsSlash := strings.ReplaceAll(p, ";", "/")
+			pathsToCheck = append(pathsToCheck, path.Clean(semiAsSlash))
+		}
+	}
+
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.ContainsRune(p, '\x00') {
+			pathsToCheck = append(pathsToCheck, path.Clean(strings.ReplaceAll(p, "\x00", "")))
+		}
+	}
+
+	candidatePaths := make([]string, 0, len(pathsToCheck))
+	seen := make(map[string]struct{}, len(pathsToCheck))
+	for _, p := range pathsToCheck {
+		if p == "" {
+			continue
+		}
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		p = path.Clean(p)
+		if _, exists := seen[p]; !exists {
+			seen[p] = struct{}{}
+			candidatePaths = append(candidatePaths, p)
+		}
+	}
+
+	return candidatePaths
+}
+
+// Engine represents a compiled inspection engine.
+type Engine struct {
+	Config       *Config
+	Methods      map[string]struct{}
+	BlockRegexes []*regexp.Regexp
+	AllowRegexes []*regexp.Regexp
+	AllowedIPs   []net.IP
+	AllowedNets  []*net.IPNet
+}
+
+// NewEngine validates and compiles a RouteWarden configuration.
+func NewEngine(cfg *Config) (*Engine, error) {
+	if cfg == nil {
+		cfg = CreateConfig()
+	}
+
+	methodsMap := make(map[string]struct{})
+	if len(cfg.Methods) == 0 {
+		methodsMap["GET"] = struct{}{}
+	} else {
+		for _, m := range cfg.Methods {
+			m = strings.ToUpper(strings.TrimSpace(m))
+			if m != "" {
+				methodsMap[m] = struct{}{}
+			}
+		}
+		if len(methodsMap) == 0 {
+			methodsMap["GET"] = struct{}{}
+		}
+	}
+
+	var blockPatterns []string
+	if cfg.EnableDefaultPatterns {
+		blockPatterns = append(blockPatterns, DefaultBlockPatterns...)
+	}
+	blockPatterns = append(blockPatterns, cfg.PathPatterns...)
+	blockPatterns = append(blockPatterns, cfg.BlockPatterns...)
+
+	compiledBlock := make([]*regexp.Regexp, 0, len(blockPatterns))
+	for _, p := range blockPatterns {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid block regex %q: %w", p, err)
+		}
+		compiledBlock = append(compiledBlock, re)
+	}
+
+	var allowPatterns []string
+	if cfg.EnableDefaultAllowPatterns {
+		allowPatterns = append(allowPatterns, DefaultAllowPatterns...)
+	}
+	allowPatterns = append(allowPatterns, cfg.AllowPatterns...)
+
+	compiledAllow := make([]*regexp.Regexp, 0, len(allowPatterns))
+	for _, p := range allowPatterns {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid allow regex %q: %w", p, err)
+		}
+		compiledAllow = append(compiledAllow, re)
+	}
+
+	var ips []net.IP
+	var nets []*net.IPNet
+	for _, ipStr := range cfg.AllowedIPs {
+		ipStr = strings.TrimSpace(ipStr)
+		if ipStr == "" {
+			continue
+		}
+		if strings.Contains(ipStr, "/") {
+			_, ipNet, err := net.ParseCIDR(ipStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid CIDR %q: %w", ipStr, err)
+			}
+			nets = append(nets, ipNet)
+		} else {
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid IP address %q", ipStr)
+			}
+			ips = append(ips, ip)
+		}
+	}
+
+	return &Engine{
+		Config:       cfg,
+		Methods:      methodsMap,
+		BlockRegexes: compiledBlock,
+		AllowRegexes: compiledAllow,
+		AllowedIPs:   ips,
+		AllowedNets:  nets,
+	}, nil
+}
+
+// EvaluationResult represents the inspection outcome of a request.
+type EvaluationResult struct {
+	Allowed        bool
+	Bypassed       bool
+	Blocked        bool
+	CandidatePaths []string
+	MatchedPattern string
+	MatchedTarget  string
+	Reason         string
+}
+
+// Evaluate inspects a simulated request against compiled rules.
+func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[string]string) *EvaluationResult {
+	result := &EvaluationResult{
+		Allowed:        false,
+		Bypassed:       false,
+		Blocked:        false,
+		CandidatePaths: []string{},
+	}
+
+	if !e.Config.Enabled {
+		result.Bypassed = true
+		result.Reason = "middleware_disabled"
+		return result
+	}
+
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == "" {
+		method = "GET"
+	}
+	if _, ok := e.Methods[method]; !ok {
+		result.Bypassed = true
+		result.Reason = fmt.Sprintf("method_%s_not_inspected", method)
+		return result
+	}
+
+	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
+	result.CandidatePaths = candidatePaths
+
+	// Check allow patterns first
+	for _, p := range candidatePaths {
+		for _, re := range e.AllowRegexes {
+			if re.MatchString(p) {
+				result.Allowed = true
+				result.MatchedPattern = re.String()
+				result.MatchedTarget = p
+				result.Reason = "path_allowed"
+				return result
+			}
+		}
+	}
+
+	// Check block patterns
+	for _, p := range candidatePaths {
+		for _, re := range e.BlockRegexes {
+			if re.MatchString(p) {
+				result.Blocked = true
+				result.MatchedPattern = re.String()
+				result.MatchedTarget = p
+				result.Reason = "path_blocked"
+				return result
+			}
+		}
+	}
+
+	// Check query string
+	if e.Config.CheckQuery && queryString != "" {
+		unescapedQuery, err := url.QueryUnescape(queryString)
+		if err != nil {
+			unescapedQuery = queryString
+		}
+
+		queryCandidates := []string{queryString, unescapedQuery}
+		if parsed, err := url.ParseQuery(queryString); err == nil {
+			for _, vals := range parsed {
+				for _, v := range vals {
+					queryCandidates = append(queryCandidates, v)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
+				}
+			}
+		}
+
+		for _, q := range queryCandidates {
+			for _, re := range e.BlockRegexes {
+				if re.MatchString(q) {
+					result.Blocked = true
+					result.MatchedPattern = re.String()
+					result.MatchedTarget = q
+					result.Reason = "query_blocked"
+					return result
+				}
+			}
+		}
+	}
+
+	// Check headers
+	if len(e.Config.CheckHeaders) > 0 && headers != nil {
+		for _, hdrName := range e.Config.CheckHeaders {
+			for k, v := range headers {
+				if strings.EqualFold(k, hdrName) && strings.TrimSpace(v) != "" {
+					hdrCandidates := ExtractCandidatePaths("", v, v)
+					for _, hc := range hdrCandidates {
+						for _, re := range e.BlockRegexes {
+							if re.MatchString(hc) {
+								result.Blocked = true
+								result.MatchedPattern = re.String()
+								result.MatchedTarget = hc
+								result.Reason = "header_blocked"
+								return result
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result.Allowed = true
+	result.Reason = "passed_inspection"
+	return result
+}

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+# Prevents redundant builds: cancel previous runs on the same branch or PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-go:
+    name: Go 1.25.1 Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.25.1
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+          cache: true
+
+      - name: Run Go Tests with Race Detection
+        run: go test -v -race ./...
+
+      - name: Run Coverage Check
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+
+      - name: Build CLI Binary
+        run: go build -v -o rwarden .
+
+      - name: Smoke Test CLI Execution
+        run: |
+          ./rwarden version
+          ./rwarden schema > /dev/null
+          ./rwarden test --path "/.env"
+          ./rwarden test --path "/public/index.html"
+
+  ci-success:
+    name: CI Status Check
+    needs: [test-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish CI Results Summary
+        run: |
+          echo "## 🛡️ RouteWarden CLI CI Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Tests & Race Detector** | ✅ Passed | Ran with \`-race\` on Go 1.25.1 |" >> $GITHUB_STEP_SUMMARY
+          echo "| **CLI Build & Smoke Tests** | ✅ Passed | Built and verified commands |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **Ready for merge! All checks passed.**" >> $GITHUB_STEP_SUMMARY
