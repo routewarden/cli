@@ -28,7 +28,7 @@ export default defineConfig({
         ]
       },
       { text: 'Schema', link: '/#json-schema' },
-      { text: 'Main Docs ↗', link: 'https://routewarden.github.io/docs/' }
+      { text: 'Main Docs', link: 'https://routewarden.github.io/docs/' }
     ],
     sidebar: [
       {
