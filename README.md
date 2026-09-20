@@ -61,6 +61,20 @@ rwarden version
 
 ---
 
+### Uninstallation
+
+`rwarden` installs as a single standalone binary without hidden system daemons or dependencies. To remove it:
+
+```bash
+# Default system-wide installation:
+sudo rm -f /usr/local/bin/rwarden
+
+# Or user-local installation:
+rm -f ~/.local/bin/rwarden
+```
+
+---
+
 ## Commands
 
 ### 1. Test URL Paths & Queries (`test`)

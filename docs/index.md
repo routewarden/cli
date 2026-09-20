@@ -68,6 +68,20 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 ---
 
+### Uninstallation
+
+`rwarden` is a single self-contained binary with no background background services or external runtime dependencies. To completely remove it from your machine:
+
+```bash
+# If installed system-wide (default):
+sudo rm -f /usr/local/bin/rwarden
+
+# If installed in user directory:
+rm -f ~/.local/bin/rwarden
+```
+
+---
+
 ## Commands {#commands}
 
 ### 1. Test URL Paths & Queries (`test`)
