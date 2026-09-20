@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # RouteWarden CLI (rwarden) Universal Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | bash
+# Usage: curl -fsSL https://routewarden.github.io/cli/install.sh | bash
+#   (or: curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | bash)
 #
 # Supports:
 #   - Linux (x86_64, arm64)
