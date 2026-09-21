@@ -288,6 +288,70 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 	}
 
+	// Validate status code range if configured
+	if cfg.StatusCode != 0 && (cfg.StatusCode < 100 || cfg.StatusCode > 599) {
+		return nil, fmt.Errorf("invalid statusCode %d: must be between 100 and 599", cfg.StatusCode)
+	}
+
+	// Resolve top-level Mode or Action aliases into cfg.Response.Mode
+	if cfg.Response == nil {
+		cfg.Response = &ResponseConfig{Mode: "text"}
+	}
+	if strings.TrimSpace(cfg.Response.Mode) == "" || cfg.Response.Mode == "text" {
+		if strings.TrimSpace(cfg.Mode) != "" {
+			cfg.Response.Mode = strings.TrimSpace(cfg.Mode)
+		} else if strings.TrimSpace(cfg.Action) != "" {
+			cfg.Response.Mode = strings.TrimSpace(cfg.Action)
+		} else if cfg.SilentDrop {
+			cfg.Response.Mode = "silentDrop"
+		} else if cfg.Response.Mode == "" {
+			cfg.Response.Mode = "text"
+		}
+	}
+
+	// Validate response configuration
+	if cfg.Response != nil {
+		if cfg.Response.StatusCode != 0 && (cfg.Response.StatusCode < 100 || cfg.Response.StatusCode > 599) {
+			return nil, fmt.Errorf("invalid response.statusCode %d: must be between 100 and 599", cfg.Response.StatusCode)
+		}
+
+		if cfg.Response.Mode != "" {
+			validModes := map[string]struct{}{
+				"text": {}, "json": {}, "html": {}, "captcha": {},
+				"redirect": {}, "silentdrop": {}, "drop": {}, "gzipbomb": {},
+				"tarpit": {}, "fakesuccess": {}, "ratelimit": {}, "ratelimitchallenge": {},
+				"proxy": {}, "infinitestream": {}, "garbagestream": {}, "xml": {},
+			}
+			if _, ok := validModes[strings.ToLower(cfg.Response.Mode)]; !ok {
+				return nil, fmt.Errorf("unsupported response.mode %q", cfg.Response.Mode)
+			}
+
+			if strings.EqualFold(cfg.Response.Mode, "redirect") && strings.TrimSpace(cfg.Response.RedirectURL) == "" {
+				return nil, fmt.Errorf("redirectUrl is required when response.mode is 'redirect'")
+			}
+
+			if strings.EqualFold(cfg.Response.Mode, "proxy") {
+				if strings.TrimSpace(cfg.Response.ProxyURL) == "" {
+					return nil, fmt.Errorf("proxyUrl is required when response.mode is 'proxy'")
+				}
+				if _, err := url.ParseRequestURI(cfg.Response.ProxyURL); err != nil {
+					return nil, fmt.Errorf("invalid proxyUrl %q: %w", cfg.Response.ProxyURL, err)
+				}
+			}
+
+			if strings.EqualFold(cfg.Response.Mode, "captcha") && cfg.Response.Captcha != nil {
+				if cfg.Response.Captcha.Provider != "" {
+					validProviders := map[string]struct{}{
+						"turnstile": {}, "hcaptcha": {}, "recaptcha": {}, "custom": {},
+					}
+					if _, ok := validProviders[strings.ToLower(cfg.Response.Captcha.Provider)]; !ok {
+						return nil, fmt.Errorf("unsupported captcha provider %q (must be turnstile, hcaptcha, recaptcha, or custom)", cfg.Response.Captcha.Provider)
+					}
+				}
+			}
+		}
+	}
+
 	return &Engine{
 		Config:       cfg,
 		Methods:      methodsMap,
@@ -309,8 +373,13 @@ type EvaluationResult struct {
 	Reason         string
 }
 
-// Evaluate inspects a simulated request against compiled rules.
+// Evaluate inspects a simulated request against compiled rules without client IP.
 func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[string]string) *EvaluationResult {
+	return e.EvaluateWithClientIP(method, requestPath, queryString, headers, "")
+}
+
+// EvaluateWithClientIP inspects a simulated request against compiled rules including client IP check.
+func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, headers map[string]string, clientIPStr string) *EvaluationResult {
 	result := &EvaluationResult{
 		Allowed:        false,
 		Bypassed:       false,
@@ -332,6 +401,26 @@ func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[s
 		result.Bypassed = true
 		result.Reason = fmt.Sprintf("method_%s_not_inspected", method)
 		return result
+	}
+
+	// Check client IP whitelist
+	if clientIPStr != "" {
+		if ip := net.ParseIP(strings.TrimSpace(clientIPStr)); ip != nil {
+			for _, allowedIP := range e.AllowedIPs {
+				if allowedIP.Equal(ip) {
+					result.Allowed = true
+					result.Reason = "ip_whitelisted"
+					return result
+				}
+			}
+			for _, allowedNet := range e.AllowedNets {
+				if allowedNet.Contains(ip) {
+					result.Allowed = true
+					result.Reason = "ip_whitelisted"
+					return result
+				}
+			}
+		}
 	}
 
 	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
@@ -419,3 +508,271 @@ func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[s
 	result.Reason = "passed_inspection"
 	return result
 }
+
+// Generate converts a Config into target gateway configuration (traefik, traefik-labels, caddy, nginx).
+func (cfg *Config) Generate(target string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "traefik":
+		return cfg.GenerateTraefikYAML(), nil
+	case "traefik-labels":
+		return cfg.GenerateTraefikLabels(), nil
+	case "caddy":
+		return cfg.GenerateCaddyfile(), nil
+	case "nginx":
+		return cfg.GenerateNginxLua(), nil
+	default:
+		return "", fmt.Errorf("unsupported target: %s (must be 'traefik', 'traefik-labels', 'caddy', or 'nginx')", target)
+	}
+}
+
+// ResolveResponse returns a normalized ResponseConfig incorporating top-level mode/action aliases.
+func (cfg *Config) ResolveResponse() (string, int, string) {
+	mode := "text"
+	status := 403
+	body := ""
+
+	if cfg.StatusCode != 0 {
+		status = cfg.StatusCode
+	}
+	if cfg.CustomResponseText != "" {
+		body = cfg.CustomResponseText
+	}
+
+	if cfg.Response != nil {
+		if cfg.Response.Mode != "" {
+			mode = cfg.Response.Mode
+		}
+		if cfg.Response.StatusCode != 0 {
+			status = cfg.Response.StatusCode
+		}
+		if cfg.Response.Body != "" {
+			body = cfg.Response.Body
+		}
+	}
+
+	if mode == "text" {
+		if strings.TrimSpace(cfg.Mode) != "" {
+			mode = strings.TrimSpace(cfg.Mode)
+		} else if strings.TrimSpace(cfg.Action) != "" {
+			mode = strings.TrimSpace(cfg.Action)
+		} else if cfg.SilentDrop {
+			mode = "silentDrop"
+		}
+	}
+
+	return mode, status, body
+}
+
+// GenerateTraefikYAML outputs Traefik dynamic YAML middleware configuration.
+func (cfg *Config) GenerateTraefikYAML() string {
+	var b strings.Builder
+	b.WriteString("# Traefik dynamic configuration generated by RouteWarden CLI\n")
+	b.WriteString("http:\n")
+	b.WriteString("  middlewares:\n")
+	b.WriteString("    routewarden:\n")
+	b.WriteString("      plugin:\n")
+	b.WriteString("        routewarden:\n")
+	fmt.Fprintf(&b, "          enabled: %t\n", cfg.Enabled)
+	fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", cfg.EnableDefaultPatterns)
+	fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", cfg.EnableDefaultAllowPatterns)
+
+	allBlocks := append([]string{}, cfg.PathPatterns...)
+	allBlocks = append(allBlocks, cfg.BlockPatterns...)
+	if len(allBlocks) > 0 {
+		b.WriteString("          pathPatterns:\n")
+		for _, p := range allBlocks {
+			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(p, "'", "''"))
+		}
+	}
+	if len(cfg.AllowPatterns) > 0 {
+		b.WriteString("          allowPatterns:\n")
+		for _, a := range cfg.AllowPatterns {
+			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(a, "'", "''"))
+		}
+	}
+	if len(cfg.AllowedIPs) > 0 {
+		b.WriteString("          allowedIps:\n")
+		for _, ip := range cfg.AllowedIPs {
+			fmt.Fprintf(&b, "            - '%s'\n", ip)
+		}
+	}
+	if len(cfg.Methods) > 0 {
+		b.WriteString("          methods:\n")
+		for _, m := range cfg.Methods {
+			fmt.Fprintf(&b, "            - '%s'\n", m)
+		}
+	}
+	if cfg.CheckQuery {
+		b.WriteString("          checkQuery: true\n")
+	}
+	if len(cfg.CheckHeaders) > 0 {
+		b.WriteString("          checkHeaders:\n")
+		for _, h := range cfg.CheckHeaders {
+			fmt.Fprintf(&b, "            - '%s'\n", h)
+		}
+	}
+
+	mode, status, body := cfg.ResolveResponse()
+	b.WriteString("          response:\n")
+	b.WriteString(fmt.Sprintf("            mode: %s\n", mode))
+	b.WriteString(fmt.Sprintf("            statusCode: %d\n", status))
+	if body != "" {
+		b.WriteString(fmt.Sprintf("            body: %q\n", body))
+	}
+
+	return b.String()
+}
+
+// GenerateTraefikLabels outputs Docker Compose label strings for Traefik.
+func (cfg *Config) GenerateTraefikLabels() string {
+	var b strings.Builder
+	b.WriteString("labels:\n")
+	b.WriteString("  - \"traefik.enable=true\"\n")
+	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enabled="); fmt.Fprintf(&b, "%t", cfg.Enabled); b.WriteString("\"\n")
+	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultPatterns="); fmt.Fprintf(&b, "%t", cfg.EnableDefaultPatterns); b.WriteString("\"\n")
+
+	allBlocks := append([]string{}, cfg.PathPatterns...)
+	allBlocks = append(allBlocks, cfg.BlockPatterns...)
+	if len(allBlocks) > 0 {
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ",")))
+	}
+	if len(cfg.AllowPatterns) > 0 {
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ",")))
+	}
+	if len(cfg.AllowedIPs) > 0 {
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ",")))
+	}
+	if len(cfg.Methods) > 0 {
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ",")))
+	}
+	if cfg.CheckQuery {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkQuery=true\"\n")
+	}
+	if len(cfg.CheckHeaders) > 0 {
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ",")))
+	}
+
+	mode, status, body := cfg.ResolveResponse()
+	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode))
+	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status))
+	if body != "" {
+		escapedBody := strings.ReplaceAll(body, "\"", "\\\"")
+		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody))
+	}
+	return b.String()
+}
+
+// GenerateCaddyfile outputs Caddyfile directive block.
+func (cfg *Config) GenerateCaddyfile() string {
+	var b strings.Builder
+	b.WriteString("routewarden {\n")
+	if !cfg.Enabled {
+		b.WriteString("    disable\n")
+	}
+	if !cfg.EnableDefaultPatterns {
+		b.WriteString("    disable_default_patterns\n")
+	}
+	if !cfg.EnableDefaultAllowPatterns {
+		b.WriteString("    disable_default_allow_patterns\n")
+	}
+	if cfg.CheckQuery {
+		b.WriteString("    check_query\n")
+	}
+	if len(cfg.CheckHeaders) > 0 {
+		b.WriteString(fmt.Sprintf("    check_headers %s\n", strings.Join(cfg.CheckHeaders, " ")))
+	}
+	allBlocks := append([]string{}, cfg.PathPatterns...)
+	allBlocks = append(allBlocks, cfg.BlockPatterns...)
+	for _, p := range allBlocks {
+		b.WriteString(fmt.Sprintf("    block_pattern %q\n", p))
+	}
+	for _, a := range cfg.AllowPatterns {
+		b.WriteString(fmt.Sprintf("    allow_pattern %q\n", a))
+	}
+	for _, ip := range cfg.AllowedIPs {
+		b.WriteString(fmt.Sprintf("    allowed_ip %s\n", ip))
+	}
+	if len(cfg.Methods) > 0 {
+		b.WriteString(fmt.Sprintf("    methods %s\n", strings.Join(cfg.Methods, " ")))
+	}
+	mode, status, body := cfg.ResolveResponse()
+	if mode != "" || status != 403 || body != "" {
+		b.WriteString("    response {\n")
+		if mode != "" {
+			b.WriteString(fmt.Sprintf("        mode %s\n", mode))
+		}
+		if status != 0 {
+			b.WriteString(fmt.Sprintf("        status %d\n", status))
+		}
+		if body != "" {
+			b.WriteString(fmt.Sprintf("        body %q\n", body))
+		}
+		b.WriteString("    }\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// GenerateNginxLua outputs OpenResty Lua configuration table.
+func (cfg *Config) GenerateNginxLua() string {
+	var b strings.Builder
+	b.WriteString("-- RouteWarden OpenResty configuration table\n")
+	b.WriteString("local routewarden_config = {\n")
+	b.WriteString(fmt.Sprintf("    enabled = %t,\n", cfg.Enabled))
+	b.WriteString(fmt.Sprintf("    enable_default_patterns = %t,\n", cfg.EnableDefaultPatterns))
+	allBlocks := append([]string{}, cfg.PathPatterns...)
+	allBlocks = append(allBlocks, cfg.BlockPatterns...)
+	if len(allBlocks) > 0 {
+		b.WriteString("    block_patterns = {\n")
+		for _, p := range allBlocks {
+			b.WriteString(fmt.Sprintf("        %q,\n", p))
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.AllowPatterns) > 0 {
+		b.WriteString("    allow_patterns = {\n")
+		for _, a := range cfg.AllowPatterns {
+			b.WriteString(fmt.Sprintf("        %q,\n", a))
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.AllowedIPs) > 0 {
+		b.WriteString("    allowed_ips = {\n")
+		for _, ip := range cfg.AllowedIPs {
+			b.WriteString(fmt.Sprintf("        %q,\n", ip))
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.Methods) > 0 {
+		b.WriteString("    methods = {\n")
+		for _, m := range cfg.Methods {
+			b.WriteString(fmt.Sprintf("        %q,\n", m))
+		}
+		b.WriteString("    },\n")
+	}
+	if cfg.CheckQuery {
+		b.WriteString("    check_query = true,\n")
+	}
+	if len(cfg.CheckHeaders) > 0 {
+		b.WriteString("    check_headers = {\n")
+		for _, h := range cfg.CheckHeaders {
+			b.WriteString(fmt.Sprintf("        %q,\n", h))
+		}
+		b.WriteString("    },\n")
+	}
+	mode, status, body := cfg.ResolveResponse()
+	b.WriteString("    response = {\n")
+	if mode != "" {
+		b.WriteString(fmt.Sprintf("        mode = %q,\n", mode))
+	}
+	if status != 0 {
+		b.WriteString(fmt.Sprintf("        status_code = %d,\n", status))
+	}
+	if body != "" {
+		b.WriteString(fmt.Sprintf("        body = %q,\n", body))
+	}
+	b.WriteString("    },\n")
+	b.WriteString("}\n")
+	return b.String()
+}
+

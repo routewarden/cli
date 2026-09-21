@@ -15,7 +15,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "1.0.0"
+var version = "1.1.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden CLI (` + version + `) — Security inspection & configuration tool
@@ -26,6 +26,7 @@ Usage:
 Commands:
   test        Simulate request path and query inspection against patterns
   validate    Validate a RouteWarden configuration file (JSON)
+  generate    Generate gateway configuration (traefik, traefik-labels, caddy, nginx)
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
 
@@ -49,6 +50,9 @@ func main() {
 	case "validate":
 		handleValidate(os.Args[2:])
 
+	case "generate":
+		handleGenerate(os.Args[2:])
+
 	case "test":
 		handleTest(os.Args[2:])
 
@@ -61,6 +65,56 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+func handleGenerate(args []string) {
+	fs := flag.NewFlagSet("generate", flag.ExitOnError)
+	target := fs.String("target", "", "Target gateway: traefik, traefik-labels, caddy, nginx")
+	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
+	_ = fs.Parse(args)
+
+	if *target == "" {
+		fmt.Fprintln(os.Stderr, "Error: --target <traefik|traefik-labels|caddy|nginx> is required")
+		os.Exit(1)
+	}
+
+	var data []byte
+	var err error
+
+	if *configPath == "-" || *configPath == "" {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 || *configPath == "-" {
+			data, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading config from stdin: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
+			os.Exit(1)
+		}
+	} else {
+		data, err = os.ReadFile(*configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", *configPath, err)
+			os.Exit(1)
+		}
+	}
+
+	cfg := engine.CreateConfig()
+	if err := json.Unmarshal(data, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	out, err := cfg.Generate(*target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print(out)
+}
+
 
 func handleSchema() {
 	fmt.Print(embeddedSchemaJSON)
@@ -130,6 +184,8 @@ func handleTest(args []string) {
 	testPath := fs.String("path", "", "Request path to evaluate (e.g. /.env or /api/v1)")
 	testQuery := fs.String("query", "", "Request query string to evaluate (optional)")
 	testMethod := fs.String("method", "GET", "HTTP method (default: GET)")
+	testIP := fs.String("ip", "", "Client IP address to evaluate against allowedIps (optional)")
+	configPath := fs.String("config", "", "Optional path to RouteWarden JSON config file (or '-' for stdin)")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
 	headerVal := fs.String("header", "", "Header in Key:Value format to test (optional)")
 	_ = fs.Parse(args)
@@ -141,6 +197,35 @@ func handleTest(args []string) {
 
 	cfg := engine.CreateConfig()
 	cfg.CheckQuery = *checkQuery
+	if *configPath != "" {
+		var data []byte
+		var err error
+		if *configPath == "-" {
+			data, err = io.ReadAll(os.Stdin)
+		} else {
+			data, err = os.ReadFile(*configPath)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", *configPath, err)
+			os.Exit(1)
+		}
+		if err := json.Unmarshal(data, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+			os.Exit(1)
+		}
+		// When --config is used, only override checkQuery if explicitly specified on CLI
+		queryFlagPassed := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "check-query" {
+				queryFlagPassed = true
+			}
+		})
+		if queryFlagPassed {
+			cfg.CheckQuery = *checkQuery
+		}
+	} else {
+		cfg.CheckQuery = *checkQuery
+	}
 
 	headers := make(map[string]string)
 	if *headerVal != "" {
@@ -163,9 +248,12 @@ func handleTest(args []string) {
 	if *testQuery != "" {
 		fmt.Printf("?%s", *testQuery)
 	}
+	if *testIP != "" {
+		fmt.Printf(" (client IP: %s)", *testIP)
+	}
 	fmt.Println()
 
-	eval := eng.Evaluate(*testMethod, *testPath, *testQuery, headers)
+	eval := eng.EvaluateWithClientIP(*testMethod, *testPath, *testQuery, headers, *testIP)
 
 	fmt.Printf("  Candidate paths extracted (%d):\n", len(eval.CandidatePaths))
 	for _, c := range eval.CandidatePaths {
@@ -181,7 +269,9 @@ func handleTest(args []string) {
 		fmt.Printf("\nResult: ⏭️ BYPASSED (%s)\n", eval.Reason)
 	} else {
 		fmt.Println("\nResult: ✅ ALLOWED (Passes inspection)")
-		if eval.MatchedPattern != "" {
+		if eval.Reason == "ip_whitelisted" {
+			fmt.Printf("  Reason:  %s (Whitelisted client IP)\n", eval.Reason)
+		} else if eval.MatchedPattern != "" {
 			fmt.Printf("  Allowlist Override: %s\n", eval.MatchedPattern)
 		}
 	}
