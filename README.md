@@ -56,8 +56,63 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 1.0.0
+# rwarden version 1.1.0
 ```
+
+---
+
+## Updating to the Latest Version
+
+To update `rwarden` to the newest released version:
+
+### 1. One-Liner Re-installation (macOS & Linux)
+Re-running the universal installer automatically queries GitHub Releases for the latest version tag, downloads the matching pre-compiled binary, and safely replaces your existing binary:
+
+```bash
+# Default system-wide (/usr/local/bin):
+curl -fsSL https://routewarden.github.io/cli/install.sh | bash
+
+# Or custom user directory (~/.local/bin):
+curl -fsSL https://routewarden.github.io/cli/install.sh | INSTALL_DIR=$HOME/.local/bin bash
+```
+
+### 2. Upgrading Docker Container Image
+If using the containerized client, pull the latest image tag:
+
+```bash
+docker pull ghcr.io/routewarden/cli:latest
+```
+
+### 3. Upgrading From Source (Go)
+Pull the latest commits and rebuild:
+
+```bash
+cd cli
+git pull origin main
+go build -o /usr/local/bin/rwarden .
+```
+
+Confirm the upgraded version:
+
+```bash
+rwarden version
+```
+
+---
+
+## Versioning & Release Automation (Maintainers)
+
+The CLI repository includes [`scripts/update-version.sh`](scripts/update-version.sh) to synchronize version tags across [`version.json`](version.json), Go source files (`main.go`), installer fallbacks, documentation manifests, and `package.json`:
+
+```bash
+# Update version across all files and version.json
+./scripts/update-version.sh v1.1.0
+
+# Or using npm
+npm run version:update v1.1.0
+```
+
+For full details on the release workflow, see [VERSIONING.md](VERSIONING.md).
 
 ---
 
@@ -94,15 +149,41 @@ rwarden test --path "/search" --query "file=secret.conf"
 
 # Test custom HTTP methods
 rwarden test --method POST --path "/wp-config.php"
+
+# Test custom HTTP headers
+rwarden test --path "/api" --header "X-Forwarded-Uri: /.env"
+
+# Test against a custom RouteWarden config file
+rwarden test --config routewarden.json --path "/admin/dashboard"
+
+# Test client IP whitelisting
+rwarden test --config routewarden.json --path "/admin" --ip "10.0.0.1"
+
+# Pipe configuration via stdin
+cat routewarden.json | rwarden test --config - --path "/admin"
 ```
 
 **Docker:**
 ```bash
+# Test a sensitive path
 docker run --rm ghcr.io/routewarden/cli:latest test --path "/.env"
-docker run --rm ghcr.io/routewarden/cli:latest test --path "/static/%252e%252e/.env"
+
+# Test evasion via query inspection
 docker run --rm ghcr.io/routewarden/cli:latest test --path "/search" --query "file=secret.conf"
-docker run --rm ghcr.io/routewarden/cli:latest test --method POST --path "/wp-config.php"
+
+# Test against custom config file
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest test --config /routewarden.json --path "/admin" --ip "10.0.0.1"
 ```
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `--path` | string | `""` | **Required**. Request path to evaluate (e.g. `/.env` or `/api/v1`) |
+| `--config` | string | `""` | Optional path to `routewarden.json` (or `-` for stdin) |
+| `--query` | string | `""` | Optional request query string to evaluate |
+| `--method` | string | `"GET"` | HTTP method (e.g. `GET`, `POST`, `HEAD`) |
+| `--ip` | string | `""` | Optional client IP address to evaluate against `allowedIps` |
+| `--header` | string | `""` | Optional header in `Key:Value` format to test |
+| `--check-query` | bool | `true` | Enable or disable query string inspection |
 
 **Example Output**:
 ```text
@@ -112,6 +193,9 @@ docker run --rm ghcr.io/routewarden/cli:latest test --method POST --path "/wp-co
     - /.env
 
 Result: 🛑 BLOCKED (HTTP Status 403)
+  Reason:  block_pattern_match
+  Target:  /.env
+  Pattern: (?i)\.env
 ```
 
 ---

@@ -32,6 +32,10 @@ export default defineConfig({
   themeConfig: {
     logo: '/icon.svg',
     siteTitle: 'rwarden CLI',
+    outline: {
+      level: [2, 3],
+      label: 'On this page'
+    },
     nav: [
       {
         text: 'Guide',
@@ -39,21 +43,23 @@ export default defineConfig({
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
-          { text: 'Production Integration', link: '/#production' }
+          { text: 'Production Integration', link: '/#production' },
+          { text: 'Changelog', link: '/#changelog' }
         ]
       },
       { text: 'Schema', link: '/#json-schema' },
+      { text: 'Changelog', link: '/#changelog' },
       { text: 'Main Docs', link: 'https://routewarden.github.io/docs/' }
     ],
     sidebar: [
       {
-        text: 'RouteWarden CLI',
+        text: 'Documentation',
         items: [
-          { text: 'Overview', link: '/' },
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
-          { text: 'Production Integration', link: '/#production' }
+          { text: 'Production Integration', link: '/#production' },
+          { text: 'Changelog', link: '/#changelog' }
         ]
       }
     ],

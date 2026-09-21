@@ -66,12 +66,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 1.0.0
+# rwarden version 1.1.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 1.0.0
+# rwarden version 1.1.0
 ```
 
 :::
@@ -601,5 +601,63 @@ Or inspect how a Caddyfile translates into the JSON schema:
 ```bash
 caddy adapt --config Caddyfile --pretty
 ```
+
+---
+
+## Changelog {#changelog}
+
+All notable changes to the RouteWarden CLI (`rwarden`) are documented below. The CLI adheres to [Semantic Versioning](https://semver.org/).
+
+### [v1.1.0] - 2026-09-21
+
+#### Added
+- **Multi-Gateway Config Generator (`generate`)**:
+  - Convert `routewarden.json` into native configuration for **Traefik Dynamic YAML** (`--target traefik`), **Traefik Docker Labels** (`--target traefik-labels`), **Caddy Caddyfile** (`--target caddy`), and **NGINX / OpenResty Lua** (`--target nginx`).
+  - Added support for `--config -` to stream configuration via standard input (stdin).
+  - Accurate serialization for `checkQuery`, `checkHeaders`, `methods`, and nested `response { mode, status, body }` blocks.
+- **Client IP Whitelist Simulation (`test --ip`)**:
+  - Test client IP evaluation against CIDR blocks and single IP allowlists offline (`rwarden test --config routewarden.json --path "/admin" --ip "10.0.0.1"`).
+- **HTTP Header Smuggling Inspection (`test --header`)**:
+  - Test custom headers in `Key:Value` format (e.g., `X-Forwarded-Uri`, `X-Rewrite-URL`, `X-Original-URL`) to evaluate reverse proxy path normalization anti-evasion.
+- **Config & Query Precedence in Offline Testing**:
+  - Added `--config <path>` flag to `rwarden test` to evaluate paths directly against custom configurations with full rule normalization.
+  - Added `--check-query` boolean flag (default `true` for interactive CLI usage, respects configuration file when provided).
+- **Comprehensive Configuration Validation (`validate`)**:
+  - Added HTTP status code range checks (100–599) across top-level and response configs.
+  - Added response mode validation (`text`, `json`, `html`, `captcha`, `redirect`, `silentDrop`, `drop`, `gzipBomb`, `tarpit`, `fakeSuccess`, `rateLimitChallenge`, `proxy`, `infiniteStream`).
+  - Added required target URL validation for `redirect` (`redirectUrl`) and `proxy` (`proxyUrl`) modes.
+  - Added CAPTCHA provider validation (`turnstile`, `hcaptcha`, `recaptcha`, `custom`).
+- **Release Automation**:
+  - Added `scripts/update-version.sh` and `VERSIONING.md` for maintainers.
+
+#### Changed
+- Normalized top-level `mode`, `action`, and `silentDrop` aliases uniformly into `Response.Mode`.
+- Modernized Caddyfile generator output to use the standard `response { mode ... status ... body ... }` directive block.
+
+---
+
+### [v1.0.0] - 2026-09-20
+
+#### Initial Release
+- **Path Anti-Evasion Inspection Engine (`test`)**:
+  - Offline candidate path extraction simulating Traefik and Caddy middleware pipelines.
+  - Recursive multi-layer URL percent-decoding (`%252e%252e`).
+  - Semicolon matrix parameter stripping (`/;param/.env`).
+  - Windows/IIS backslash normalization (`\..\`).
+  - Null-byte injection scrubbing (`%00`).
+  - Dot-segment path traversal resolving (`/static/../.env`).
+  - Default block pattern matching across sensitive files (`.env`, `server.key`, `cert.pem`, `Dockerfile`, `.git`, etc.).
+  - Default allow pattern overrides (`robots.txt`, `favicon.ico`, `sitemap.xml`, `.well-known`).
+- **Configuration Validator (`validate`)**:
+  - Offline schema validation of `routewarden.json`.
+  - Detection of invalid regular expressions and malformed CIDR blocks.
+  - Detailed summary breakdown of active rules, allowlists, and monitored headers.
+- **Official JSON Schema Export (`schema`)**:
+  - CLI command emitting `config.schema.json` directly for IDE integration (VS Code, JetBrains, Neovim) and CI/CD validation.
+- **Distribution**:
+  - Single-binary zero-dependency Go distribution for macOS (`amd64`, `arm64`), Linux (`amd64`, `arm64`), and Windows (`amd64`).
+  - Automated installation script (`curl -fsSL https://routewarden.github.io/cli/install.sh | bash`).
+  - Official multi-architecture Docker container image on GitHub Container Registry (`ghcr.io/routewarden/cli:latest`).
+
 
 
