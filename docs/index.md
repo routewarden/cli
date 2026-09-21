@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_windows_amd64.zip](https://github.com/routewarden/cli/releases/latest/download/rwarden_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_1.1.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_1.1.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_1.1.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_1.1.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_1.1.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_windows_amd64.zip) |
 
 All downloads and checksums are verified on the [Releases Page](https://github.com/routewarden/cli/releases/latest).
 
