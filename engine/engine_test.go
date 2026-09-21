@@ -234,6 +234,50 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			t.Fatalf("expected Response.Mode to be 'silentDrop', got %q", eng.Config.Response.Mode)
 		}
 	})
+
+	t.Run("All valid response.mode options compile and validate", func(t *testing.T) {
+		validModes := []struct {
+			mode        string
+			redirectURL string
+			proxyURL    string
+			captcha     *engine.CaptchaConfig
+		}{
+			{mode: "text"},
+			{mode: "json"},
+			{mode: "html"},
+			{mode: "captcha", captcha: &engine.CaptchaConfig{Provider: "turnstile"}},
+			{mode: "redirect", redirectURL: "https://example.com/blocked"},
+			{mode: "silentDrop"},
+			{mode: "drop"},
+			{mode: "gzipBomb"},
+			{mode: "tarpit"},
+			{mode: "fakeSuccess"},
+			{mode: "rateLimit"},
+			{mode: "rateLimitChallenge"},
+			{mode: "proxy", proxyURL: "http://127.0.0.1:8080/honeypot"},
+			{mode: "infiniteStream"},
+			{mode: "garbagestream"},
+			{mode: "xml"},
+		}
+
+		for _, vm := range validModes {
+			cfg := engine.CreateConfig()
+			cfg.Response = &engine.ResponseConfig{
+				Mode:        vm.mode,
+				RedirectURL: vm.redirectURL,
+				ProxyURL:    vm.proxyURL,
+				Captcha:     vm.captcha,
+			}
+			eng, err := engine.NewEngine(cfg)
+			if err != nil {
+				t.Errorf("expected mode %q to be valid, got error: %v", vm.mode, err)
+			}
+			resolvedMode, _, _ := eng.Config.ResolveResponse()
+			if resolvedMode != vm.mode {
+				t.Errorf("expected resolvedMode %q, got %q", vm.mode, resolvedMode)
+			}
+		}
+	})
 }
 
 func TestEngine_EvaluateEdgeCases(t *testing.T) {
