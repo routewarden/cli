@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 1.1.1
+# rwarden version 2.0.0
 ```
 
 ---
@@ -285,6 +285,72 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `traefik-labels` | Docker Compose `labels:` block |
 | `caddy` | Caddyfile `routewarden { ... }` directive block |
 | `nginx` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+
+---
+
+### 5. Live Gateway Sandbox (`sandbox`)
+
+Test `routewarden.json` against an ephemeral Docker container running **Traefik**, **Caddy**, or **NGINX**:
+
+```bash
+# Run Traefik sandbox on localhost:8080
+rwarden sandbox --target traefik --config routewarden.json
+
+# Print the generated gateway configuration before launching
+rwarden sandbox --target traefik --config routewarden.json --print-config
+
+# Run Caddy sandbox with specific version and port
+rwarden sandbox --target caddy --version 2.8.4 --port 9090
+
+# Run automated live HTTP probe assertions against container then exit (CI/CD)
+rwarden sandbox --target traefik --config routewarden.json --test
+
+# Dry-run: inspect generated config and docker command without starting container
+rwarden sandbox --target nginx --dry-run --print-config
+
+# Test against a specific RouteWarden plugin release tag or branch
+rwarden sandbox --target traefik --plugin-version v1.2.0
+
+# Mount local plugin repository for rapid plugin development
+rwarden sandbox --target traefik --plugin-path ../traefik-warden
+```
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `--target` | string | `""` | **Required**. Target gateway: `traefik`, `caddy`, or `nginx` |
+| `--config` | string | `""` | Path to `routewarden.json` (or `-` for stdin) |
+| `--port` | int | `8080` | Local port to bind the gateway |
+| `--version` | string | `""` | Target gateway container version tag (e.g. `v3.3`, `2.11.4`, `alpine`) |
+| `--plugin-version` | string | `""` | RouteWarden plugin version/tag/branch (e.g. `v1.2.0`, `v1.1.0`, `main`) |
+| `--plugin-path` | string | `""` | Local path to RouteWarden plugin directory to mount for development |
+| `--print-config`, `-p` | bool | `false` | Print generated gateway configuration before running |
+| `--test` | bool | `false` | Run automated live HTTP probe assertions against container then exit |
+| `--dry-run` | bool | `false` | Generate config and show docker command without starting container |
+| `--detach`, `-d` | bool | `false` | Run container in background mode |
+
+#### Testing Live with `curl`
+
+```bash
+# Direct sensitive file access (blocked)
+curl -i http://localhost:8080/.env
+
+# Path traversal & double URL encoding evasion (blocked)
+curl -i http://localhost:8080/static/%252e%252e/.env
+
+# Query parameter inspection (blocked if checkQuery enabled)
+curl -i "http://localhost:8080/search?file=secret.conf"
+
+# Header smuggling injection (blocked if checkHeaders enabled)
+curl -i -H "X-Forwarded-Uri: /.env" http://localhost:8080/api/dashboard
+
+# Legitimate public endpoint (allowed downstream)
+curl -i http://localhost:8080/robots.txt
+
+# Client IP whitelisting test (simulating a request from whitelisted IP 192.168.1.50)
+curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
+```
+
+> **Security Note:** In local testing, `X-Forwarded-For` allows simulating whitelisted IPs without reconfiguring network interfaces. In production, edge reverse proxies (Cloudflare, AWS ALB, Traefik, NGINX) overwrite or sanitize untrusted client-supplied headers with the real TCP socket address.
 
 ---
 

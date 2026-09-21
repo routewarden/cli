@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_1.1.1_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.1/rwarden_1.1.1_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_1.1.1_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.1/rwarden_1.1.1_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_1.1.1_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.1/rwarden_1.1.1_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_1.1.1_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.1/rwarden_1.1.1_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_1.1.1_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v1.1.1/rwarden_1.1.1_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_2.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_2.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_2.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_2.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_2.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 1.1.1
+# rwarden version 2.0.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 1.1.1
+# rwarden version 2.0.0
 ```
 
 :::
@@ -252,7 +252,106 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 ---
 
-### 5. Check CLI Version (`version`)
+### 5. Live Gateway Sandbox (`sandbox`)
+
+Test your `routewarden.json` against a real, live gateway container (**Traefik**, **Caddy**, or **NGINX**) without manual setup or deployment.
+
+`rwarden sandbox` automatically generates the native configuration, mounts it into an ephemeral container, binds your specified port, and cleanly terminates on `Ctrl+C`.
+
+::: code-group
+
+```bash [CLI]
+# Run Traefik sandbox on localhost:8080
+rwarden sandbox --target traefik --config routewarden.json
+
+# Print the generated gateway configuration before launching
+rwarden sandbox --target traefik --config routewarden.json --print-config
+
+# Run Caddy sandbox with specific version and port
+rwarden sandbox --target caddy --version 2.8.4 --port 9090
+
+# Run NGINX (OpenResty) sandbox
+rwarden sandbox --target nginx --port 8080
+
+# Automated test mode: probes live container with test requests, asserts HTTP codes, then exits
+rwarden sandbox --target traefik --config routewarden.json --test
+
+# Dry-run: output docker command and generated config without starting container
+rwarden sandbox --target caddy --dry-run --print-config
+
+# Test against a specific RouteWarden plugin version/tag/branch
+rwarden sandbox --target traefik --plugin-version v1.2.0
+
+# Mount local plugin repository for rapid local plugin testing
+rwarden sandbox --target traefik --plugin-path ../traefik-warden
+```
+
+```bash [Docker]
+# Run Traefik sandbox from within Docker container (mounts docker.sock):
+docker run -it --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/routewarden.json:/routewarden.json \
+  --net=host \
+  ghcr.io/routewarden/cli:latest sandbox --target traefik --config /routewarden.json
+
+# Dry-run from Docker (requires no docker.sock mounting):
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json \
+  ghcr.io/routewarden/cli:latest sandbox --target traefik --dry-run --print-config --config /routewarden.json
+```
+
+:::
+
+**Available `sandbox` Flags:**
+
+| Flag | Default | Description |
+| :--- | :---: | :--- |
+| `--target` *(required)* | — | Target gateway: `traefik`, `caddy`, or `nginx` |
+| `--config` | `./routewarden.json` | Path to RouteWarden JSON configuration file (or `-` for stdin) |
+| `--port` | `8080` | Local port to bind the gateway |
+| `--version` | `latest` | Target gateway container image tag (e.g. `v3.3`, `2.11.4`, `alpine`) |
+| `--plugin-version` | `""` | RouteWarden plugin version/tag/branch (e.g. `v1.2.0`, `v1.1.0`, `main`) |
+| `--plugin-path` | `""` | Local path to RouteWarden plugin directory to mount for development |
+| `--print-config`, `-p` | `false` | Print generated gateway config (YAML / Caddyfile / Lua) before running |
+| `--test` | `false` | Run automated live HTTP probe assertions against the container and exit |
+| `--dry-run` | `false` | Generate config and show docker command without starting container |
+| `--detach`, `-d` | `false` | Run container in background and print container ID |
+
+#### Testing Your Sandbox with `curl`
+
+Once your sandbox container is running on port `8080`, test real HTTP requests against it:
+
+```bash
+# 1. Direct sensitive file access (should be blocked)
+curl -i http://localhost:8080/.env
+
+# 2. Path traversal & double URL encoding evasion (should be blocked)
+curl -i http://localhost:8080/static/%252e%252e/.env
+
+# 3. Query string inspection (should be blocked if checkQuery is enabled)
+curl -i "http://localhost:8080/search?file=secret.conf"
+
+# 4. Semicolon matrix parameter evasion (should be blocked)
+curl -i "http://localhost:8080/app;jsessionid=123/.env"
+
+# 5. Reverse proxy header smuggling (should be blocked if checkHeaders is enabled)
+curl -i -H "X-Forwarded-Uri: /.env" http://localhost:8080/api/dashboard
+
+# 6. Legitimate public asset (should pass downstream to upstream)
+curl -i http://localhost:8080/robots.txt
+
+# 7. Client IP whitelisting test (simulating a request from whitelisted IP 192.168.1.50)
+curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
+```
+
+::: tip Security Note on Client IP & Reverse Proxies
+In local testing and the sandbox, passing `X-Forwarded-For` allows you to simulate requests from whitelisted IPs without reconfiguring your network.
+
+In **production deployments**, edge reverse proxies (Cloudflare, AWS ALB, Traefik, or NGINX) strip or overwrite untrusted client-supplied `X-Forwarded-For` headers with the client's actual TCP socket IP. Ensure your edge gateway is configured to only trust upstream proxy headers from verified addresses (e.g. `trustedIPs` in Traefik, `trusted_proxies` in Caddy, or `set_real_ip_from` in NGINX).
+:::
+
+---
+
+### 6. Check CLI Version (`version`)
 
 ::: code-group
 
