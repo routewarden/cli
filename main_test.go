@@ -83,6 +83,7 @@ func TestCLI_TestCommand(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
+		stdin      string
 		wantOutput string
 	}{
 		{
@@ -110,16 +111,43 @@ func TestCLI_TestCommand(t *testing.T) {
 			args:       []string{"test", "--path", "/dashboard", "--header", "X-Forwarded-Uri:/.env"},
 			wantOutput: "Result: 🛑 BLOCKED",
 		},
+		{
+			name: "Custom response statusCode and mode from config",
+			args: []string{
+				"test",
+				"--config", "-",
+				"--path", "/.env",
+			},
+			stdin: `{
+				"enabled": true,
+				"enableDefaultPatterns": true,
+				"methods": ["GET", "POST"],
+				"response": {
+					"mode": "rateLimitChallenge",
+					"statusCode": 429,
+					"retryAfterSeconds": 300
+				}
+			}`,
+			wantOutput: "Result: 🛑 BLOCKED (HTTP Status 429, Mode: rateLimitChallenge)",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := exec.Command(binaryPath, tc.args...).CombinedOutput()
-			if err != nil {
-				t.Fatalf("command failed with %v: %s", err, string(out))
+			var out string
+			var err string
+			var code int
+			if tc.stdin != "" {
+				out, err, code = runCLIWithStdin(t, tc.stdin, tc.args...)
+			} else {
+				out, err, code = runCLI(t, tc.args...)
 			}
-			if !strings.Contains(string(out), tc.wantOutput) {
-				t.Errorf("expected output to contain %q, got:\n%s", tc.wantOutput, string(out))
+			combined := out + err
+			if code != 0 {
+				t.Fatalf("command failed with exit code %d: %s", code, combined)
+			}
+			if !strings.Contains(combined, tc.wantOutput) {
+				t.Errorf("expected output to contain %q, got:\n%s", tc.wantOutput, combined)
 			}
 		})
 	}

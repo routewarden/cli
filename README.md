@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 1.1.0
+# rwarden version 1.2.0
 ```
 
 ---

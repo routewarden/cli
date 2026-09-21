@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_1.1.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_1.1.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_1.1.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_1.1.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_1.1.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_1.2.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.2.0/rwarden_1.2.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_1.2.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.2.0/rwarden_1.2.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_1.2.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.2.0/rwarden_1.2.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_1.2.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.2.0/rwarden_1.2.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_1.2.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v1.2.0/rwarden_1.2.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 1.1.0
+# rwarden version 1.2.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 1.1.0
+# rwarden version 1.2.0
 ```
 
 :::
