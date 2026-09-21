@@ -10,10 +10,9 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}" -o /bin/rwarden .
 
 FROM alpine:3.20
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata docker-cli
 COPY --from=builder /bin/rwarden /usr/local/bin/rwarden
 
 WORKDIR /
-USER nobody:nobody
 ENTRYPOINT ["/usr/local/bin/rwarden"]
 CMD ["--help"]

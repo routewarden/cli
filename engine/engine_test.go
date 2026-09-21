@@ -375,3 +375,31 @@ func TestEngine_ExtractCandidatePaths(t *testing.T) {
 		})
 	}
 }
+
+func TestEngine_CheckDockerInstalled(t *testing.T) {
+	// CheckDockerInstalled should return an error or nil without panicking
+	err := engine.CheckDockerInstalled()
+	if err != nil {
+		t.Logf("CheckDockerInstalled returned error (expected in environments without Docker or daemon running): %v", err)
+	} else {
+		t.Logf("Docker is installed and running")
+	}
+}
+
+func TestEngine_GenerateSandboxConfig(t *testing.T) {
+	cfg := engine.CreateConfig()
+	for _, target := range []string{"traefik", "caddy", "nginx"} {
+		conf, err := engine.GenerateSandboxConfig(target, cfg)
+		if err != nil {
+			t.Fatalf("[%s] unexpected error generating sandbox config: %v", target, err)
+		}
+		if len(conf) == 0 {
+			t.Fatalf("[%s] generated sandbox config is empty", target)
+		}
+	}
+	_, err := engine.GenerateSandboxConfig("unsupported", cfg)
+	if err == nil {
+		t.Fatalf("expected error for unsupported target")
+	}
+}
+
