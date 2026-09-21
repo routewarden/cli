@@ -15,7 +15,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "1.1.0"
+var version = "1.1.1"
 
 func printUsage() {
 	fmt.Println(`RouteWarden CLI (` + version + `) — Security inspection & configuration tool
@@ -261,7 +261,12 @@ func handleTest(args []string) {
 	}
 
 	if eval.Blocked {
-		fmt.Printf("\nResult: 🛑 BLOCKED (HTTP Status %d)\n", cfg.StatusCode)
+		mode, statusCode, _ := cfg.ResolveResponse()
+		if mode != "" && !strings.EqualFold(mode, "text") {
+			fmt.Printf("\nResult: 🛑 BLOCKED (HTTP Status %d, Mode: %s)\n", statusCode, mode)
+		} else {
+			fmt.Printf("\nResult: 🛑 BLOCKED (HTTP Status %d)\n", statusCode)
+		}
 		fmt.Printf("  Reason:  %s\n", eval.Reason)
 		fmt.Printf("  Target:  %s\n", eval.MatchedTarget)
 		fmt.Printf("  Pattern: %s\n", eval.MatchedPattern)
