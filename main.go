@@ -15,7 +15,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "1.2.0"
+var version = "1.1.1"
 
 func printUsage() {
 	fmt.Println(`RouteWarden CLI (` + version + `) — Security inspection & configuration tool
