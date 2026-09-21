@@ -99,6 +99,8 @@ fi
 # 6. Update docs/index.md if present
 if [ -f "${ROOT_DIR}/docs/index.md" ]; then
   sed -i '' -E "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/docs/index.md"
+  sed -i '' -E "s|(releases/download/)v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/index.md"
+  sed -i '' -E "s|(rwarden_)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?_|\1${SEMVER_NO_V}_|g" "${ROOT_DIR}/docs/index.md"
   echo "  ✓ Synchronized docs/index.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
