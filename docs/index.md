@@ -66,12 +66,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 1.0.0
+# rwarden version 1.1.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 1.0.0
+# rwarden version 1.1.0
 ```
 
 :::
