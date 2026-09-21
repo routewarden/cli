@@ -84,6 +84,10 @@ echo "🚀 Installing ${BINARY} to ${INSTALL_DIR}..."
 ${USE_SUDO} mv "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 ${USE_SUDO} chmod +x "${INSTALL_DIR}/${BINARY}"
 
+if [ "${TARGET_OS}" = "darwin" ] && command -v xattr >/dev/null 2>&1; then
+  ${USE_SUDO} xattr -d com.apple.quarantine "${INSTALL_DIR}/${BINARY}" >/dev/null 2>&1 || true
+fi
+
 echo "✅ Successfully installed ${BINARY} (${LATEST_TAG}) to ${INSTALL_DIR}/${BINARY}!"
 echo ""
 echo "Run '${BINARY} --help' or '${BINARY} test --path \"/.env\"' to get started."

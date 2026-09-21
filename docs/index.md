@@ -34,6 +34,18 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 | **Linux** | ARM64 (`arm64`) | [rwarden_1.1.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_linux_arm64.tar.gz) |
 | **Windows**| 64-bit (`amd64`) | [rwarden_1.1.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v1.1.0/rwarden_1.1.0_windows_amd64.zip) |
 
+::: tip macOS Gatekeeper Notice
+If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
+
+```bash
+xattr -d com.apple.quarantine $(which rwarden)
+# Or for a downloaded binary directly:
+xattr -d com.apple.quarantine rwarden
+```
+
+Alternatively, navigate to **System Settings > Privacy & Security** and click **"Allow Anyway"** next to the `rwarden` prompt.
+:::
+
 All downloads and checksums are verified on the [Releases Page](https://github.com/routewarden/cli/releases/latest).
 
 ---
