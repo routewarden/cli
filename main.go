@@ -133,6 +133,13 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 				flags = append(flags, arg)
 				continue
 			}
+			// --help / -h are handled internally by flag.FlagSet and never appear
+			// in fs.Lookup(); treat them as boolean flags so they don't swallow
+			// the next positional argument.
+			if flagName == "help" || flagName == "h" {
+				flags = append(flags, arg)
+				continue
+			}
 			f := fs.Lookup(flagName)
 			if f != nil {
 				type boolFlag interface {
@@ -594,11 +601,15 @@ func handleValidate(args []string) {
 	fmt.Printf("  - Default patterns enabled: %t\n", cfg.EnableDefaultPatterns)
 	fmt.Printf("  - Default allow patterns enabled: %t\n", cfg.EnableDefaultAllowPatterns)
 	fmt.Printf("  - Methods: %v\n", cfg.Methods)
-	if len(cfg.BlockPatterns) > 0 {
-		fmt.Printf("  - Custom block patterns: %d\n", len(cfg.BlockPatterns))
+	customBlockCount := len(cfg.PathPatterns) + len(cfg.BlockPatterns)
+	if customBlockCount > 0 {
+		fmt.Printf("  - Custom block patterns: %d\n", customBlockCount)
 	}
 	if len(cfg.AllowPatterns) > 0 {
 		fmt.Printf("  - Custom allow patterns: %d\n", len(cfg.AllowPatterns))
+	}
+	if len(cfg.AllowedIPs) > 0 {
+		fmt.Printf("  - Allowed IPs/CIDRs: %v\n", cfg.AllowedIPs)
 	}
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Printf("  - Monitored headers: %v\n", cfg.CheckHeaders)

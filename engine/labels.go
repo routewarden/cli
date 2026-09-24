@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -180,10 +181,22 @@ func normalizePropKey(prop string) string {
 				return "response.mode"
 			case "body":
 				return "response.body"
+			case "contenttype":
+				return "response.contentType"
 			case "redirecturl":
 				return "response.redirectUrl"
 			case "proxyurl":
 				return "response.proxyUrl"
+			case "gzipbombmb":
+				return "response.gzipBombMB"
+			case "retryafterseconds":
+				return "response.retryAfterSeconds"
+			case "tarpitdelayms":
+				return "response.tarpitDelayMs"
+			case "tarpitmaxdurationseconds":
+				return "response.tarpitMaxDurationSeconds"
+			case "streamsizemb":
+				return "response.streamSizeMB"
 			default:
 				return prop
 			}
@@ -321,6 +334,40 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 			}
 			if body != "" {
 				fmt.Fprintf(&b, "            body: %q\n", body)
+			}
+			if ct := props["response.contentType"]; ct != "" {
+				fmt.Fprintf(&b, "            contentType: %q\n", ct)
+			}
+			if ru := props["response.redirectUrl"]; ru != "" {
+				fmt.Fprintf(&b, "            redirectUrl: %q\n", ru)
+			}
+			if pu := props["response.proxyUrl"]; pu != "" {
+				fmt.Fprintf(&b, "            proxyUrl: %q\n", pu)
+			}
+			if gz := props["response.gzipBombMB"]; gz != "" {
+				if n, err := strconv.Atoi(gz); err == nil {
+					fmt.Fprintf(&b, "            gzipBombMB: %d\n", n)
+				}
+			}
+			if ra := props["response.retryAfterSeconds"]; ra != "" {
+				if n, err := strconv.Atoi(ra); err == nil {
+					fmt.Fprintf(&b, "            retryAfterSeconds: %d\n", n)
+				}
+			}
+			if td := props["response.tarpitDelayMs"]; td != "" {
+				if n, err := strconv.Atoi(td); err == nil {
+					fmt.Fprintf(&b, "            tarpitDelayMs: %d\n", n)
+				}
+			}
+			if tm := props["response.tarpitMaxDurationSeconds"]; tm != "" {
+				if n, err := strconv.Atoi(tm); err == nil {
+					fmt.Fprintf(&b, "            tarpitMaxDurationSeconds: %d\n", n)
+				}
+			}
+			if ss := props["response.streamSizeMB"]; ss != "" {
+				if n, err := strconv.Atoi(ss); err == nil {
+					fmt.Fprintf(&b, "            streamSizeMB: %d\n", n)
+				}
 			}
 		}
 	}
