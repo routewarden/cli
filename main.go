@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,7 +22,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "2.0.0"
+var version = "2.1.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden CLI (` + version + `) — Security inspection & configuration tool
@@ -31,8 +33,9 @@ Usage:
 Commands:
   test        Simulate request path and query inspection against patterns
   validate    Validate a RouteWarden configuration file (JSON)
-  generate    Generate gateway configuration (traefik, traefik-labels, caddy, nginx)
+  generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx)
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
+  cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
 
@@ -62,6 +65,9 @@ func main() {
 	case "sandbox":
 		handleSandbox(os.Args[2:])
 
+	case "cleanup":
+		handleCleanup(os.Args[2:])
+
 	case "test":
 		handleTest(os.Args[2:])
 
@@ -75,14 +81,33 @@ func main() {
 	}
 }
 
+func handleCleanup(args []string) {
+	fmt.Println("🧹 Cleaning up RouteWarden sandbox containers...")
+	removed, err := engine.CleanupSandboxes()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error cleaning up sandboxes: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(removed) == 0 {
+		fmt.Println("No active RouteWarden sandbox containers found.")
+		return
+	}
+
+	fmt.Printf("Successfully removed %d sandbox container(s):\n", len(removed))
+	for _, name := range removed {
+		fmt.Printf("  • %s\n", name)
+	}
+}
+
 func handleGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
-	target := fs.String("target", "", "Target gateway: traefik, traefik-labels, caddy, nginx")
+	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx")
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
 	_ = fs.Parse(args)
 
 	if *target == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target <traefik|traefik-labels|caddy|nginx> is required")
+		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx> is required")
 		os.Exit(1)
 	}
 
@@ -124,11 +149,18 @@ func handleGenerate(args []string) {
 	fmt.Print(out)
 }
 
-
 func handleSandbox(args []string) {
+	if len(args) > 0 && (args[0] == "cleanup" || args[0] == "--cleanup") {
+		handleCleanup(args[1:])
+		return
+	}
 	fs := flag.NewFlagSet("sandbox", flag.ExitOnError)
-	target := fs.String("target", "", "Target gateway to run: traefik, caddy, nginx (required)")
-	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (default: ./routewarden.json or '-' for stdin)")
+	target := fs.String("target", "", "Target gateway to run: traefik, caddy, nginx (optional if inferrable from config)")
+	configPath := fs.String("config", "", "Path to gateway config (traefik.toml, traefik.yaml, docker-compose.yaml, Caddyfile, nginx.conf, or routewarden.json, or '-' for stdin)")
+	formatFlag := fs.String("format", "", "Explicit config format: json, traefik-toml, traefik-yaml, traefik-labels, caddy, nginx")
+	labelsFlag := fs.String("labels", "", "Direct Traefik Docker labels string (e.g. 'traefik.http.middlewares.warden...')")
+	probePathFlag := fs.String("probe-path", "", "Additional custom endpoint path to probe during live test")
+	probeIPFlag := fs.String("probe-ip", "", "Client IP to simulate for allowlist verification during live test")
 	port := fs.Int("port", 8080, "Local host port to bind gateway (default: 8080)")
 	ver := fs.String("version", "", "Target gateway version tag (e.g. v3.3, 2.11.4, alpine)")
 	pluginVer := fs.String("plugin-version", "", "RouteWarden plugin version/tag/branch (e.g. v1.2.0, v1.1.0, main)")
@@ -145,14 +177,63 @@ func handleSandbox(args []string) {
 	shouldPrint := *printConfig || *shortPrint
 	shouldDetach := *detach || *shortDetach
 
-	if *target == "" {
+	// Determine target
+	normTarget := strings.ToLower(strings.TrimSpace(*target))
+
+	// Resolve config content and format
+	resolvedConfig := *configPath
+	var rawData []byte
+	var err error
+
+	if *labelsFlag != "" {
+		rawData = []byte(*labelsFlag)
+	} else {
+		if resolvedConfig == "" {
+			// Check default filenames
+			candidates := []string{"routewarden.json", "traefik.toml", "traefik.yaml", "traefik.yml", "docker-compose.yaml", "docker-compose.yml", "Caddyfile", "nginx.conf"}
+			for _, c := range candidates {
+				if _, err := os.Stat(c); err == nil {
+					resolvedConfig = c
+					break
+				}
+			}
+			if resolvedConfig == "" {
+				stat, _ := os.Stdin.Stat()
+				if (stat.Mode() & os.ModeCharDevice) == 0 {
+					resolvedConfig = "-"
+				}
+			}
+		}
+
+		if resolvedConfig != "" {
+			rawData, err = engine.ReadConfigContent(resolvedConfig)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading config: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	// Determine format
+	var format engine.ConfigFormat
+	if *formatFlag != "" {
+		format = engine.ConfigFormat(strings.ToLower(strings.TrimSpace(*formatFlag)))
+	} else if *labelsFlag != "" {
+		format = engine.FormatTraefikLabels
+	} else {
+		format = engine.DetectConfigFormat(resolvedConfig, rawData)
+	}
+
+	if normTarget == "" {
+		normTarget = engine.InferredTargetFromFormat(format)
+	}
+	if normTarget == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target <traefik|caddy|nginx> is required")
 		os.Exit(1)
 	}
 
-	normTarget := strings.ToLower(strings.TrimSpace(*target))
 	if normTarget != "traefik" && normTarget != "caddy" && normTarget != "nginx" {
-		fmt.Fprintf(os.Stderr, "Error: unsupported target %q. Must be 'traefik', 'caddy', or 'nginx'\n", *target)
+		fmt.Fprintf(os.Stderr, "Error: unsupported target %q. Must be 'traefik', 'caddy', or 'nginx'\n", normTarget)
 		os.Exit(1)
 	}
 
@@ -164,70 +245,114 @@ func handleSandbox(args []string) {
 		}
 	}
 
-	// Resolve config path
-	resolvedConfig := *configPath
-	if resolvedConfig == "" {
-		if _, err := os.Stat("routewarden.json"); err == nil {
-			resolvedConfig = "routewarden.json"
-		} else {
-			stat, _ := os.Stdin.Stat()
-			if (stat.Mode() & os.ModeCharDevice) == 0 {
-				resolvedConfig = "-"
-			}
-		}
-	}
-
 	cfg := engine.CreateConfig()
-	if resolvedConfig != "" {
-		data, err := engine.ReadConfigContent(resolvedConfig)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading config: %v\n", err)
-			os.Exit(1)
-		}
-		if len(data) > 0 {
-			if err := json.Unmarshal(data, cfg); err != nil {
+	var sandboxConfig string
+	expectedStatusCode := 403
+
+	switch format {
+	case engine.FormatJSON:
+		if len(rawData) > 0 {
+			if err := json.Unmarshal(rawData, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
 				os.Exit(1)
 			}
 		}
-	}
+		sandboxConfig, err = engine.GenerateSandboxConfig(normTarget, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating sandbox configuration: %v\n", err)
+			os.Exit(1)
+		}
+		_, status, _ := cfg.ResolveResponse()
+		expectedStatusCode = status
 
-	// Generate target sandbox config
-	sandboxConfig, err := engine.GenerateSandboxConfig(normTarget, cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating sandbox configuration: %v\n", err)
-		os.Exit(1)
+	case engine.FormatTraefikLabels:
+		var labels []engine.TraefikLabel
+		if *labelsFlag != "" {
+			labels = engine.ParseTraefikLabels(string(rawData))
+		} else {
+			labels = engine.ExtractLabelsFromCompose(string(rawData))
+		}
+		sandboxConfig, err = engine.ConvertLabelsToTraefikDynamicYAML(labels)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error converting labels to sandbox configuration: %v\n", err)
+			os.Exit(1)
+		}
+		// Detect custom statusCode from labels if present
+		for _, l := range labels {
+			if strings.HasSuffix(l.Key, ".response.statusCode") {
+				if s, err := strconv.Atoi(l.Value); err == nil && s > 0 {
+					expectedStatusCode = s
+				}
+			}
+		}
+
+	case engine.FormatTraefikTOML, engine.FormatTraefikYAML, engine.FormatCaddyfile, engine.FormatNginx:
+		sandboxConfig = engine.PrepareActualGatewayConfig(normTarget, format, string(rawData))
+		// Check if config has custom status code configured
+		strContent := string(rawData)
+		if strings.Contains(strContent, "statusCode") || strings.Contains(strContent, "status_code") || strings.Contains(strContent, "status ") {
+			re := regexp.MustCompile(`(?:statusCode|status_code|status)\s*[:=]?\s*(\d{3})`)
+			if m := re.FindStringSubmatch(strContent); len(m) == 2 {
+				if s, err := strconv.Atoi(m[1]); err == nil && s > 0 {
+					expectedStatusCode = s
+				}
+			}
+		}
+
+	default:
+		// Fallback to synthetic config from JSON
+		if len(rawData) > 0 {
+			_ = json.Unmarshal(rawData, cfg)
+		}
+		sandboxConfig, err = engine.GenerateSandboxConfig(normTarget, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating sandbox configuration: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// If --print-config was requested, print it now
 	if shouldPrint {
-		fmt.Printf("\n--- [%s Configuration Generated by RouteWarden] ---\n", strings.ToUpper(normTarget))
+		fmt.Printf("\n--- [%s Configuration Generated by RouteWarden] (%s) ---\n", strings.ToUpper(normTarget), format)
 		fmt.Println(sandboxConfig)
 		fmt.Println("-----------------------------------------------------")
 	}
 
 	containerName := fmt.Sprintf("rwarden-sandbox-%s-%d", normTarget, time.Now().Unix()%10000)
 	opts := engine.SandboxOptions{
-		Target:        normTarget,
-		Config:        cfg,
-		Port:          *port,
-		Version:       *ver,
-		PluginVersion: *pluginVer,
-		PluginPath:    *pluginPath,
-		Image:         *imgOverride,
-		PrintConfig:   shouldPrint,
-		DryRun:        *dryRun,
-		RunTest:       *runTest,
-		Detach:        shouldDetach,
+		Target:             normTarget,
+		Config:             cfg,
+		Format:             format,
+		ConfigFile:         resolvedConfig,
+		RawConfigContent:   sandboxConfig,
+		ExpectedStatusCode: expectedStatusCode,
+		ProbeIP:            *probeIPFlag,
+		Port:               *port,
+		Version:            *ver,
+		PluginVersion:      *pluginVer,
+		PluginPath:         *pluginPath,
+		Image:              *imgOverride,
+		PrintConfig:        shouldPrint,
+		DryRun:             *dryRun,
+		RunTest:            *runTest,
+		Detach:             shouldDetach || *runTest,
+	}
+	if *probePathFlag != "" {
+		opts.ProbePaths = append(opts.ProbePaths, *probePathFlag)
 	}
 
 	// Prepare temporary mounted configuration file
-	cfgPath, cleanup, err := engine.PrepareSandboxTempFile(normTarget, sandboxConfig)
+	cfgPath, cleanup, err := engine.PrepareSandboxTempFileWithFormat(normTarget, sandboxConfig, format)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error preparing sandbox config: %v\n", err)
 		os.Exit(1)
 	}
-	defer cleanup()
+	keepContainer := false
+	defer func() {
+		if !keepContainer {
+			cleanup()
+		}
+	}()
 
 	imgName, dockerArgs := engine.BuildDockerRunCommand(opts, cfgPath, containerName)
 
@@ -237,16 +362,18 @@ func handleSandbox(args []string) {
 		return
 	}
 
-	mode, status, _ := cfg.ResolveResponse()
 	fmt.Printf("\n🚀 Launching RouteWarden Sandbox...\n")
 	fmt.Printf("  • Target Gateway:  %s (%s)\n", strings.ToUpper(normTarget), imgName)
+	fmt.Printf("  • Config Format:   %s\n", format)
 	fmt.Printf("  • Bound Port:      http://localhost:%d\n", *port)
-	fmt.Printf("  • Active Mode:     %s (Status: %d)\n", mode, status)
+	fmt.Printf("  • Expected Block:  HTTP %d\n", expectedStatusCode)
 	fmt.Printf("  • Container:       %s\n\n", containerName)
 
 	// Clean up container on exit
 	stopContainer := func() {
-		_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		if !keepContainer {
+			_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		}
 	}
 	defer stopContainer()
 
@@ -266,11 +393,13 @@ func handleSandbox(args []string) {
 		runCmd := exec.Command("docker", dockerArgs...)
 		runOut, err := runCmd.CombinedOutput()
 		if err != nil {
+			stopContainer()
 			fmt.Fprintf(os.Stderr, "Failed to start container: %v\nOutput: %s\n", err, string(runOut))
 			os.Exit(1)
 		}
 
 		if shouldDetach && !*runTest {
+			keepContainer = true
 			fmt.Printf("✓ Sandbox container %s is running in background!\n", containerName)
 			fmt.Printf("  Endpoint: http://localhost:%d\n", *port)
 			fmt.Printf("  Stop it with: docker rm -f %s\n", containerName)
@@ -278,12 +407,13 @@ func handleSandbox(args []string) {
 		}
 
 		if *runTest {
-			passed, total, summary := engine.LiveProbeTest(*port, status)
+			passed, total, summary := engine.LiveProbeTestWithOptions(*port, expectedStatusCode, opts.ProbePaths, opts.ProbeIP)
 			fmt.Print(summary)
 			if passed == total {
 				fmt.Printf("\n✨ All %d live tests PASSED successfully against %s sandbox!\n", total, strings.ToUpper(normTarget))
 				return
 			}
+			stopContainer()
 			fmt.Fprintf(os.Stderr, "\n❌ Probe tests failed: %d/%d passed.\n", passed, total)
 			os.Exit(1)
 		}

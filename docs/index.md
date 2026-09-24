@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_2.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_2.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_2.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_2.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_2.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v2.0.0/rwarden_2.0.0_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_2.1.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_2.1.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_2.1.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_2.1.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_2.1.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 2.0.0
+# rwarden version 2.1.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 2.0.0
+# rwarden version 2.1.0
 ```
 
 :::
@@ -213,7 +213,10 @@ Convert a `routewarden.json` specification into native gateway configuration for
 
 ```bash [CLI]
 # Traefik: output as dynamic YAML middleware definition
-rwarden generate --target traefik --config routewarden.json > dynamic.yml
+rwarden generate --target traefik-yaml --config routewarden.json > dynamic.yml
+
+# Traefik: output as dynamic TOML middleware definition
+rwarden generate --target traefik-toml --config routewarden.json > dynamic.toml
 
 # Traefik: output as Docker Compose label block
 rwarden generate --target traefik-labels --config routewarden.json
@@ -227,7 +230,10 @@ rwarden generate --target nginx --config routewarden.json
 
 ```bash [Docker]
 # Traefik: output as dynamic YAML middleware definition
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik --config /routewarden.json > dynamic.yml
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-yaml --config /routewarden.json > dynamic.yml
+
+# Traefik: output as dynamic TOML middleware definition
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-toml --config /routewarden.json > dynamic.toml
 
 # Traefik: output as Docker Compose label block
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-labels --config /routewarden.json
@@ -245,7 +251,8 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 | Target | Output |
 | :--- | :--- |
-| `traefik` | Traefik dynamic YAML middleware definition (mountable as `dynamic.yml`) |
+| `traefik-yaml` (or `traefik`) | Traefik dynamic YAML middleware definition (mountable as `dynamic.yml`) |
+| `traefik-toml` | Traefik dynamic TOML middleware definition (mountable as `dynamic.toml`) |
 | `traefik-labels` | Docker Compose `labels:` block for direct service configuration |
 | `caddy` | Caddyfile `routewarden { ... }` directive block |
 | `nginx` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |

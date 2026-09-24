@@ -15,17 +15,23 @@ import (
 
 // SandboxOptions specifies options for spawning a gateway container sandbox.
 type SandboxOptions struct {
-	Target        string // "traefik", "caddy", "nginx"
-	Config        *Config
-	Port          int    // host port to bind, default 8080
-	Version       string // gateway version tag (optional, e.g. "v3.3", "2.11.4", "alpine")
-	Image         string // container image override
-	PluginVersion string // RouteWarden plugin version/tag/branch (e.g. "v1.2.0", "v1.1.0", "main")
-	PluginPath    string // local path to RouteWarden plugin repository/files to mount
-	PrintConfig   bool   // print generated config before starting or in dry-run
-	DryRun        bool   // generate config and print docker command without starting container
-	RunTest       bool   // run standard live probe test suite against container then exit
-	Detach        bool   // run container in detached mode and return immediately
+	Target             string // "traefik", "caddy", "nginx"
+	Config             *Config
+	Format             ConfigFormat // FormatJSON, FormatTraefikTOML, FormatTraefikYAML, FormatTraefikLabels, FormatCaddyfile, FormatNginx
+	ConfigFile         string       // original config file path if passed
+	RawConfigContent   string       // raw content of actual config file (traefik.toml, Caddyfile, etc.)
+	ExpectedStatusCode int          // expected block HTTP status code (default 403 or detected from config)
+	ProbePaths         []string     // optional custom probe paths
+	ProbeIP            string       // optional client IP to probe allowlist bypass
+	Port               int          // host port to bind, default 8080
+	Version            string       // gateway version tag (optional, e.g. "v3.3", "2.11.4", "alpine")
+	Image              string       // container image override
+	PluginVersion      string       // RouteWarden plugin version/tag/branch (e.g. "v1.2.0", "v1.1.0", "main")
+	PluginPath         string       // local path to RouteWarden plugin repository/files to mount
+	PrintConfig        bool         // print generated config before starting or in dry-run
+	DryRun             bool         // generate config and print docker command without starting container
+	RunTest            bool         // run standard live probe test suite against container then exit
+	Detach             bool         // run container in detached mode and return immediately
 }
 
 // SandboxResult contains output from a sandbox session.
@@ -43,8 +49,8 @@ type SandboxResult struct {
 const (
 	DefaultTraefikImage = "traefik"
 	DefaultTraefikTag   = "v3.3"
-	DefaultCaddyImage   = "caddy"
-	DefaultCaddyTag     = "2.11.4-alpine"
+	DefaultCaddyImage   = "ghcr.io/routewarden/caddy-warden"
+	DefaultCaddyTag     = "latest"
 	DefaultNginxImage   = "openresty/openresty"
 	DefaultNginxTag     = "alpine"
 )
@@ -79,13 +85,7 @@ func generateTraefikSandboxYAML(cfg *Config) string {
 	b.WriteString("        - web\n")
 	b.WriteString("      middlewares:\n")
 	b.WriteString("        - routewarden\n")
-	b.WriteString("      service: sandbox-service\n")
-	b.WriteString("\n")
-	b.WriteString("  services:\n")
-	b.WriteString("    sandbox-service:\n")
-	b.WriteString("      loadBalancer:\n")
-	b.WriteString("        servers:\n")
-	b.WriteString("          - url: \"http://127.0.0.1:8080\"\n")
+	b.WriteString("      service: ping@internal\n")
 	b.WriteString("\n")
 
 	// Middleware definition
@@ -144,8 +144,8 @@ func generateNginxSandboxConf(cfg *Config) string {
 	b.WriteString("        local routewarden = require(\"resty.routewarden\")\n")
 
 	luaTable := cfg.GenerateNginxLua()
-	lines := strings.Split(luaTable, "\n")
-	for _, l := range lines {
+	lines := strings.SplitSeq(luaTable, "\n")
+	for l := range lines {
 		if strings.HasPrefix(l, "--") {
 			continue
 		}
@@ -196,21 +196,42 @@ func BuildDockerRunCommand(opts SandboxOptions, configFilePath string, container
 			}
 			img = DefaultTraefikImage + ":" + tag
 		}
-		// Mount dynamic configuration
-		args = append(args, "-v", configFilePath+":/etc/traefik/dynamic.yml:ro")
+
+		configDir := filepath.Dir(configFilePath)
+		filename := filepath.Base(configFilePath)
+		providerFlag := "--providers.file.filename=/etc/traefik/" + filename
+
+		// Mount directory containing configuration into /etc/traefik
+		args = append(args, "-v", configDir+":/etc/traefik:ro")
 
 		// If local plugin path specified, mount it as a local plugin
 		traefikCmdArgs := []string{
 			"--api.dashboard=false",
 			"--entrypoints.web.address=:8080",
 			"--entrypoints.web.forwardedHeaders.insecure=true",
-			"--providers.file.filename=/etc/traefik/dynamic.yml",
+			"--ping=true",
+			"--ping.manualrouting=true",
+			providerFlag,
 			"--providers.file.watch=true",
 			"--log.level=DEBUG",
 		}
 
-		if opts.PluginPath != "" {
-			absPluginPath, err := filepath.Abs(opts.PluginPath)
+		pluginPath := opts.PluginPath
+		if pluginPath == "" && opts.PluginVersion == "" {
+			candidates := []string{
+				"../traefik-warden",
+				"../../traefik-warden",
+			}
+			for _, c := range candidates {
+				if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+					pluginPath = c
+					break
+				}
+			}
+		}
+
+		if pluginPath != "" {
+			absPluginPath, err := filepath.Abs(pluginPath)
 			if err == nil {
 				args = append(args, "-v", absPluginPath+":/plugins-local/src/github.com/routewarden/traefik-warden:ro")
 				traefikCmdArgs = append(traefikCmdArgs, "--experimental.localplugins.routewarden.modulename=github.com/routewarden/traefik-warden")
@@ -256,8 +277,24 @@ func BuildDockerRunCommand(opts SandboxOptions, configFilePath string, container
 			}
 		}
 		args = append(args, "-v", configFilePath+":/usr/local/openresty/nginx/conf/nginx.conf:ro")
-		if opts.PluginPath != "" {
-			absPluginPath, err := filepath.Abs(opts.PluginPath)
+		
+		pluginPath := opts.PluginPath
+		if pluginPath == "" {
+			// Auto-detect local sibling nginx-warden lua library if present
+			candidates := []string{
+				"../nginx-warden/lib/resty/routewarden",
+				"../../nginx-warden/lib/resty/routewarden",
+			}
+			for _, c := range candidates {
+				if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+					pluginPath = c
+					break
+				}
+			}
+		}
+
+		if pluginPath != "" {
+			absPluginPath, err := filepath.Abs(pluginPath)
 			if err == nil {
 				args = append(args, "-v", absPluginPath+":/usr/local/openresty/site/lualib/resty/routewarden:ro")
 			}
@@ -271,6 +308,11 @@ func BuildDockerRunCommand(opts SandboxOptions, configFilePath string, container
 
 // LiveProbeTest runs live HTTP assertions against http://localhost:<port> to verify RouteWarden behavior.
 func LiveProbeTest(port int, expectedBlockCode int) (int, int, string) {
+	return LiveProbeTestWithOptions(port, expectedBlockCode, nil, "")
+}
+
+// LiveProbeTestWithOptions runs live HTTP assertions with custom probe paths and optional client IP override.
+func LiveProbeTestWithOptions(port int, expectedBlockCode int, probePaths []string, probeIP string) (int, int, string) {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	client := &http.Client{Timeout: 3 * time.Second}
 
@@ -326,6 +368,42 @@ func LiveProbeTest(port int, expectedBlockCode int) (int, int, string) {
 		},
 	}
 
+	// Add any user-supplied probe paths
+	for _, p := range probePaths {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tests = append(tests, struct {
+				name         string
+				method       string
+				path         string
+				headers      map[string]string
+				expectStatus int
+			}{
+				name:         fmt.Sprintf("Custom probe path (%s)", p),
+				method:       "GET",
+				path:         p,
+				expectStatus: expectedBlockCode,
+			})
+		}
+	}
+
+	// If probe IP specified, add an IP bypass test assertion
+	if probeIP != "" {
+		tests = append(tests, struct {
+			name         string
+			method       string
+			path         string
+			headers      map[string]string
+			expectStatus int
+		}{
+			name:         fmt.Sprintf("Allowed IP bypass (X-Forwarded-For: %s)", probeIP),
+			method:       "GET",
+			path:         "/.env",
+			headers:      map[string]string{"X-Forwarded-For": probeIP},
+			expectStatus: http.StatusOK,
+		})
+	}
+
 	passed := 0
 	total := len(tests)
 
@@ -333,7 +411,7 @@ func LiveProbeTest(port int, expectedBlockCode int) (int, int, string) {
 	for _, tc := range tests {
 		req, err := http.NewRequest(tc.method, baseURL+tc.path, nil)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("  ❌ %-50s Error: %v\n", tc.name, err))
+			fmt.Fprintf(&sb, "  ❌ %-50s Error: %v\n", tc.name, err)
 			continue
 		}
 		for k, v := range tc.headers {
@@ -342,16 +420,16 @@ func LiveProbeTest(port int, expectedBlockCode int) (int, int, string) {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("  ❌ %-50s Request failed: %v\n", tc.name, err))
+			fmt.Fprintf(&sb, "  ❌ %-50s Request failed: %v\n", tc.name, err)
 			continue
 		}
 		_ = resp.Body.Close()
 
 		if resp.StatusCode == tc.expectStatus {
 			passed++
-			sb.WriteString(fmt.Sprintf("  ✓ %-50s [HTTP %d]\n", tc.name, resp.StatusCode))
+			fmt.Fprintf(&sb, "  ✓ %-50s [HTTP %d]\n", tc.name, resp.StatusCode)
 		} else {
-			sb.WriteString(fmt.Sprintf("  ❌ %-50s Expected HTTP %d, got %d\n", tc.name, tc.expectStatus, resp.StatusCode))
+			fmt.Fprintf(&sb, "  ❌ %-50s Expected HTTP %d, got %d\n", tc.name, tc.expectStatus, resp.StatusCode)
 		}
 	}
 
@@ -371,15 +449,22 @@ func CheckDockerInstalled() error {
 	return nil
 }
 
-// PrepareSandboxTempFile writes the generated config content to a temp file and returns its path and cleanup func.
+// PrepareSandboxTempFile writes the configuration content to a temp file and returns its path and cleanup func.
 func PrepareSandboxTempFile(target, content string) (string, func(), error) {
+	return PrepareSandboxTempFileWithFormat(target, content, FormatUnknown)
+}
+
+// PrepareSandboxTempFileWithFormat writes the configuration content using the exact filename required by the format.
+func PrepareSandboxTempFileWithFormat(target, content string, format ConfigFormat) (string, func(), error) {
 	var filename string
-	switch strings.ToLower(target) {
-	case "traefik":
+	switch {
+	case format == FormatTraefikTOML || strings.ToLower(target) == "traefik-toml":
+		filename = "dynamic.toml"
+	case strings.ToLower(target) == "traefik":
 		filename = "dynamic.yml"
-	case "caddy":
+	case strings.ToLower(target) == "caddy":
 		filename = "Caddyfile"
-	case "nginx":
+	case strings.ToLower(target) == "nginx":
 		filename = "nginx.conf"
 	default:
 		filename = "routewarden.conf"
@@ -388,6 +473,9 @@ func PrepareSandboxTempFile(target, content string) (string, func(), error) {
 	tmpDir, err := os.MkdirTemp("", "rwarden-sandbox-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create temporary directory: %w", err)
+	}
+	if realPath, err := filepath.EvalSymlinks(tmpDir); err == nil {
+		tmpDir = realPath
 	}
 
 	filePath := filepath.Join(tmpDir, filename)
@@ -402,6 +490,90 @@ func PrepareSandboxTempFile(target, content string) (string, func(), error) {
 	return filePath, cleanup, nil
 }
 
+// PrepareActualGatewayConfig prepares a user-provided gateway config for sandbox execution,
+// ensuring that standalone routers and mock upstreams exist if only middleware was provided.
+func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent string) string {
+	content := strings.TrimSpace(rawContent)
+
+	switch format {
+	case FormatTraefikTOML:
+		// If TOML only defines middlewares without routers/services, wrap with sandbox router and mock service
+		if !strings.Contains(content, "[http.routers.") {
+			var b strings.Builder
+			b.WriteString("# Wrapped Traefik TOML configuration with Sandbox router & mock service\n")
+			b.WriteString("[http.routers.sandbox-router]\n")
+			b.WriteString("  rule = \"PathPrefix(`/`)\"\n")
+			b.WriteString("  entryPoints = [\"web\"]\n")
+			b.WriteString("  middlewares = [\"routewarden\", \"immich-smart-shield\", \"immich-public-shield\", \"warden\", \"global-warden\"]\n")
+			b.WriteString("  service = \"ping@internal\"\n\n")
+			b.WriteString(content)
+			b.WriteString("\n")
+			return b.String()
+		}
+		return content
+
+	case FormatTraefikYAML:
+		// If YAML only defines middlewares without routers/services, wrap with sandbox router and mock service
+		if !strings.Contains(content, "routers:") {
+			var b strings.Builder
+			b.WriteString("# Wrapped Traefik dynamic YAML with Sandbox router & mock service\n")
+			b.WriteString("http:\n")
+			b.WriteString("  routers:\n")
+			b.WriteString("    sandbox-router:\n")
+			b.WriteString("      rule: \"PathPrefix(`/`)\"\n")
+			b.WriteString("      entryPoints:\n")
+			b.WriteString("        - web\n")
+			b.WriteString("      middlewares:\n")
+			b.WriteString("        - routewarden\n")
+			b.WriteString("        - immich-smart-shield\n")
+			b.WriteString("        - immich-public-shield\n")
+			b.WriteString("        - warden\n")
+			b.WriteString("        - global-warden\n")
+			b.WriteString("      service: ping@internal\n\n")
+			// Strip top-level http: if present in content
+			if strings.HasPrefix(content, "http:") {
+				b.WriteString(strings.TrimPrefix(content, "http:"))
+			} else {
+				b.WriteString("  ")
+				b.WriteString(content)
+			}
+			b.WriteString("\n")
+			return b.String()
+		}
+		return content
+
+	case FormatCaddyfile:
+		// If Caddyfile does not contain a site address (e.g. :8080, :80, localhost, http://), wrap inside :8080
+		if !strings.Contains(content, ":8080") && !strings.Contains(content, ":80") && !strings.Contains(content, "localhost") && !strings.Contains(content, "http://") && !strings.Contains(content, "https://") {
+			var b strings.Builder
+			b.WriteString("{\n    admin off\n    order routewarden first\n}\n\n:8080 {\n")
+			b.WriteString("    ")
+			b.WriteString(content)
+			b.WriteString("\n    respond \"OK: Upstream Passed (RouteWarden Sandbox)\" 200\n}\n")
+			return b.String()
+		}
+		return content
+
+	case FormatNginx:
+		// If nginx.conf does not contain worker/http blocks, wrap it
+		if !strings.Contains(content, "worker_processes") && !strings.Contains(content, "http {") {
+			var b strings.Builder
+			b.WriteString("worker_processes 1;\nevents { worker_connections 1024; }\nhttp {\n")
+			b.WriteString("    lua_package_path \"/usr/local/openresty/site/lualib/?.lua;/etc/nginx/lua/lib/?.lua;;\";\n")
+			b.WriteString("    server {\n        listen 8080;\n        location / {\n")
+			b.WriteString("            ")
+			b.WriteString(content)
+			b.WriteString("\n            content_by_lua_block { ngx.say(\"OK: Upstream Passed (RouteWarden Sandbox)\") }\n")
+			b.WriteString("        }\n    }\n}\n")
+			return b.String()
+		}
+		return content
+
+	default:
+		return content
+	}
+}
+
 // StreamCommandOutput executes a command streaming its output to stdout/stderr.
 func StreamCommandOutput(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -411,10 +583,51 @@ func StreamCommandOutput(ctx context.Context, name string, args ...string) error
 	return cmd.Run()
 }
 
-// ReadConfigContent reads JSON configuration from path or stdin.
+// ReadConfigContent reads JSON or raw configuration from path or stdin.
 func ReadConfigContent(configPath string) ([]byte, error) {
 	if configPath == "" || configPath == "-" {
 		return io.ReadAll(os.Stdin)
 	}
 	return os.ReadFile(configPath)
 }
+
+// CleanupSandboxes queries and forcefully terminates/removes all running or stopped rwarden-sandbox-* containers.
+// Returns the list of cleaned up container identifiers, or nil if none found.
+func CleanupSandboxes() ([]string, error) {
+	cmd := exec.Command("docker", "ps", "-a", "--filter", "name=rwarden-sandbox", "--format", "{{.ID}}\t{{.Names}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query docker containers: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var removed []string
+	var ids []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		parts := strings.Split(l, "\t")
+		if len(parts) >= 2 {
+			ids = append(ids, parts[0])
+			removed = append(removed, fmt.Sprintf("%s (%s)", parts[1], parts[0]))
+		} else if len(parts) == 1 {
+			ids = append(ids, parts[0])
+			removed = append(removed, parts[0])
+		}
+	}
+
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	rmArgs := append([]string{"rm", "-f"}, ids...)
+	rmCmd := exec.Command("docker", rmArgs...)
+	if rmOut, err := rmCmd.CombinedOutput(); err != nil {
+		return removed, fmt.Errorf("failed to remove containers: %w, output: %s", err, string(rmOut))
+	}
+
+	return removed, nil
+}
+
