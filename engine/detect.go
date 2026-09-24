@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 )
@@ -25,10 +26,12 @@ func DetectConfigFormat(pathOrName string, content []byte) ConfigFormat {
 	strContent := string(content)
 
 	// 1. Docker Compose / Labels
-	if strings.HasPrefix(name, "docker-compose") || strings.HasPrefix(name, "compose.") {
+	if strings.HasPrefix(name, "docker-compose") || strings.HasPrefix(name, "compose.") || strings.HasPrefix(name, "compose-") ||
+		(strings.Contains(name, "compose") && (ext == ".yaml" || ext == ".yml")) {
 		return FormatTraefikLabels
 	}
-	if strings.Contains(strContent, "traefik.http.middlewares.") || strings.Contains(strContent, "traefik.enable=") {
+	if strings.Contains(strContent, "traefik.http.middlewares.") || strings.Contains(strContent, "traefik.enable=") ||
+		(strings.Contains(strContent, "services:") && strings.Contains(strContent, "labels:")) {
 		return FormatTraefikLabels
 	}
 
@@ -38,18 +41,21 @@ func DetectConfigFormat(pathOrName string, content []byte) ConfigFormat {
 	}
 
 	// 3. Caddyfile
-	if name == "caddyfile" || ext == ".caddy" || ext == ".caddyfile" || strings.Contains(strContent, "route_warden {") || strings.Contains(strContent, "routewarden {") {
+	if name == "caddyfile" || ext == ".caddy" || ext == ".caddyfile" || strings.HasPrefix(name, "caddyfile") ||
+		strings.Contains(strContent, "route_warden") || strings.Contains(strContent, "routewarden {") ||
+		strings.Contains(strContent, "order routewarden") || strings.Contains(strContent, "reverse_proxy") {
 		return FormatCaddyfile
 	}
 
 	// 4. NGINX
-	if name == "nginx.conf" || ext == ".conf" || strings.Contains(strContent, "resty.routewarden") {
+	if name == "nginx.conf" || name == "nginx" || ext == ".conf" || strings.Contains(strContent, "resty.routewarden") ||
+		strings.Contains(strContent, "access_by_lua") || (strings.Contains(strContent, "events {") && strings.Contains(strContent, "http {")) {
 		return FormatNginx
 	}
 
 	// 5. JSON
 	trimmed := strings.TrimSpace(strContent)
-	if ext == ".json" || (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) {
+	if ext == ".json" || (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") && json.Valid([]byte(trimmed))) {
 		return FormatJSON
 	}
 

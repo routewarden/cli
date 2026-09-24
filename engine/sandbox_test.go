@@ -343,6 +343,142 @@ http {
 			t.Errorf("complete nginx.conf should not be wrapped, got:\n%s", unwrapped)
 		}
 	})
+
+	t.Run("traefik toml complete config with backend service url and tls", func(t *testing.T) {
+		fullToml := "[http.routers.app]\n" +
+			"rule = \"Host(`api.example.com`)\"\n" +
+			"entryPoints = [\"websecure\"]\n" +
+			"middlewares = [\"routewarden\"]\n" +
+			"service = \"api-service\"\n\n" +
+			"[http.routers.app.tls]\n" +
+			"certResolver = \"letsencrypt\"\n\n" +
+			"[http.services.api-service.loadBalancer]\n" +
+			"[[http.services.api-service.loadBalancer.servers]]\n" +
+			"url = \"http://backend.internal:8080\"\n"
+
+		prepared := engine.PrepareActualGatewayConfig("traefik", engine.FormatTraefikTOML, fullToml)
+		if !strings.Contains(prepared, `service = "ping@internal"`) {
+			t.Errorf("router service was not redirected to ping@internal:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, `url = "http://127.0.0.1:8080/ping"`) {
+			t.Errorf("loadbalancer url was not redirected to internal ping:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, `entryPoints = ["web", "websecure"]`) {
+			t.Errorf("entryPoints was not adapted with web:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "# [http.routers.app.tls]") {
+			t.Errorf("tls section was not commented out:\n%s", prepared)
+		}
+		expectedRule := "Host(`api.example.com`) || Host(`127.0.0.1`) || Host(`localhost`)"
+		if !strings.Contains(prepared, expectedRule) {
+			t.Errorf("Host rule was not expanded with loopback:\n%s", prepared)
+		}
+	})
+
+	t.Run("traefik yaml complete config with backend service url and tls", func(t *testing.T) {
+		fullYaml := "http:\n" +
+			"  routers:\n" +
+			"    app:\n" +
+			"      rule: \"Host(`app.example.com`)\"\n" +
+			"      entryPoints:\n" +
+			"        - websecure\n" +
+			"      middlewares:\n" +
+			"        - routewarden\n" +
+			"      service: app-service\n" +
+			"      tls:\n" +
+			"        certResolver: letsencrypt\n" +
+			"  services:\n" +
+			"    app-service:\n" +
+			"      loadBalancer:\n" +
+			"        servers:\n" +
+			"          - url: \"http://backend.internal:8080\"\n"
+
+		prepared := engine.PrepareActualGatewayConfig("traefik", engine.FormatTraefikYAML, fullYaml)
+		if !strings.Contains(prepared, "service: ping@internal") {
+			t.Errorf("router service was not redirected to ping@internal:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, `- url: "http://127.0.0.1:8080/ping"`) {
+			t.Errorf("loadbalancer url was not redirected to internal ping:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "- web") {
+			t.Errorf("entryPoints did not include - web:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "tls: disabled in sandbox") && !strings.Contains(prepared, "# tls:") {
+			t.Errorf("tls was not neutralized in sandbox:\n%s", prepared)
+		}
+		expectedRule := "Host(`app.example.com`) || Host(`127.0.0.1`) || Host(`localhost`)"
+		if !strings.Contains(prepared, expectedRule) {
+			t.Errorf("Host rule was not expanded with loopback:\n%s", prepared)
+		}
+	})
+
+	t.Run("caddy complete config with reverse_proxy and domain site", func(t *testing.T) {
+		fullCaddy := `api.example.com {
+    routewarden {
+        deny_paths /.env
+    }
+    reverse_proxy http://backend.internal:8080 {
+        header_up Host {upstream_hostport}
+    }
+}`
+		prepared := engine.PrepareActualGatewayConfig("caddy", engine.FormatCaddyfile, fullCaddy)
+		if !strings.Contains(prepared, ":8080, api.example.com {") {
+			t.Errorf("site address did not have :8080 injected:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "order routewarden first") {
+			t.Errorf("missing order routewarden first global block:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "auto_https off") {
+			t.Errorf("missing auto_https off global block:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "respond \"OK: Upstream Passed (RouteWarden Sandbox)\" 200") {
+			t.Errorf("reverse_proxy block was not replaced with mock response:\n%s", prepared)
+		}
+		if strings.Contains(prepared, "http://backend.internal:8080") {
+			t.Errorf("unreachable upstream backend url was not replaced:\n%s", prepared)
+		}
+	})
+
+	t.Run("nginx complete config with upstream and proxy_pass", func(t *testing.T) {
+		fullNginx := `user nginx;
+worker_processes 1;
+events { worker_connections 1024; }
+http {
+    upstream backend_pool {
+        server backend.internal:8080 max_fails=3;
+    }
+    server {
+        listen 80;
+        listen 443 ssl;
+        ssl_certificate /etc/ssl/cert.pem;
+        location / {
+            access_by_lua_block {
+                local routewarden = require("resty.routewarden")
+            }
+            proxy_pass http://backend_pool;
+        }
+    }
+}`
+		prepared := engine.PrepareActualGatewayConfig("nginx", engine.FormatNginx, fullNginx)
+		if !strings.Contains(prepared, "# user directive disabled in sandbox;") {
+			t.Errorf("user directive was not commented out:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "server 127.0.0.1:8080 down;") {
+			t.Errorf("upstream server hostname was not neutralized:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "content_by_lua_block { ngx.header[\"Content-Type\"] = \"text/plain\"; ngx.say(\"OK: Upstream Passed (RouteWarden Sandbox)\") }") {
+			t.Errorf("proxy_pass was not replaced with mock content_by_lua_block:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "# ssl_certificate disabled in sandbox;") {
+			t.Errorf("ssl_certificate was not commented out:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "listen 8080;") {
+			t.Errorf("missing listen 8080 in server block:\n%s", prepared)
+		}
+		if !strings.Contains(prepared, "lua_package_path") {
+			t.Errorf("missing lua_package_path in http block:\n%s", prepared)
+		}
+	})
 }
 
 func TestSandbox_PrepareSandboxTempFileWithFormat(t *testing.T) {

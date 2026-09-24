@@ -113,34 +113,57 @@ Simulate candidate path extraction, normalization, and pattern matching on an ar
 ::: code-group
 
 ```bash [CLI]
-# Test a sensitive file path
+# Test a sensitive file path (positional or --path)
+rwarden test /.env
 rwarden test --path "/.env"
 
 # Test double URL encoding anti-evasion
-rwarden test --path "/static/%252e%252e/.env"
+rwarden test "/static/%252e%252e/.env"
 
-# Test query string inspection
-rwarden test --path "/search" --query "file=secret.conf"
+# Test query string inspection (-q or --query)
+rwarden test -q "file=secret.conf" /search
 
-# Test custom HTTP methods
-rwarden test --method POST --path "/wp-config.php"
+# Test custom HTTP methods (-X, -m, or --method)
+rwarden test -X POST /wp-config.php
+
+# Test custom HTTP headers (-H or --header, repeatable)
+rwarden test -H "X-Forwarded-Uri: /.env" /api
+
+# Test against a custom RouteWarden config file (-c or --config)
+rwarden test -c routewarden.json /admin/dashboard
+
+# Test client IP whitelisting
+rwarden test -c routewarden.json --ip "10.0.0.1" /admin
+
+# Pipe configuration via stdin
+cat routewarden.json | rwarden test -c - /admin
 ```
 
 ```bash [Docker]
-# Test a sensitive file path
-docker run --rm ghcr.io/routewarden/cli:latest test --path "/.env"
+# Test a sensitive path
+docker run --rm ghcr.io/routewarden/cli:latest test /.env
 
 # Test double URL encoding anti-evasion
-docker run --rm ghcr.io/routewarden/cli:latest test --path "/static/%252e%252e/.env"
+docker run --rm ghcr.io/routewarden/cli:latest test "/static/%252e%252e/.env"
 
-# Test query string inspection
-docker run --rm ghcr.io/routewarden/cli:latest test --path "/search" --query "file=secret.conf"
+# Test evasion via query inspection
+docker run --rm ghcr.io/routewarden/cli:latest test -q "file=secret.conf" /search
 
-# Test custom HTTP methods
-docker run --rm ghcr.io/routewarden/cli:latest test --method POST --path "/wp-config.php"
+# Test against custom config file
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest test -c /routewarden.json --ip "10.0.0.1" /admin
 ```
 
 :::
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `[path]`, `--path` | string | `""` | Request path to evaluate (e.g. `/.env` or `/api/v1`) |
+| `-c`, `--config` | string | `""` | Optional path to `routewarden.json` (or `-` for stdin) |
+| `-q`, `--query` | string | `""` | Optional request query string to evaluate |
+| `-X`, `-m`, `--method` | string | `"GET"` | HTTP method (e.g. `GET`, `POST`, `HEAD`) |
+| `-H`, `--header` | string | `""` | Optional header in `Key:Value` format to test (repeatable) |
+| `--ip` | string | `""` | Optional client IP address to evaluate against `allowedIps` |
+| `--check-query` | bool | `true` | Enable or disable query string inspection |
 
 **Example Output**:
 ```text
@@ -150,6 +173,9 @@ docker run --rm ghcr.io/routewarden/cli:latest test --method POST --path "/wp-co
     - /.env
 
 Result: 🛑 BLOCKED (HTTP Status 403)
+  Reason:  block_pattern_match
+  Target:  /.env
+  Pattern: (?i)\.env
 ```
 
 ---
@@ -161,16 +187,27 @@ Validate a RouteWarden JSON configuration file before deploying:
 ::: code-group
 
 ```bash [CLI]
-# Validate local configuration file
-rwarden validate --config routewarden.json
+# Validate routewarden.json directly (positional or --config)
+rwarden validate routewarden.json
+rwarden validate -c routewarden.json
+
+# Auto-detects routewarden.json in current directory if omitted
+rwarden validate
+
+# Validate piped config via stdin
+cat routewarden.json | rwarden validate
 ```
 
 ```bash [Docker]
-# Mount configuration file directly into container and validate
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate --config /routewarden.json
+# Validate mounted config file
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate /routewarden.json
 ```
 
 :::
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `[config]`, `-c`, `--config` | string | `"routewarden.json"` | Path to RouteWarden JSON config file (or `-` for stdin) |
 
 **Example Output**:
 ```text
@@ -207,143 +244,182 @@ docker run --rm ghcr.io/routewarden/cli:latest schema > routewarden.schema.json
 
 ### 4. Generate Gateway Configs (`generate`)
 
-Convert a `routewarden.json` specification into native gateway configuration format — no manual translation required:
+Convert `routewarden.json` into native gateway configuration — no manual translation required. Flags and positional arguments may be used interchangeably:
 
 ::: code-group
 
 ```bash [CLI]
-# Traefik: output as dynamic YAML middleware definition
-rwarden generate --target traefik-yaml --config routewarden.json > dynamic.yml
+# Traefik: dynamic YAML middleware definition
+rwarden generate traefik-yaml [routewarden.json] > dynamic.yml
+rwarden generate yaml > dynamic.yml
 
-# Traefik: output as dynamic TOML middleware definition
-rwarden generate --target traefik-toml --config routewarden.json > dynamic.toml
+# Traefik: dynamic TOML middleware definition
+rwarden generate traefik-toml [routewarden.json] > dynamic.toml
+rwarden generate toml > dynamic.toml
 
-# Traefik: output as Docker Compose label block
-rwarden generate --target traefik-labels --config routewarden.json
+# Traefik: Docker Compose labels block
+rwarden generate traefik-labels [routewarden.json]
+rwarden generate compose
 
-# Caddy: output as Caddyfile directive block
-rwarden generate --target caddy --config routewarden.json
+# Caddy: Caddyfile directive block
+rwarden generate caddy [routewarden.json]
 
-# NGINX / OpenResty: output as Lua init table for nginx.conf
-rwarden generate --target nginx --config routewarden.json
+# NGINX / OpenResty: Lua init table for nginx.conf
+rwarden generate nginx [routewarden.json]
 ```
 
 ```bash [Docker]
 # Traefik: output as dynamic YAML middleware definition
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-yaml --config /routewarden.json > dynamic.yml
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate traefik-yaml /routewarden.json > dynamic.yml
 
 # Traefik: output as dynamic TOML middleware definition
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-toml --config /routewarden.json > dynamic.toml
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate traefik-toml /routewarden.json > dynamic.toml
 
-# Traefik: output as Docker Compose label block
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target traefik-labels --config /routewarden.json
+# Traefik: output as Docker Compose labels block
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate traefik-labels /routewarden.json
 
 # Caddy: output as Caddyfile directive block
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target caddy --config /routewarden.json
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate caddy /routewarden.json
 
 # NGINX / OpenResty: output as Lua init table for nginx.conf
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate --target nginx --config /routewarden.json
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate nginx /routewarden.json
 ```
 
 :::
 
-**Available `--target` values:**
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `<target>`, `-t`, `--target` | string | `""` | Target gateway format (e.g. `traefik-yaml`, `caddy`, `nginx`) |
+| `[config]`, `-c`, `--config` | string | `"routewarden.json"` | Path to RouteWarden JSON config file (or `-` for stdin) |
 
-| Target | Output |
-| :--- | :--- |
-| `traefik-yaml` (or `traefik`) | Traefik dynamic YAML middleware definition (mountable as `dynamic.yml`) |
-| `traefik-toml` | Traefik dynamic TOML middleware definition (mountable as `dynamic.toml`) |
-| `traefik-labels` | Docker Compose `labels:` block for direct service configuration |
-| `caddy` | Caddyfile `routewarden { ... }` directive block |
-| `nginx` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+**Available Targets & Aliases:**
+
+| Target / Alias | Output |
+|:---|:---|
+| `traefik-yaml`, `traefik`, `yaml`, `yml` | Traefik dynamic YAML middleware definition (`dynamic.yml`) |
+| `traefik-toml`, `toml` | Traefik dynamic TOML middleware definition (`dynamic.toml`) |
+| `traefik-labels`, `compose`, `docker-compose`, `labels` | Docker Compose `labels:` block |
+| `caddy`, `caddyfile` | Caddyfile `routewarden { ... }` directive block |
+| `nginx`, `openresty` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
 
 ---
 
 ### 5. Live Gateway Sandbox (`sandbox`)
 
-Test your `routewarden.json` against a real, live gateway container (**Traefik**, **Caddy**, or **NGINX**) without manual setup or deployment.
+Test configurations against an ephemeral Docker container running **Traefik**, **Caddy**, or **NGINX**.
 
-`rwarden sandbox` automatically generates the native configuration, mounts it into an ephemeral container, binds your specified port, and cleanly terminates on `Ctrl+C`.
+`rwarden sandbox` supports:
+1. **Generic JSON (`routewarden.json`)**: Automatically synthesized into complete gateway configurations.
+2. **Actual Gateway Configs**: Pass real `traefik.toml`, `traefik.yaml` / `dynamic.yml`, `docker-compose.yaml`, `Caddyfile`, or `nginx.conf` directly. Target gateway and format are **auto-detected** from filename and content.
+3. **Inline Docker Labels**: Test Traefik label snippets directly via `--labels`.
+4. **Snippets & Complete Production Configs**:
+   - **Snippets**: Middleware-only snippets are automatically wrapped with sandbox entrypoints and mock upstream endpoints returning `200 OK` for passing traffic.
+   - **Complete Configs**: Full configurations with backend service URLs, upstreams, or proxies are automatically adapted for ephemeral sandboxes in-memory without modifying your source file:
+     - **Traefik**: External loadBalancer service URLs (`url`, `service`) are redirected to Traefik's internal ping service (`ping@internal`), entrypoints guarantee `:8080` binding, and router TLS directives are safely neutralized for local HTTP testing.
+     - **Caddy**: Upstream `reverse_proxy` targets are replaced with mock `200 OK` responders, `order routewarden first` and `auto_https off` are injected, and custom site blocks bind to `:8080`.
+     - **NGINX**: External `upstream` hostnames are neutralized with `down` to prevent OpenResty startup DNS failures, `proxy_pass` directives are converted to mock Lua `200 OK` responders, local SSL certificate requirements are bypassed, and `listen 8080;` is configured.
+   - **Live Upstream Reachability**: In `--test` mode, RouteWarden recognizes upstream reachability (HTTP `200`, or HTTP `502`/`504` from an offline production backend) as an allowlist pass-through.
 
 ::: code-group
 
 ```bash [CLI]
-# Run Traefik sandbox on localhost:8080
-rwarden sandbox --target traefik --config routewarden.json
+# 1. Test actual Traefik TOML configuration (auto-detects target & mounts dynamic.toml)
+rwarden sandbox traefik.toml
+rwarden sandbox -c traefik.toml
 
-# Print the generated gateway configuration before launching
-rwarden sandbox --target traefik --config routewarden.json --print-config
+# 2. Test actual Traefik YAML / dynamic.yml
+rwarden sandbox dynamic.yml
 
-# Run Caddy sandbox with specific version and port
-rwarden sandbox --target caddy --version 2.8.4 --port 9090
+# 3. Test Docker Compose with Traefik labels
+rwarden sandbox docker-compose.yaml
 
-# Run NGINX (OpenResty) sandbox
-rwarden sandbox --target nginx --port 8080
+# 4. Test Traefik labels inline
+rwarden sandbox --labels "traefik.http.middlewares.shield.plugin.routewarden.enabled=true"
 
-# Automated test mode: probes live container with test requests, asserts HTTP codes, then exits
-rwarden sandbox --target traefik --config routewarden.json --test
+# 5. Test actual Caddyfile
+rwarden sandbox Caddyfile
 
-# Dry-run: output docker command and generated config without starting container
-rwarden sandbox --target caddy --dry-run --print-config
+# 6. Test actual nginx.conf
+rwarden sandbox nginx.conf
 
-# Test against a specific RouteWarden plugin version/tag/branch
-rwarden sandbox --target traefik --plugin-version v1.2.0
+# 7. Automated live probe verification with custom path and IP allowlist assertion
+rwarden sandbox docker-compose.yaml --test --probe-path "/immich/api/admin" --probe-ip "10.0.0.1"
 
-# Mount local plugin repository for rapid local plugin testing
-rwarden sandbox --target traefik --plugin-path ../traefik-warden
+# 8. Dry-run: inspect generated/wrapped gateway config & exact docker run command
+rwarden sandbox traefik.toml -n -p
+
+# 9. Run in detached background mode
+rwarden sandbox caddy Caddyfile -d
+
+# 10. Run against specific RouteWarden plugin version or local plugin path
+rwarden sandbox traefik --plugin-version v1.2.0
+rwarden sandbox traefik --plugin-path ../traefik-warden
 ```
 
 ```bash [Docker]
-# Run Traefik sandbox from within Docker container (mounts docker.sock):
-docker run -it --rm \
+# Test actual traefik.toml via Docker (mounts docker.sock):
+docker run --rm -it \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/routewarden.json:/routewarden.json \
-  --net=host \
-  ghcr.io/routewarden/cli:latest sandbox --target traefik --config /routewarden.json
+  -v $(pwd)/traefik.toml:/config/traefik.toml:ro \
+  -p 8080:8080 \
+  ghcr.io/routewarden/cli:latest sandbox /config/traefik.toml
 
-# Dry-run from Docker (requires no docker.sock mounting):
-docker run --rm -v $(pwd)/routewarden.json:/routewarden.json \
-  ghcr.io/routewarden/cli:latest sandbox --target traefik --dry-run --print-config --config /routewarden.json
+# Test Docker Compose Traefik labels via Docker:
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/docker-compose.yaml:/config/docker-compose.yaml:ro \
+  -p 8080:8080 \
+  ghcr.io/routewarden/cli:latest sandbox /config/docker-compose.yaml --test
+
+# Test inline labels without mounting files:
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 8080:8080 \
+  ghcr.io/routewarden/cli:latest sandbox \
+  --labels "traefik.http.middlewares.shield.plugin.routewarden.enabled=true" \
+  --test
 ```
 
 :::
 
-**Available `sandbox` Flags:**
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `[config]`, `-c`, `--config` | string | `""` | Path to gateway config (`traefik.toml`, `dynamic.yml`, `docker-compose.yaml`, `Caddyfile`, `nginx.conf`, `routewarden.json`, or `-`) |
+| `-t`, `--target` | string | `""` | Target gateway: `traefik`, `caddy`, or `nginx` (optional if auto-detected or passed as positional argument) |
+| `--format` | string | `""` | Explicit format: `traefik-toml`, `traefik-yaml`, `traefik-labels`, `caddy`, `nginx`, `json` |
+| `--labels` | string | `""` | Direct Traefik Docker labels string (e.g. `'traefik.http.middlewares.warden...'`) |
+| `--probe-path` | string | `""` | Custom endpoint path to verify blocked during `--test` |
+| `--probe-ip` | string | `""` | Client IP to simulate via `X-Forwarded-For` to verify allowlist bypass during `--test` |
+| `--port` | int | `8080` | Local port to bind the gateway |
+| `--version` | string | `""` | Target gateway container version tag (e.g. `v3.3`, `2.11.4`, `alpine`) |
+| `--plugin-version` | string | `""` | RouteWarden plugin version/tag/branch (e.g. `v1.2.0`, `v1.1.0`, `main`) |
+| `--plugin-path` | string | `""` | Local path to RouteWarden plugin directory to mount for development |
+| `-p`, `--print-config` | bool | `false` | Print generated/wrapped gateway configuration before running |
+| `--test` | bool | `false` | Run automated live HTTP probe assertions against container then exit |
+| `-n`, `--dry-run` | bool | `false` | Generate config and show docker command without starting container |
+| `-d`, `--detach` | bool | `false` | Run container in background mode |
 
-| Flag | Default | Description |
-| :--- | :---: | :--- |
-| `--target` *(required)* | — | Target gateway: `traefik`, `caddy`, or `nginx` |
-| `--config` | `./routewarden.json` | Path to RouteWarden JSON configuration file (or `-` for stdin) |
-| `--port` | `8080` | Local port to bind the gateway |
-| `--version` | `latest` | Target gateway container image tag (e.g. `v3.3`, `2.11.4`, `alpine`) |
-| `--plugin-version` | `""` | RouteWarden plugin version/tag/branch (e.g. `v1.2.0`, `v1.1.0`, `main`) |
-| `--plugin-path` | `""` | Local path to RouteWarden plugin directory to mount for development |
-| `--print-config`, `-p` | `false` | Print generated gateway config (YAML / Caddyfile / Lua) before running |
-| `--test` | `false` | Run automated live HTTP probe assertions against the container and exit |
-| `--dry-run` | `false` | Generate config and show docker command without starting container |
-| `--detach`, `-d` | `false` | Run container in background and print container ID |
-
-#### Testing Your Sandbox with `curl`
+#### Testing Live with `curl`
 
 Once your sandbox container is running on port `8080`, test real HTTP requests against it:
 
 ```bash
-# 1. Direct sensitive file access (should be blocked)
+# 1. Direct sensitive file access (blocked)
 curl -i http://localhost:8080/.env
 
-# 2. Path traversal & double URL encoding evasion (should be blocked)
+# 2. Path traversal & double URL encoding evasion (blocked)
 curl -i http://localhost:8080/static/%252e%252e/.env
 
-# 3. Query string inspection (should be blocked if checkQuery is enabled)
+# 3. Query string inspection (blocked if checkQuery is enabled)
 curl -i "http://localhost:8080/search?file=secret.conf"
 
-# 4. Semicolon matrix parameter evasion (should be blocked)
+# 4. Semicolon matrix parameter evasion (blocked)
 curl -i "http://localhost:8080/app;jsessionid=123/.env"
 
-# 5. Reverse proxy header smuggling (should be blocked if checkHeaders is enabled)
+# 5. Reverse proxy header smuggling (blocked if checkHeaders is enabled)
 curl -i -H "X-Forwarded-Uri: /.env" http://localhost:8080/api/dashboard
 
-# 6. Legitimate public asset (should pass downstream to upstream)
+# 6. Legitimate public asset (allowed downstream)
 curl -i http://localhost:8080/robots.txt
 
 # 7. Client IP whitelisting test (simulating a request from whitelisted IP 192.168.1.50)
@@ -358,12 +434,37 @@ In **production deployments**, edge reverse proxies (Cloudflare, AWS ALB, Traefi
 
 ---
 
-### 6. Check CLI Version (`version`)
+### 6. Cleanup Sandbox Containers (`cleanup`)
+
+Stop and remove all running or detached RouteWarden sandbox containers:
+
+::: code-group
+
+```bash [CLI]
+rwarden cleanup
+
+# Or via sandbox subcommand:
+rwarden sandbox cleanup
+```
+
+```bash [Docker]
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden/cli:latest cleanup
+```
+
+:::
+
+---
+
+### 7. Check CLI Version (`version`)
+
+Display the current RouteWarden CLI version:
 
 ::: code-group
 
 ```bash [CLI]
 rwarden version
+rwarden --version
+rwarden -v
 ```
 
 ```bash [Docker]
@@ -371,6 +472,11 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 ```
 
 :::
+
+**Example Output**:
+```text
+rwarden version 2.1.0
+```
 
 ---
 
@@ -725,6 +831,55 @@ caddy adapt --config Caddyfile --pretty
 ## Changelog {#changelog}
 
 All notable changes to the RouteWarden CLI (`rwarden`) are documented below. The CLI adheres to [Semantic Versioning](https://semver.org/).
+
+### [v2.1.0] - 2026-09-24
+
+#### Added
+- **Flexible Positional Arguments & Lenient Flag Parsing**:
+  - Direct positional inputs for all commands: `rwarden test /.env`, `rwarden validate [config]`, `rwarden generate <target> [config]`, and `rwarden sandbox <target> [config]`.
+  - Flags can now be placed interchangeably before or after positional arguments.
+  - Automatic fallback to `routewarden.json` in current working directory when `--config` is omitted in `validate` and `generate`.
+- **Shorthand Flag Aliases**:
+  - Added `-c` for `--config`, `-t` for `--target`, `-q` for `--query`, `-X` and `-m` for `--method`, `-H` (repeatable) for `--header`, `-n` for `--dry-run`, `-d` for `--detach`, `-p` for `--print-config`, and `-v` for `version`.
+- **Target & Format Aliases**:
+  - Target generator and sandbox accept standard aliases: `yaml`, `yml`, `toml`, `compose`, `labels`, `docker-compose`, `caddyfile`, `openresty`.
+- **Production Gateway Config Adaptation in Sandbox**:
+  - Support for passing complete, production Traefik (`traefik.yaml`, `traefik.toml`), Docker Compose (`docker-compose.yaml`), Caddy (`Caddyfile`), and NGINX (`nginx.conf`) files directly to `rwarden sandbox`.
+  - In-memory auto-adaptation: rewrites external upstream backend URLs, proxies, and certificates for isolated local testing without modifying original configuration files.
+  - Live probe testing (`--test`) accommodates upstream reachability (HTTP 200, 502, 504) as allowlist pass-through.
+- **Dedicated Sandbox Teardown Command**:
+  - `rwarden cleanup` (and `rwarden sandbox cleanup`) to stop and prune dangling or detached sandbox containers in one command.
+
+#### Fixed
+- **Regex & Configuration Parsing**:
+  - Fixed RE2 regex backreference in Traefik label parsing to ensure 100% Go regexp standard library compliance.
+  - Prevented multiline upstream regex greediness in NGINX config adaptation from corrupting `server {` blocks.
+  - Injected missing `middlewares:` parent block in synthetic Traefik sandbox YAML generation.
+  - Enhanced label normalization to recognize root-level response parameters (`status`, `statusCode`, `mode`, `action`, `customResponseText`).
+  - Removed legacy direct boolean `silentDrop` property from `Config` schema, structs, and Docker label converters (use `mode: "silentDrop"`, `action: "silentDrop"`, or `response.mode: "silentDrop"` instead).
+
+---
+
+### [v2.0.0] - 2026-09-21
+
+#### Added
+- **Ephemeral Gateway Sandbox (`rwarden sandbox`)**:
+  - Spin up live, ephemeral container environments for **Traefik**, **Caddy**, and **NGINX (OpenResty)** pre-configured with RouteWarden security rules.
+  - Automatically translates and mounts native dynamic configurations (`dynamic.yml`, `Caddyfile`, `nginx.conf`) into isolated test containers.
+  - Interactive foreground mode with instant graceful teardown on `Ctrl+C`.
+  - Detached background mode (`--detach` / `-d`) for local dev workflows and integration testing.
+  - Automated probe testing (`--test`) to execute live HTTP test suites asserting blocking and bypass behavior directly against the running container.
+  - Dry-run mode (`--dry-run`) to inspect generated gateway configurations and exact Docker run commands without launching containers.
+  - Print configuration option (`--print-config` / `-p`) to output generated gateway configuration before launching.
+- **Custom RouteWarden Plugin Support**:
+  - `--plugin-version`: Specify custom plugin version/tag/branch for testing specific releases (Traefik plugin catalog version, Caddy / NGINX container tag).
+  - `--plugin-path`: Mount local plugin repository directories for real-time plugin development and verification.
+- **Pre-flight Environment Validation**:
+  - Added early Docker installation and daemon accessibility checks (`CheckDockerInstalled`) to fail fast with actionable guidance before preparing or running containers.
+- **Enhanced Container Tooling**:
+  - Included `docker-cli` inside the RouteWarden container image (`ghcr.io/routewarden/cli`) to enable running sandboxes from within Docker via `/var/run/docker.sock`.
+
+---
 
 ### [v1.1.0] - 2026-09-21
 

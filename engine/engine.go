@@ -79,7 +79,6 @@ type Config struct {
 	Methods                    []string        `json:"methods,omitempty"`
 	StatusCode                 int             `json:"statusCode,omitempty"`
 	CustomResponseText         string          `json:"customResponseText,omitempty"`
-	SilentDrop                 bool            `json:"silentDrop,omitempty"`
 	Action                     string          `json:"action,omitempty"`
 	Mode                       string          `json:"mode,omitempty"`
 	CheckQuery                 bool            `json:"checkQuery,omitempty"`
@@ -102,7 +101,6 @@ func CreateConfig() *Config {
 		Methods:                    []string{"GET"},
 		StatusCode:                 403,
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
-		SilentDrop:                 false,
 		CheckQuery:                 false,
 		CheckHeaders:               []string{},
 		Debug:                      false,
@@ -302,8 +300,6 @@ func NewEngine(cfg *Config) (*Engine, error) {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Mode)
 		} else if strings.TrimSpace(cfg.Action) != "" {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Action)
-		} else if cfg.SilentDrop {
-			cfg.Response.Mode = "silentDrop"
 		} else if cfg.Response.Mode == "" {
 			cfg.Response.Mode = "text"
 		}
@@ -512,11 +508,11 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 // Generate converts a Config into target gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx).
 func (cfg *Config) Generate(target string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "traefik", "traefik-yaml", "traefik.yaml", "traefik.yml", "traefik-yml", "treafik-yaml":
+	case "traefik", "traefik-yaml", "traefik.yaml", "traefik.yml", "traefik-yml", "treafik-yaml", "yaml", "yml":
 		return cfg.GenerateTraefikYAML(), nil
-	case "traefik-toml", "traefik.toml", "treafik-toml":
+	case "traefik-toml", "traefik.toml", "treafik-toml", "toml":
 		return cfg.GenerateTraefikTOML(), nil
-	case "traefik-labels", "traefik_labels", "treafik-labels", "labels":
+	case "traefik-labels", "traefik_labels", "treafik-labels", "labels", "compose", "docker-compose":
 		return cfg.GenerateTraefikLabels(), nil
 	case "caddy", "caddyfile":
 		return cfg.GenerateCaddyfile(), nil
@@ -557,8 +553,6 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 			mode = strings.TrimSpace(cfg.Mode)
 		} else if strings.TrimSpace(cfg.Action) != "" {
 			mode = strings.TrimSpace(cfg.Action)
-		} else if cfg.SilentDrop {
-			mode = "silentDrop"
 		}
 	}
 
@@ -616,10 +610,10 @@ func (cfg *Config) GenerateTraefikYAML() string {
 
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("          response:\n")
-	b.WriteString(fmt.Sprintf("            mode: %s\n", mode))
-	b.WriteString(fmt.Sprintf("            statusCode: %d\n", status))
+	fmt.Fprintf(&b, "            mode: %s\n", mode)
+	fmt.Fprintf(&b, "            statusCode: %d\n", status)
 	if body != "" {
-		b.WriteString(fmt.Sprintf("            body: %q\n", body))
+		fmt.Fprintf(&b, "            body: %q\n", body)
 	}
 
 	return b.String()
@@ -706,33 +700,40 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	var b strings.Builder
 	b.WriteString("labels:\n")
 	b.WriteString("  - \"traefik.enable=true\"\n")
-	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enabled="); fmt.Fprintf(&b, "%t", cfg.Enabled); b.WriteString("\"\n")
-	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultPatterns="); fmt.Fprintf(&b, "%t", cfg.EnableDefaultPatterns); b.WriteString("\"\n")
+	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enabled=")
+	fmt.Fprintf(&b, "%t", cfg.Enabled)
+	b.WriteString("\"\n")
+	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultPatterns=")
+	fmt.Fprintf(&b, "%t", cfg.EnableDefaultPatterns)
+	b.WriteString("\"\n")
+	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultAllowPatterns=")
+	fmt.Fprintf(&b, "%t", cfg.EnableDefaultAllowPatterns)
+	b.WriteString("\"\n")
 
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	if len(allBlocks) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ","))
 	}
 	if len(cfg.AllowPatterns) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ","))
 	}
 	if len(cfg.AllowedIPs) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
 	}
 	if len(cfg.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ","))
 	}
 	if cfg.CheckQuery {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkQuery=true\"\n")
 	}
 	if len(cfg.CheckHeaders) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ","))
 	}
 
 	mode, status, body := cfg.ResolveResponse()
-	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode))
-	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status))
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode)
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status)
 	if body != "" {
 		escapedBody := strings.ReplaceAll(body, "\"", "\\\"")
 		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody))
@@ -757,33 +758,33 @@ func (cfg *Config) GenerateCaddyfile() string {
 		b.WriteString("    check_query\n")
 	}
 	if len(cfg.CheckHeaders) > 0 {
-		b.WriteString(fmt.Sprintf("    check_headers %s\n", strings.Join(cfg.CheckHeaders, " ")))
+		fmt.Fprintf(&b, "    check_headers %s\n", strings.Join(cfg.CheckHeaders, " "))
 	}
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	for _, p := range allBlocks {
-		b.WriteString(fmt.Sprintf("    block_pattern %q\n", p))
+		fmt.Fprintf(&b, "    block_pattern %q\n", p)
 	}
 	for _, a := range cfg.AllowPatterns {
-		b.WriteString(fmt.Sprintf("    allow_pattern %q\n", a))
+		fmt.Fprintf(&b, "    allow_pattern %q\n", a)
 	}
 	for _, ip := range cfg.AllowedIPs {
-		b.WriteString(fmt.Sprintf("    allowed_ip %s\n", ip))
+		fmt.Fprintf(&b, "    allowed_ip %s\n", ip)
 	}
 	if len(cfg.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("    methods %s\n", strings.Join(cfg.Methods, " ")))
+		fmt.Fprintf(&b, "    methods %s\n", strings.Join(cfg.Methods, " "))
 	}
 	mode, status, body := cfg.ResolveResponse()
 	if mode != "" || status != 403 || body != "" {
 		b.WriteString("    response {\n")
 		if mode != "" {
-			b.WriteString(fmt.Sprintf("        mode %s\n", mode))
+			fmt.Fprintf(&b, "        mode %s\n", mode)
 		}
 		if status != 0 {
-			b.WriteString(fmt.Sprintf("        status %d\n", status))
+			fmt.Fprintf(&b, "        status %d\n", status)
 		}
 		if body != "" {
-			b.WriteString(fmt.Sprintf("        body %q\n", body))
+			fmt.Fprintf(&b, "        body %q\n", body)
 		}
 		b.WriteString("    }\n")
 	}
@@ -796,8 +797,9 @@ func (cfg *Config) GenerateNginxLua() string {
 	var b strings.Builder
 	b.WriteString("-- RouteWarden OpenResty configuration table\n")
 	b.WriteString("local routewarden_config = {\n")
-	b.WriteString(fmt.Sprintf("    enabled = %t,\n", cfg.Enabled))
-	b.WriteString(fmt.Sprintf("    enable_default_patterns = %t,\n", cfg.EnableDefaultPatterns))
+	fmt.Fprintf(&b, "    enabled = %t,\n", cfg.Enabled)
+	fmt.Fprintf(&b, "    enable_default_patterns = %t,\n", cfg.EnableDefaultPatterns)
+	fmt.Fprintf(&b, "    enable_default_allow_patterns = %t,\n", cfg.EnableDefaultAllowPatterns)
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	if len(allBlocks) > 0 {
@@ -810,21 +812,21 @@ func (cfg *Config) GenerateNginxLua() string {
 	if len(cfg.AllowPatterns) > 0 {
 		b.WriteString("    allow_patterns = {\n")
 		for _, a := range cfg.AllowPatterns {
-			b.WriteString(fmt.Sprintf("        %q,\n", a))
+			fmt.Fprintf(&b, "        %q,\n", a)
 		}
 		b.WriteString("    },\n")
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allowed_ips = {\n")
 		for _, ip := range cfg.AllowedIPs {
-			b.WriteString(fmt.Sprintf("        %q,\n", ip))
+			fmt.Fprintf(&b, "        %q,\n", ip)
 		}
 		b.WriteString("    },\n")
 	}
 	if len(cfg.Methods) > 0 {
 		b.WriteString("    methods = {\n")
 		for _, m := range cfg.Methods {
-			b.WriteString(fmt.Sprintf("        %q,\n", m))
+			fmt.Fprintf(&b, "        %q,\n", m)
 		}
 		b.WriteString("    },\n")
 	}
@@ -834,23 +836,22 @@ func (cfg *Config) GenerateNginxLua() string {
 	if len(cfg.CheckHeaders) > 0 {
 		b.WriteString("    check_headers = {\n")
 		for _, h := range cfg.CheckHeaders {
-			b.WriteString(fmt.Sprintf("        %q,\n", h))
+			fmt.Fprintf(&b, "        %q,\n", h)
 		}
 		b.WriteString("    },\n")
 	}
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("    response = {\n")
 	if mode != "" {
-		b.WriteString(fmt.Sprintf("        mode = %q,\n", mode))
+		fmt.Fprintf(&b, "        mode = %q,\n", mode)
 	}
 	if status != 0 {
-		b.WriteString(fmt.Sprintf("        status_code = %d,\n", status))
+		fmt.Fprintf(&b, "        status_code = %d,\n", status)
 	}
 	if body != "" {
-		b.WriteString(fmt.Sprintf("        body = %q,\n", body))
+		fmt.Fprintf(&b, "        body = %q,\n", body)
 	}
 	b.WriteString("    },\n")
 	b.WriteString("}\n")
 	return b.String()
 }
-

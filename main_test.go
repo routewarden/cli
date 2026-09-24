@@ -1124,6 +1124,122 @@ http {
 		}
 	})
 
+	t.Run("dry-run with complete traefik yaml containing backend service url", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "traefik.yaml")
+		cfgContent := "http:\n" +
+			"  routers:\n" +
+			"    prod-app:\n" +
+			"      rule: \"Host(`app.internal`)\"\n" +
+			"      entryPoints:\n" +
+			"        - websecure\n" +
+			"      middlewares:\n" +
+			"        - routewarden\n" +
+			"      service: backend-service\n" +
+			"  services:\n" +
+			"    backend-service:\n" +
+			"      loadBalancer:\n" +
+			"        servers:\n" +
+			"          - url: \"http://10.0.1.20:8080\"\n"
+		if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		stdout, stderr, code := runCLI(t, "sandbox", "--config", cfgPath, "--dry-run", "--print-config")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "service: ping@internal") {
+			t.Errorf("expected router service to be ping@internal, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "- web") {
+			t.Errorf("expected web entrypoint to be injected, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "Host(`app.internal`) || Host(`127.0.0.1`) || Host(`localhost`)") {
+			t.Errorf("expected Host rule loopback expansion, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("dry-run with complete caddyfile containing reverse_proxy to external service", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "Caddyfile")
+		cfgContent := `app.internal.domain {
+    routewarden {
+        deny_paths /.env
+    }
+    reverse_proxy http://app-upstream:8080
+}
+`
+		if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		stdout, stderr, code := runCLI(t, "sandbox", "--config", cfgPath, "--dry-run", "--print-config")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, ":8080, app.internal.domain {") {
+			t.Errorf("expected :8080 port injection in Caddyfile, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "order routewarden first") {
+			t.Errorf("expected order routewarden first in Caddyfile, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "auto_https off") {
+			t.Errorf("expected auto_https off in Caddyfile, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "respond \"OK: Upstream Passed (RouteWarden Sandbox)\" 200") {
+			t.Errorf("expected reverse_proxy replacement with mock responder, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("dry-run with complete nginx.conf containing upstream hostnames and proxy_pass", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "nginx.conf")
+		cfgContent := `user nginx;
+worker_processes 1;
+events { worker_connections 1024; }
+http {
+    upstream backend_pool {
+        server backend1.company.local:8080;
+    }
+    server {
+        listen 80;
+        listen 443 ssl;
+        ssl_certificate /etc/ssl/cert.pem;
+        location / {
+            access_by_lua_block {
+                require("resty.routewarden")
+            }
+            proxy_pass http://backend_pool;
+        }
+    }
+}
+`
+		if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		stdout, stderr, code := runCLI(t, "sandbox", "--config", cfgPath, "--dry-run", "--print-config")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "# user directive disabled in sandbox;") {
+			t.Errorf("expected user directive to be commented out, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "server 127.0.0.1:8080 down;") {
+			t.Errorf("expected upstream server hostname to be neutralized, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "content_by_lua_block { ngx.header[\"Content-Type\"] = \"text/plain\"; ngx.say(\"OK: Upstream Passed (RouteWarden Sandbox)\") }") {
+			t.Errorf("expected proxy_pass to be replaced with mock content block, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "# ssl_certificate disabled in sandbox;") {
+			t.Errorf("expected ssl_certificate to be commented out, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "listen 8080;") {
+			t.Errorf("expected listen 8080; in server block, got:\n%s", stdout)
+		}
+	})
+
 	t.Run("dry-run against sample directory files", func(t *testing.T) {
 		sampleTests := []struct {
 			path       string
@@ -1208,5 +1324,123 @@ func TestCLI_CleanupCommand(t *testing.T) {
 	}
 }
 
+func TestCLI_PositionalAndFlagAliases(t *testing.T) {
+	sampleJSON := filepath.Join("samples", "json", "routewarden.json")
+	sampleCaddy := filepath.Join("samples", "caddy", "Caddyfile")
 
+	t.Run("test command positional path", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "/.env")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Result: 🛑 BLOCKED") {
+			t.Errorf("expected blocked result for positional /.env, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test command -X and -m method aliases", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-X", "POST", "/.env")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Testing: POST /.env") {
+			t.Errorf("missing POST method in output:\n%s", stdout)
+		}
+
+		stdout, stderr, code = runCLI(t, "test", "-m", "DELETE", "/.env")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Testing: DELETE /.env") {
+			t.Errorf("missing DELETE method in output:\n%s", stdout)
+		}
+	})
+
+	t.Run("test command -H repeatable header flag", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-H", "X-Forwarded-Uri: /.env", "/api/public")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Result: 🛑 BLOCKED") {
+			t.Errorf("expected blocked result for -H header injection, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test command -q query flag", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-q", "file=../../.env", "/search")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Result: 🛑 BLOCKED") {
+			t.Errorf("expected blocked result for -q query inspection, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("validate command positional config and -c alias", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "validate", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "is VALID") {
+			t.Errorf("expected valid output for positional config, got:\n%s", stdout)
+		}
+
+		stdout, stderr, code = runCLI(t, "validate", "-c", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "is VALID") {
+			t.Errorf("expected valid output for -c config, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("generate command positional target and config", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "generate", "caddy", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "routewarden {") {
+			t.Errorf("expected caddy output from positional generate, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("generate command target aliases: yaml, toml, compose", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "generate", "yaml", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "middlewares:") {
+			t.Errorf("expected yaml output from generate yaml, got:\n%s", stdout)
+		}
+
+		stdout, stderr, code = runCLI(t, "generate", "toml", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "[http.middlewares.routewarden.plugin.routewarden]") {
+			t.Errorf("expected toml output from generate toml, got:\n%s", stdout)
+		}
+
+		stdout, stderr, code = runCLI(t, "generate", "compose", sampleJSON)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "traefik.http.middlewares.warden") {
+			t.Errorf("expected compose output from generate compose, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("sandbox command positional target and config with -n dry-run alias", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "sandbox", "caddy", sampleCaddy, "-n")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "[Dry Run] Docker command for caddy:") {
+			t.Errorf("expected dry run output from sandbox caddy, got:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "docker run --rm") {
+			t.Errorf("missing docker run in dry run output:\n%s", stdout)
+		}
+	})
+}
 

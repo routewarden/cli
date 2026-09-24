@@ -67,11 +67,6 @@
       "type": "string",
       "description": "Custom response body text when blocking requests."
     },
-    "silentDrop": {
-      "type": "boolean",
-      "default": false,
-      "description": "Immediately terminate TCP connection without sending an HTTP response."
-    },
     "mode": {
       "type": "string",
       "enum": [

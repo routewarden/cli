@@ -24,17 +24,34 @@ var embeddedSchemaJSON string
 
 var version = "2.1.0"
 
+type stringSlice []string
+
+func (s *stringSlice) String() string {
+	return strings.Join(*s, ", ")
+}
+
+func (s *stringSlice) Set(val string) error {
+	*s = append(*s, val)
+	return nil
+}
+
 func printUsage() {
 	fmt.Println(`RouteWarden CLI (` + version + `) — Security inspection & configuration tool
 
 Usage:
-  rwarden <command> [options]
+  rwarden <command> [arguments] [options]
 
 Commands:
   test        Simulate request path and query inspection against patterns
+                e.g. rwarden test /.env
+                e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
   validate    Validate a RouteWarden configuration file (JSON)
+                e.g. rwarden validate [routewarden.json]
   generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx)
+                e.g. rwarden generate caddy [routewarden.json]
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
+                e.g. rwarden sandbox caddy [Caddyfile]
+                e.g. rwarden sandbox traefik --test
   cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
@@ -100,38 +117,99 @@ func handleCleanup(args []string) {
 	}
 }
 
+// parseFlagsLenient rearranges arguments so flags can appear before or after positional arguments.
+func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
+	var flags []string
+	var posArgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			posArgs = append(posArgs, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "-") && arg != "-" {
+			flagName := strings.TrimLeft(arg, "-")
+			if idx := strings.IndexByte(flagName, '='); idx != -1 {
+				flags = append(flags, arg)
+				continue
+			}
+			f := fs.Lookup(flagName)
+			if f != nil {
+				type boolFlag interface {
+					IsBoolFlag() bool
+				}
+				if bf, ok := f.Value.(boolFlag); ok && bf.IsBoolFlag() {
+					flags = append(flags, arg)
+					continue
+				}
+			}
+			flags = append(flags, arg)
+			if i+1 < len(args) && (!strings.HasPrefix(args[i+1], "-") || args[i+1] == "-") {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			posArgs = append(posArgs, arg)
+		}
+	}
+	return fs.Parse(append(flags, posArgs...))
+}
+
 func handleGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
 	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx")
+	shortTarget := fs.String("t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
-	_ = fs.Parse(args)
+	shortConfig := fs.String("c", "", "Alias for --config")
+	_ = parseFlagsLenient(fs, args)
+
+	if *shortTarget != "" && *target == "" {
+		*target = *shortTarget
+	}
+	if *shortConfig != "" && *configPath == "" {
+		*configPath = *shortConfig
+	}
+
+	for _, arg := range fs.Args() {
+		if *target == "" {
+			*target = arg
+		} else if *configPath == "" {
+			*configPath = arg
+		}
+	}
 
 	if *target == "" {
 		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx> is required")
 		os.Exit(1)
 	}
 
+	if *configPath == "" {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			*configPath = "-"
+		} else if _, err := os.Stat("routewarden.json"); err == nil {
+			*configPath = "routewarden.json"
+		}
+	}
+
 	var data []byte
 	var err error
 
-	if *configPath == "-" || *configPath == "" {
-		stat, _ := os.Stdin.Stat()
-		if (stat.Mode() & os.ModeCharDevice) == 0 || *configPath == "-" {
-			data, err = io.ReadAll(os.Stdin)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading config from stdin: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
+	if *configPath == "-" {
+		data, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config from stdin: %v\n", err)
 			os.Exit(1)
 		}
-	} else {
+	} else if *configPath != "" {
 		data, err = os.ReadFile(*configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", *configPath, err)
 			os.Exit(1)
 		}
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
+		os.Exit(1)
 	}
 
 	cfg := engine.CreateConfig()
@@ -156,7 +234,9 @@ func handleSandbox(args []string) {
 	}
 	fs := flag.NewFlagSet("sandbox", flag.ExitOnError)
 	target := fs.String("target", "", "Target gateway to run: traefik, caddy, nginx (optional if inferrable from config)")
+	shortTarget := fs.String("t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to gateway config (traefik.toml, traefik.yaml, docker-compose.yaml, Caddyfile, nginx.conf, or routewarden.json, or '-' for stdin)")
+	shortConfig := fs.String("c", "", "Alias for --config")
 	formatFlag := fs.String("format", "", "Explicit config format: json, traefik-toml, traefik-yaml, traefik-labels, caddy, nginx")
 	labelsFlag := fs.String("labels", "", "Direct Traefik Docker labels string (e.g. 'traefik.http.middlewares.warden...')")
 	probePathFlag := fs.String("probe-path", "", "Additional custom endpoint path to probe during live test")
@@ -169,13 +249,32 @@ func handleSandbox(args []string) {
 	printConfig := fs.Bool("print-config", false, "Print generated gateway configuration before starting container")
 	shortPrint := fs.Bool("p", false, "Alias for --print-config")
 	dryRun := fs.Bool("dry-run", false, "Generate config and print docker command without running container")
+	shortDryRun := fs.Bool("n", false, "Alias for --dry-run")
 	runTest := fs.Bool("test", false, "Run automated live HTTP test assertions against container then teardown")
 	detach := fs.Bool("detach", false, "Run container in background mode")
 	shortDetach := fs.Bool("d", false, "Alias for --detach")
-	_ = fs.Parse(args)
+	_ = parseFlagsLenient(fs, args)
+
+	if *shortTarget != "" && *target == "" {
+		*target = *shortTarget
+	}
+	if *shortConfig != "" && *configPath == "" {
+		*configPath = *shortConfig
+	}
+	for _, arg := range fs.Args() {
+		argLower := strings.ToLower(arg)
+		if argLower == "traefik" || argLower == "caddy" || argLower == "nginx" {
+			if *target == "" {
+				*target = argLower
+			}
+		} else if *configPath == "" {
+			*configPath = arg
+		}
+	}
 
 	shouldPrint := *printConfig || *shortPrint
 	shouldDetach := *detach || *shortDetach
+	isDryRun := *dryRun || *shortDryRun
 
 	// Determine target
 	normTarget := strings.ToLower(strings.TrimSpace(*target))
@@ -238,7 +337,7 @@ func handleSandbox(args []string) {
 	}
 
 	// Check if Docker is installed & running early (unless in dry-run mode)
-	if !*dryRun {
+	if !isDryRun {
 		if err := engine.CheckDockerInstalled(); err != nil {
 			fmt.Fprintf(os.Stderr, "Docker error: %v\n", err)
 			os.Exit(1)
@@ -290,8 +389,8 @@ func handleSandbox(args []string) {
 		sandboxConfig = engine.PrepareActualGatewayConfig(normTarget, format, string(rawData))
 		// Check if config has custom status code configured
 		strContent := string(rawData)
-		if strings.Contains(strContent, "statusCode") || strings.Contains(strContent, "status_code") || strings.Contains(strContent, "status ") {
-			re := regexp.MustCompile(`(?:statusCode|status_code|status)\s*[:=]?\s*(\d{3})`)
+		if strings.Contains(strContent, "statusCode") || strings.Contains(strContent, "status_code") || strings.Contains(strContent, "status ") || strings.Contains(strContent, "block_status") {
+			re := regexp.MustCompile(`(?:statusCode|status_code|block_status|status)\s*[:=]?\s*([45]\d{2})`)
 			if m := re.FindStringSubmatch(strContent); len(m) == 2 {
 				if s, err := strconv.Atoi(m[1]); err == nil && s > 0 {
 					expectedStatusCode = s
@@ -333,7 +432,7 @@ func handleSandbox(args []string) {
 		PluginPath:         *pluginPath,
 		Image:              *imgOverride,
 		PrintConfig:        shouldPrint,
-		DryRun:             *dryRun,
+		DryRun:             isDryRun,
 		RunTest:            *runTest,
 		Detach:             shouldDetach || *runTest,
 	}
@@ -356,7 +455,7 @@ func handleSandbox(args []string) {
 
 	imgName, dockerArgs := engine.BuildDockerRunCommand(opts, cfgPath, containerName)
 
-	if *dryRun {
+	if isDryRun {
 		fmt.Printf("🔍 [Dry Run] Docker command for %s:\n", normTarget)
 		fmt.Printf("docker %s\n", strings.Join(dockerArgs, " "))
 		return
@@ -437,32 +536,45 @@ func handleSchema() {
 func handleValidate(args []string) {
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
-	_ = fs.Parse(args)
+	shortConfig := fs.String("c", "", "Alias for --config")
+	_ = parseFlagsLenient(fs, args)
+
+	if *shortConfig != "" && *configPath == "" {
+		*configPath = *shortConfig
+	}
+	if *configPath == "" && len(fs.Args()) > 0 {
+		*configPath = fs.Args()[0]
+	}
+
+	if *configPath == "" {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			*configPath = "-"
+		} else if _, err := os.Stat("routewarden.json"); err == nil {
+			*configPath = "routewarden.json"
+		}
+	}
 
 	var data []byte
 	var err error
 	targetName := *configPath
 
-	if *configPath == "-" || *configPath == "" {
-		// Check if input is being piped via stdin
-		stat, _ := os.Stdin.Stat()
-		if (stat.Mode() & os.ModeCharDevice) == 0 || *configPath == "-" {
-			targetName = "stdin"
-			data, err = io.ReadAll(os.Stdin)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading config from stdin: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
+	if *configPath == "-" {
+		targetName = "stdin"
+		data, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading config from stdin: %v\n", err)
 			os.Exit(1)
 		}
-	} else {
+	} else if *configPath != "" {
 		data, err = os.ReadFile(*configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", *configPath, err)
 			os.Exit(1)
 		}
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
+		os.Exit(1)
 	}
 
 	cfg := engine.CreateConfig()
@@ -497,12 +609,34 @@ func handleTest(args []string) {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	testPath := fs.String("path", "", "Request path to evaluate (e.g. /.env or /api/v1)")
 	testQuery := fs.String("query", "", "Request query string to evaluate (optional)")
+	shortQuery := fs.String("q", "", "Alias for --query")
 	testMethod := fs.String("method", "GET", "HTTP method (default: GET)")
+	shortMethodX := fs.String("X", "", "Alias for --method (HTTP method)")
+	shortMethodM := fs.String("m", "", "Alias for --method (HTTP method)")
 	testIP := fs.String("ip", "", "Client IP address to evaluate against allowedIps (optional)")
 	configPath := fs.String("config", "", "Optional path to RouteWarden JSON config file (or '-' for stdin)")
+	shortConfig := fs.String("c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
-	headerVal := fs.String("header", "", "Header in Key:Value format to test (optional)")
-	_ = fs.Parse(args)
+
+	var headerList stringSlice
+	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
+	fs.Var(&headerList, "H", "Alias for --header (repeatable)")
+	_ = parseFlagsLenient(fs, args)
+
+	if *shortMethodX != "" {
+		*testMethod = *shortMethodX
+	} else if *shortMethodM != "" {
+		*testMethod = *shortMethodM
+	}
+	if *shortQuery != "" && *testQuery == "" {
+		*testQuery = *shortQuery
+	}
+	if *shortConfig != "" && *configPath == "" {
+		*configPath = *shortConfig
+	}
+	if *testPath == "" && len(fs.Args()) > 0 {
+		*testPath = fs.Args()[0]
+	}
 
 	if *testPath == "" {
 		fmt.Fprintln(os.Stderr, "Error: --path <url-path> is required")
@@ -542,8 +676,8 @@ func handleTest(args []string) {
 	}
 
 	headers := make(map[string]string)
-	if *headerVal != "" {
-		parts := strings.SplitN(*headerVal, ":", 2)
+	for _, h := range headerList {
+		parts := strings.SplitN(h, ":", 2)
 		if len(parts) == 2 {
 			hdrKey := strings.TrimSpace(parts[0])
 			hdrVal := strings.TrimSpace(parts[1])

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -85,8 +86,8 @@ func generateTraefikSandboxYAML(cfg *Config) string {
 	b.WriteString("        - web\n")
 	b.WriteString("      middlewares:\n")
 	b.WriteString("        - routewarden\n")
-	b.WriteString("      service: ping@internal\n")
-	b.WriteString("\n")
+	b.WriteString("      service: ping@internal\n\n")
+	b.WriteString("  middlewares:\n")
 
 	// Middleware definition
 	midYaml := cfg.GenerateTraefikYAML()
@@ -98,7 +99,8 @@ func generateTraefikSandboxYAML(cfg *Config) string {
 			inMid = true
 		}
 		if inMid {
-			b.WriteString(l);b.WriteString("\n")
+			b.WriteString(l)
+			b.WriteString("\n")
 		}
 	}
 	return b.String()
@@ -121,7 +123,9 @@ func generateCaddySandboxFile(cfg *Config) string {
 		} else if l == "}" {
 			b.WriteString("    }\n")
 		} else if strings.TrimSpace(l) != "" {
-			b.WriteString("    ");b.WriteString(l);b.WriteString("\n")
+			b.WriteString("    ")
+			b.WriteString(l)
+			b.WriteString("\n")
 		}
 	}
 	b.WriteString("    respond \"OK: Upstream Passed (RouteWarden Sandbox)\" 200\n")
@@ -149,7 +153,9 @@ func generateNginxSandboxConf(cfg *Config) string {
 		if strings.HasPrefix(l, "--") {
 			continue
 		}
-		b.WriteString("        ");b.WriteString(l);b.WriteString("\n")
+		b.WriteString("        ")
+		b.WriteString(l)
+		b.WriteString("\n")
 	}
 	b.WriteString("        warden_instance = routewarden.new(routewarden_config)\n")
 	b.WriteString("    }\n\n")
@@ -277,7 +283,7 @@ func BuildDockerRunCommand(opts SandboxOptions, configFilePath string, container
 			}
 		}
 		args = append(args, "-v", configFilePath+":/usr/local/openresty/nginx/conf/nginx.conf:ro")
-		
+
 		pluginPath := opts.PluginPath
 		if pluginPath == "" {
 			// Auto-detect local sibling nginx-warden lua library if present
@@ -322,6 +328,13 @@ func LiveProbeTestWithOptions(port int, expectedBlockCode int, probePaths []stri
 		resp, err := client.Get(baseURL + "/robots.txt")
 		if err == nil {
 			resp.Body.Close()
+			ready = true
+			break
+		}
+		// Also probe root URL in case /robots.txt is unmapped in custom configurations
+		respRoot, errRoot := client.Get(baseURL + "/")
+		if errRoot == nil {
+			respRoot.Body.Close()
 			ready = true
 			break
 		}
@@ -425,9 +438,21 @@ func LiveProbeTestWithOptions(port int, expectedBlockCode int, probePaths []stri
 		}
 		_ = resp.Body.Close()
 
-		if resp.StatusCode == tc.expectStatus {
+		isPass := resp.StatusCode == tc.expectStatus
+		// If testing allowlist or IP bypass (expectStatus == 200), and the gateway returned 502/504 or 404
+		// (indicating RouteWarden allowed the request through, not blocked with expectedBlockCode, but route was unmapped or backend offline)
+		if !isPass && tc.expectStatus == http.StatusOK && resp.StatusCode != expectedBlockCode &&
+			(resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusGatewayTimeout || resp.StatusCode == http.StatusNotFound) {
+			isPass = true
+		}
+
+		if isPass {
 			passed++
-			fmt.Fprintf(&sb, "  ✓ %-50s [HTTP %d]\n", tc.name, resp.StatusCode)
+			if resp.StatusCode == tc.expectStatus {
+				fmt.Fprintf(&sb, "  ✓ %-50s [HTTP %d]\n", tc.name, resp.StatusCode)
+			} else {
+				fmt.Fprintf(&sb, "  ✓ %-50s [HTTP %d (Upstream Route Reached)]\n", tc.name, resp.StatusCode)
+			}
 		} else {
 			fmt.Fprintf(&sb, "  ❌ %-50s Expected HTTP %d, got %d\n", tc.name, tc.expectStatus, resp.StatusCode)
 		}
@@ -491,7 +516,8 @@ func PrepareSandboxTempFileWithFormat(target, content string, format ConfigForma
 }
 
 // PrepareActualGatewayConfig prepares a user-provided gateway config for sandbox execution,
-// ensuring that standalone routers and mock upstreams exist if only middleware was provided.
+// ensuring that standalone routers and mock upstreams exist if only middleware was provided,
+// and mocking/adapting external service URLs when complete configs are provided.
 func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent string) string {
 	content := strings.TrimSpace(rawContent)
 
@@ -510,7 +536,56 @@ func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent s
 			b.WriteString("\n")
 			return b.String()
 		}
-		return content
+
+		// When complete TOML is passed with backend service URLs or external services,
+		// mock or redirect services to internal ping service so sandbox doesn't fail with 502/unreachable upstreams
+		prepared := content
+		if strings.Contains(prepared, "http.services.") || strings.Contains(prepared, "url =") || strings.Contains(prepared, "service =") {
+			// Redirect router services pointing to external backend services to ping@internal
+			reRouterService := regexp.MustCompile(`(?m)^([ \t]*service[ \t]*=[ \t]*)["']([^"']+)["']`)
+			prepared = reRouterService.ReplaceAllStringFunc(prepared, func(m string) string {
+				parts := reRouterService.FindStringSubmatch(m)
+				if len(parts) == 3 && parts[2] != "ping@internal" {
+					return parts[1] + `"ping@internal"`
+				}
+				return m
+			})
+
+			// Redirect any external loadbalancer server URLs to local ping endpoint
+			reServerURL := regexp.MustCompile(`(?m)^([ \t]*url[ \t]*=[ \t]*)["']https?://[^"']+["']`)
+			prepared = reServerURL.ReplaceAllString(prepared, `${1}"http://127.0.0.1:8080/ping"`)
+		}
+
+		// If entryPoints is defined without web, ensure web is included so port 8080 is bound
+		if strings.Contains(prepared, "entryPoints") && !strings.Contains(prepared, `"web"`) && !strings.Contains(prepared, `'web'`) {
+			reTomlEntry := regexp.MustCompile(`(?m)^([ \t]*entryPoints[ \t]*=[ \t]*\[)`)
+			prepared = reTomlEntry.ReplaceAllString(prepared, `${1}"web", `)
+		}
+
+		// Comment out TLS sections on routers so sandbox can test via plain HTTP
+		if strings.Contains(prepared, ".tls]") || strings.Contains(prepared, "certResolver") {
+			reTomlTLS := regexp.MustCompile(`(?m)^[ \t]*\[http\.routers\.[a-zA-Z0-9_-]+\.tls\][^\n]*`)
+			prepared = reTomlTLS.ReplaceAllString(prepared, `# $0`)
+			reTomlCert := regexp.MustCompile(`(?m)^[ \t]*certResolver[ \t]*=.*`)
+			prepared = reTomlCert.ReplaceAllString(prepared, `# $0`)
+		}
+
+		// If Host rule does not allow 127.0.0.1 or localhost, expand it so probe requests match
+		if strings.Contains(prepared, "Host(") {
+			reHost := regexp.MustCompile("Host\\([`'\"]([^`'\"]+)[`'\"]\\)")
+			prepared = reHost.ReplaceAllStringFunc(prepared, func(m string) string {
+				if strings.Contains(m, "127.0.0.1") || strings.Contains(m, "localhost") {
+					return m
+				}
+				parts := reHost.FindStringSubmatch(m)
+				if len(parts) == 2 {
+					return fmt.Sprintf("(Host(`%s`) || Host(`127.0.0.1`) || Host(`localhost`))", parts[1])
+				}
+				return m
+			})
+		}
+
+		return prepared
 
 	case FormatTraefikYAML:
 		// If YAML only defines middlewares without routers/services, wrap with sandbox router and mock service
@@ -540,11 +615,72 @@ func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent s
 			b.WriteString("\n")
 			return b.String()
 		}
-		return content
+
+		// When complete YAML is passed with backend service URLs or external services,
+		// mock or redirect services to internal ping service so sandbox doesn't fail with 502/unreachable upstreams
+		prepared := content
+		if strings.Contains(prepared, "services:") || strings.Contains(prepared, "url:") || strings.Contains(prepared, "service:") {
+			// Redirect any router service pointing to an external service to ping@internal
+			reYamlService := regexp.MustCompile(`(?m)^([ \t]*service:[ \t]*)["']?([a-zA-Z0-9_-]+)["']?[ \t]*$`)
+			prepared = reYamlService.ReplaceAllStringFunc(prepared, func(m string) string {
+				parts := reYamlService.FindStringSubmatch(m)
+				if len(parts) == 3 && parts[2] != "ping@internal" {
+					return parts[1] + "ping@internal"
+				}
+				return m
+			})
+
+			// Redirect any external loadbalancer server URLs to local ping endpoint
+			reYamlURL := regexp.MustCompile(`(?m)^([ \t]*-[ \t]*url:[ \t]*)["']?https?://[^"'\s]+["']?`)
+			prepared = reYamlURL.ReplaceAllString(prepared, `${1}"http://127.0.0.1:8080/ping"`)
+		}
+
+		// If entryPoints is defined without web, ensure web is included so port 8080 is bound
+		if strings.Contains(prepared, "entryPoints:") && !strings.Contains(prepared, "- web") && !strings.Contains(prepared, `"web"`) && !strings.Contains(prepared, `'web'`) {
+			if strings.Contains(prepared, "entryPoints: [") {
+				reYamlEntryInline := regexp.MustCompile(`(?m)^([ \t]*entryPoints:[ \t]*\[)`)
+				prepared = reYamlEntryInline.ReplaceAllString(prepared, `${1}"web", `)
+			} else {
+				reYamlEntry := regexp.MustCompile(`(?m)^([ \t]*entryPoints:[ \t]*\n)`)
+				prepared = reYamlEntry.ReplaceAllString(prepared, "${1}      - web\n")
+			}
+		}
+
+		// Comment out TLS sections on routers so sandbox can test via plain HTTP
+		if strings.Contains(prepared, "tls:") || strings.Contains(prepared, "certResolver") {
+			reYamlTLS := regexp.MustCompile(`(?m)^[ \t]*tls:[ \t]*\{?[ \t]*\}?[ \t]*$`)
+			prepared = reYamlTLS.ReplaceAllString(prepared, `      # tls: disabled in sandbox`)
+			reYamlCert := regexp.MustCompile(`(?m)^[ \t]*certResolver:.*`)
+			prepared = reYamlCert.ReplaceAllString(prepared, `        # certResolver: disabled in sandbox`)
+		}
+
+		// If Host rule does not allow 127.0.0.1 or localhost, expand it so probe requests match
+		if strings.Contains(prepared, "Host(") {
+			reHost := regexp.MustCompile("Host\\([`'\"]([^`'\"]+)[`'\"]\\)")
+			prepared = reHost.ReplaceAllStringFunc(prepared, func(m string) string {
+				if strings.Contains(m, "127.0.0.1") || strings.Contains(m, "localhost") {
+					return m
+				}
+				parts := reHost.FindStringSubmatch(m)
+				if len(parts) == 2 {
+					return fmt.Sprintf("(Host(`%s`) || Host(`127.0.0.1`) || Host(`localhost`))", parts[1])
+				}
+				return m
+			})
+		}
+
+		return prepared
 
 	case FormatCaddyfile:
-		// If Caddyfile does not contain a site address (e.g. :8080, :80, localhost, http://), wrap inside :8080
-		if !strings.Contains(content, ":8080") && !strings.Contains(content, ":80") && !strings.Contains(content, "localhost") && !strings.Contains(content, "http://") && !strings.Contains(content, "https://") {
+		hasSiteAddress := strings.Contains(content, ":8080") ||
+			strings.Contains(content, ":80") ||
+			strings.Contains(content, "localhost") ||
+			strings.Contains(content, "http://") ||
+			strings.Contains(content, "https://") ||
+			regexp.MustCompile(`(?m)^[ \t]*[a-zA-Z0-9_-]+\.[a-zA-Z0-9.:/_-]*[ \t]*\{`).MatchString(content)
+
+		// If Caddyfile does not contain a site address, wrap inside :8080
+		if !hasSiteAddress {
 			var b strings.Builder
 			b.WriteString("{\n    admin off\n    order routewarden first\n}\n\n:8080 {\n")
 			b.WriteString("    ")
@@ -552,7 +688,59 @@ func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent s
 			b.WriteString("\n    respond \"OK: Upstream Passed (RouteWarden Sandbox)\" 200\n}\n")
 			return b.String()
 		}
-		return content
+
+		prepared := content
+		// If complete Caddyfile has reverse_proxy pointing to an external service URL,
+		// replace it with mock upstream response so sandbox doesn't fail with 502 Bad Gateway
+		if strings.Contains(prepared, "reverse_proxy") {
+			// Replace multi-line reverse_proxy block: reverse_proxy ... { ... }
+			reBlock := regexp.MustCompile(`(?s)reverse_proxy\s+[^{}\n]*\{[^}]*\}`)
+			prepared = reBlock.ReplaceAllString(prepared, `respond "OK: Upstream Passed (RouteWarden Sandbox)" 200`)
+
+			// Replace single-line reverse_proxy: reverse_proxy ...
+			reLine := regexp.MustCompile(`(?m)^[ \t]*reverse_proxy[ \t]+[^\n]+$`)
+			prepared = reLine.ReplaceAllString(prepared, `    respond "OK: Upstream Passed (RouteWarden Sandbox)" 200`)
+		}
+
+		// Comment out tls directives so Caddy runs plain HTTP without looking for local cert files
+		if strings.Contains(prepared, "tls ") || strings.Contains(prepared, "tls\t") {
+			reTLS := regexp.MustCompile(`(?m)^[ \t]*tls[ \t]+[^\n]+$`)
+			prepared = reTLS.ReplaceAllString(prepared, `    # tls disabled in sandbox`)
+		}
+
+		// Ensure global block with order routewarden first, auto_https off, and admin off if routewarden is used
+		if strings.Contains(prepared, "routewarden") || strings.Contains(prepared, "route_warden") {
+			if strings.HasPrefix(strings.TrimSpace(prepared), "{") {
+				// Global block exists, ensure order routewarden first, auto_https off, and admin off are present
+				if !strings.Contains(prepared, "order routewarden") && !strings.Contains(prepared, "order route_warden") {
+					prepared = strings.Replace(prepared, "{", "{\n    order routewarden first", 1)
+				}
+				if !strings.Contains(prepared, "auto_https off") {
+					prepared = strings.Replace(prepared, "{", "{\n    auto_https off", 1)
+				}
+				if !strings.Contains(prepared, "admin off") {
+					prepared = strings.Replace(prepared, "{", "{\n    admin off", 1)
+				}
+			} else if !strings.Contains(prepared, "order routewarden") && !strings.Contains(prepared, "order route_warden") {
+				// Prepend global block
+				prepared = "{\n    admin off\n    auto_https off\n    order routewarden first\n}\n\n" + prepared
+			}
+		}
+
+		// Ensure port 8080 is listened on if site address is customized
+		if !strings.Contains(prepared, ":8080") {
+			firstSite := true
+			reSite := regexp.MustCompile(`(?m)^[ \t]*([a-zA-Z0-9*.:/_-]+)[ \t]*\{`)
+			prepared = reSite.ReplaceAllStringFunc(prepared, func(m string) string {
+				if firstSite {
+					firstSite = false
+					return ":8080, " + m
+				}
+				return m
+			})
+		}
+
+		return prepared
 
 	case FormatNginx:
 		// If nginx.conf does not contain worker/http blocks, wrap it
@@ -567,7 +755,62 @@ func PrepareActualGatewayConfig(target string, format ConfigFormat, rawContent s
 			b.WriteString("        }\n    }\n}\n")
 			return b.String()
 		}
-		return content
+
+		prepared := content
+		// Comment out user directive which can cause crashes in Alpine if user does not exist
+		if strings.Contains(prepared, "user ") {
+			reUser := regexp.MustCompile(`(?m)^[ \t]*user[ \t]+[^;]+;`)
+			prepared = reUser.ReplaceAllString(prepared, `# user directive disabled in sandbox;`)
+		}
+
+		// If complete nginx.conf has proxy_pass to an external service URL or upstream,
+		// replace proxy_pass with mock content block so sandbox doesn't fail with 502 Bad Gateway
+		if strings.Contains(prepared, "proxy_pass") {
+			reProxy := regexp.MustCompile(`(?m)^[ \t]*proxy_pass[ \t]+[^;]+;`)
+			prepared = reProxy.ReplaceAllString(prepared, `            content_by_lua_block { ngx.header["Content-Type"] = "text/plain"; ngx.say("OK: Upstream Passed (RouteWarden Sandbox)") }`)
+		}
+
+		// Neutralize upstream server hostnames to prevent nginx startup DNS resolution failure
+		if strings.Contains(prepared, "upstream") {
+			reUpstreamServer := regexp.MustCompile(`(?m)^([ \t]*server[ \t]+)[^;{\n]+;`)
+			prepared = reUpstreamServer.ReplaceAllString(prepared, `${1}127.0.0.1:8080 down;`)
+		}
+
+		// Comment out ssl_certificate and ssl_certificate_key directives to prevent missing file crashes
+		if strings.Contains(prepared, "ssl_") {
+			reSSL := regexp.MustCompile(`(?m)^[ \t]*ssl_(certificate|certificate_key|trusted_certificate|dhparam)[^\n;]*;`)
+			prepared = reSSL.ReplaceAllString(prepared, `        # ssl_certificate disabled in sandbox;`)
+		}
+
+		// Ensure lua_package_path is configured in http block so resty.routewarden can be loaded
+		if strings.Contains(prepared, "routewarden") && !strings.Contains(prepared, "lua_package_path") {
+			prepared = strings.Replace(prepared, "http {", "http {\n    lua_package_path \"/usr/local/openresty/site/lualib/?.lua;/usr/local/openresty/site/lualib/?/init.lua;;/etc/nginx/lua/lib/?.lua;\";", 1)
+		}
+
+		// Ensure server block listens on 8080 if not already listening on 8080
+		if !strings.Contains(prepared, "listen 8080") && !strings.Contains(prepared, "listen\t8080") {
+			firstListen := true
+			reListen := regexp.MustCompile(`(?m)^([ \t]*listen[ \t]+)[^;]+;`)
+			prepared = reListen.ReplaceAllStringFunc(prepared, func(m string) string {
+				if firstListen {
+					firstListen = false
+					parts := reListen.FindStringSubmatch(m)
+					if len(parts) >= 2 {
+						return parts[1] + "8080;"
+					}
+					return "        listen 8080;"
+				}
+				return "        # " + strings.TrimSpace(m)
+			})
+		}
+
+		// Remove ssl flag from any listen directive
+		if strings.Contains(prepared, " ssl") {
+			reListenSSL := regexp.MustCompile(`(?m)^([ \t]*listen[ \t]+[^;\n]*)\bssl\b([^;\n]*;)`)
+			prepared = reListenSSL.ReplaceAllString(prepared, `${1}${2} # ssl removed in sandbox`)
+		}
+
+		return prepared
 
 	default:
 		return content
@@ -630,4 +873,3 @@ func CleanupSandboxes() ([]string, error) {
 
 	return removed, nil
 }
-

@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -53,8 +54,8 @@ func parseLabelLine(rawLine string) (TraefikLabel, bool) {
 // ParseTraefikLabels parses lines or comma-separated lists of Docker labels.
 // Supports lines like:
 //   - "traefik.http.middlewares.my-shield.plugin.routewarden.enabled=true"
-//   traefik.http.middlewares.my-shield.plugin.routewarden.enabled: true
-//   traefik.http.middlewares.my-shield.plugin.routewarden.response.mode=json
+//     traefik.http.middlewares.my-shield.plugin.routewarden.enabled: true
+//     traefik.http.middlewares.my-shield.plugin.routewarden.response.mode=json
 func ParseTraefikLabels(content string) []TraefikLabel {
 	lines := strings.Split(content, "\n")
 	var items []string
@@ -157,12 +158,10 @@ func normalizePropKey(prop string) string {
 		return "checkQuery"
 	case "checkheaders":
 		return "checkHeaders"
-	case "statuscode":
+	case "statuscode", "status":
 		return "statusCode"
 	case "customresponsetext":
 		return "customResponseText"
-	case "silentdrop":
-		return "silentDrop"
 	case "debug":
 		return "debug"
 	case "securitylog":
@@ -172,10 +171,10 @@ func normalizePropKey(prop string) string {
 	case "mode":
 		return "mode"
 	default:
-		if strings.HasPrefix(lower, "response.") {
-			sub := strings.TrimPrefix(lower, "response.")
+		if after, ok :=strings.CutPrefix(lower, "response."); ok  {
+			sub := after
 			switch sub {
-			case "statuscode":
+			case "statuscode", "status":
 				return "response.statusCode"
 			case "mode":
 				return "response.mode"
@@ -209,7 +208,7 @@ func normalizeBool(val string, defaultVal bool) bool {
 // ConvertLabelsToTraefikDynamicYAML converts a collection of Traefik labels into a standalone dynamic YAML configuration.
 func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 	middlewareProps := make(map[string]map[string]string)
-	middlewareListPattern := regexp.MustCompile(`^traefik\.http\.middlewares\.([a-zA-Z0-9_-]+)\.plugin\.routewarden\.(.+)$`)
+	middlewareListPattern := regexp.MustCompile(`^traefik\.http\.middlewares\.([a-zA-Z0-9_-]+)\.plugin\.(?:routewarden|traefik-warden|traefik_warden|warden)\.(.+)$`)
 
 	for _, l := range labels {
 		m := middlewareListPattern.FindStringSubmatch(l.Key)
@@ -232,23 +231,26 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 	b.WriteString("http:\n")
 	b.WriteString("  routers:\n")
 
-	// Pick the first middleware name for the sandbox router
-	var firstMwName string
+	// Collect and sort middleware names deterministically
+	var mwNames []string
 	for name := range middlewareProps {
-		firstMwName = name
-		break
+		mwNames = append(mwNames, name)
 	}
+	sort.Strings(mwNames)
 
 	b.WriteString("    sandbox-router:\n")
 	b.WriteString("      rule: \"PathPrefix(`/`)\"\n")
 	b.WriteString("      entryPoints:\n")
 	b.WriteString("        - web\n")
 	b.WriteString("      middlewares:\n")
-	fmt.Fprintf(&b, "        - %s\n", firstMwName)
+	for _, mw := range mwNames {
+		fmt.Fprintf(&b, "        - %s\n", mw)
+	}
 	b.WriteString("      service: ping@internal\n\n")
 
 	b.WriteString("  middlewares:\n")
-	for name, props := range middlewareProps {
+	for _, name := range mwNames {
+		props := middlewareProps[name]
 		fmt.Fprintf(&b, "    %s:\n", name)
 		b.WriteString("      plugin:\n")
 		b.WriteString("        routewarden:\n")
@@ -275,9 +277,6 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		if val, ok := props["securityLog"]; ok {
 			fmt.Fprintf(&b, "          securityLog: %t\n", normalizeBool(val, false))
 		}
-		if val, ok := props["silentDrop"]; ok {
-			fmt.Fprintf(&b, "          silentDrop: %t\n", normalizeBool(val, false))
-		}
 
 		writeListProp(&b, "pathPatterns", props["pathPatterns"])
 		writeListProp(&b, "blockPatterns", props["blockPatterns"])
@@ -294,15 +293,33 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 				break
 			}
 		}
+		if !hasResponse && (props["statusCode"] != "" || props["mode"] != "" || props["action"] != "" || props["customResponseText"] != "") {
+			hasResponse = true
+		}
 		if hasResponse {
 			b.WriteString("          response:\n")
-			if mode, ok := props["response.mode"]; ok {
+			mode := props["response.mode"]
+			if mode == "" {
+				mode = props["mode"]
+			}
+			if mode == "" {
+				mode = props["action"]
+			}
+			if mode != "" {
 				fmt.Fprintf(&b, "            mode: %s\n", mode)
 			}
-			if status, ok := props["response.statusCode"]; ok {
+			status := props["response.statusCode"]
+			if status == "" {
+				status = props["statusCode"]
+			}
+			if status != "" {
 				fmt.Fprintf(&b, "            statusCode: %s\n", status)
 			}
-			if body, ok := props["response.body"]; ok {
+			body := props["response.body"]
+			if body == "" {
+				body = props["customResponseText"]
+			}
+			if body != "" {
 				fmt.Fprintf(&b, "            body: %q\n", body)
 			}
 		}
