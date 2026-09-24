@@ -117,8 +117,8 @@ func generateCaddySandboxFile(cfg *Config) string {
 	b.WriteString(":8080 {\n")
 
 	caddyBlock := cfg.GenerateCaddyfile()
-	lines := strings.Split(caddyBlock, "\n")
-	for _, l := range lines {
+	lines := strings.SplitSeq(caddyBlock, "\n")
+	for l := range lines {
 		if l == "routewarden {" || strings.HasPrefix(l, "routewarden {") {
 			b.WriteString("    routewarden {\n")
 		} else if l == "}" {
