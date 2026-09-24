@@ -1,0 +1,29 @@
+# Standalone Traefik Dynamic TOML Sample
+# Test with:
+#   rwarden sandbox --config dynamic.toml --test
+#   rwarden sandbox --config dynamic.toml --print-config --dry-run
+
+[http.routers.sample-router]
+  rule = "PathPrefix(`/`)"
+  entryPoints = ["web"]
+  middlewares = ["toml-shield"]
+  service = "ping@internal"
+
+[http.middlewares.toml-shield.plugin.routewarden]
+  enabled = true
+  enableDefaultPatterns = true
+  enableDefaultAllowPatterns = true
+  pathPatterns = ["(?i)^/admin/secret.*$", "(?i)^/vault/.*$"]
+  allowPatterns = ["(?i)^/vault/public$"]
+  allowedIps = ["192.168.100.50", "10.99.0.0/16"]
+  methods = ["GET", "POST"]
+  checkQuery = true
+  checkHeaders = ["X-Forwarded-Uri", "X-Rewrite-URL"]
+
+[http.middlewares.toml-shield.plugin.routewarden.response]
+  mode = "json"
+  statusCode = 403
+  body = "{\"error\":\"Access Denied via Traefik TOML\",\"engine\":\"routewarden\"}"
+
+[http.middlewares.toml-shield.plugin.routewarden.response.headers]
+  X-Security-Warden = "Traefik-TOML-Active"

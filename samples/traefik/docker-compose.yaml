@@ -1,0 +1,25 @@
+# Docker Compose with Traefik RouteWarden Middleware Labels
+# Test with:
+#   rwarden sandbox --config docker-compose.yaml --test
+#   rwarden sandbox --config docker-compose.yaml --print-config --dry-run
+
+services:
+  app:
+    image: traefik/whoami:latest
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.app.entrypoints=web"
+      - "traefik.http.routers.app.middlewares=compose-shield"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.enabled=true"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.enableDefaultPatterns=true"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.enableDefaultAllowPatterns=true"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.pathPatterns=(?i)^/admin/secret.*$,(?i)^/backup/.*$"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.allowPatterns=(?i)^/backup/status$"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.allowedIps=192.168.100.50,10.99.0.0/16"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.methods=GET,POST"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.checkQuery=true"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.checkHeaders=X-Forwarded-Uri,X-Rewrite-URL"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.response.mode=json"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.response.statusCode=403"
+      - 'traefik.http.middlewares.compose-shield.plugin.routewarden.response.body={"error":"Access Denied via Docker Labels","protection":"routewarden"}'

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -79,7 +80,6 @@ type Config struct {
 	Methods                    []string        `json:"methods,omitempty"`
 	StatusCode                 int             `json:"statusCode,omitempty"`
 	CustomResponseText         string          `json:"customResponseText,omitempty"`
-	SilentDrop                 bool            `json:"silentDrop,omitempty"`
 	Action                     string          `json:"action,omitempty"`
 	Mode                       string          `json:"mode,omitempty"`
 	CheckQuery                 bool            `json:"checkQuery,omitempty"`
@@ -102,7 +102,6 @@ func CreateConfig() *Config {
 		Methods:                    []string{"GET"},
 		StatusCode:                 403,
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
-		SilentDrop:                 false,
 		CheckQuery:                 false,
 		CheckHeaders:               []string{},
 		Debug:                      false,
@@ -302,8 +301,6 @@ func NewEngine(cfg *Config) (*Engine, error) {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Mode)
 		} else if strings.TrimSpace(cfg.Action) != "" {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Action)
-		} else if cfg.SilentDrop {
-			cfg.Response.Mode = "silentDrop"
 		} else if cfg.Response.Mode == "" {
 			cfg.Response.Mode = "text"
 		}
@@ -509,19 +506,21 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 	return result
 }
 
-// Generate converts a Config into target gateway configuration (traefik, traefik-labels, caddy, nginx).
+// Generate converts a Config into target gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx).
 func (cfg *Config) Generate(target string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "traefik":
+	case "traefik", "traefik-yaml", "traefik.yaml", "traefik.yml", "traefik-yml", "treafik-yaml", "yaml", "yml":
 		return cfg.GenerateTraefikYAML(), nil
-	case "traefik-labels":
+	case "traefik-toml", "traefik.toml", "treafik-toml", "toml":
+		return cfg.GenerateTraefikTOML(), nil
+	case "traefik-labels", "traefik_labels", "treafik-labels", "labels", "compose", "docker-compose":
 		return cfg.GenerateTraefikLabels(), nil
-	case "caddy":
+	case "caddy", "caddyfile":
 		return cfg.GenerateCaddyfile(), nil
-	case "nginx":
+	case "nginx", "openresty", "nginx.conf":
 		return cfg.GenerateNginxLua(), nil
 	default:
-		return "", fmt.Errorf("unsupported target: %s (must be 'traefik', 'traefik-labels', 'caddy', or 'nginx')", target)
+		return "", fmt.Errorf("unsupported target: %s (must be 'traefik-yaml', 'traefik-toml', 'traefik-labels', 'caddy', or 'nginx')", target)
 	}
 }
 
@@ -555,8 +554,6 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 			mode = strings.TrimSpace(cfg.Mode)
 		} else if strings.TrimSpace(cfg.Action) != "" {
 			mode = strings.TrimSpace(cfg.Action)
-		} else if cfg.SilentDrop {
-			mode = "silentDrop"
 		}
 	}
 
@@ -575,6 +572,12 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	fmt.Fprintf(&b, "          enabled: %t\n", cfg.Enabled)
 	fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", cfg.EnableDefaultPatterns)
 	fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", cfg.EnableDefaultAllowPatterns)
+	if cfg.Debug {
+		b.WriteString("          debug: true\n")
+	}
+	if !cfg.SecurityLog {
+		b.WriteString("          securityLog: false\n")
+	}
 
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
@@ -614,10 +617,196 @@ func (cfg *Config) GenerateTraefikYAML() string {
 
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("          response:\n")
-	b.WriteString(fmt.Sprintf("            mode: %s\n", mode))
-	b.WriteString(fmt.Sprintf("            statusCode: %d\n", status))
+	fmt.Fprintf(&b, "            mode: %s\n", mode)
+	fmt.Fprintf(&b, "            statusCode: %d\n", status)
 	if body != "" {
-		b.WriteString(fmt.Sprintf("            body: %q\n", body))
+		fmt.Fprintf(&b, "            body: %q\n", body)
+	}
+	if cfg.Response != nil {
+		if cfg.Response.ContentType != "" {
+			fmt.Fprintf(&b, "            contentType: %q\n", cfg.Response.ContentType)
+		}
+		if cfg.Response.RedirectURL != "" {
+			fmt.Fprintf(&b, "            redirectUrl: %q\n", cfg.Response.RedirectURL)
+		}
+		if cfg.Response.ProxyURL != "" {
+			fmt.Fprintf(&b, "            proxyUrl: %q\n", cfg.Response.ProxyURL)
+		}
+		if cfg.Response.GzipBombMB > 0 {
+			fmt.Fprintf(&b, "            gzipBombMB: %d\n", cfg.Response.GzipBombMB)
+		}
+		if cfg.Response.RetryAfterSeconds > 0 {
+			fmt.Fprintf(&b, "            retryAfterSeconds: %d\n", cfg.Response.RetryAfterSeconds)
+		}
+		if cfg.Response.TarpitDelayMs > 0 {
+			fmt.Fprintf(&b, "            tarpitDelayMs: %d\n", cfg.Response.TarpitDelayMs)
+		}
+		if cfg.Response.TarpitMaxDurationSeconds > 0 {
+			fmt.Fprintf(&b, "            tarpitMaxDurationSeconds: %d\n", cfg.Response.TarpitMaxDurationSeconds)
+		}
+		if cfg.Response.StreamSizeMB > 0 {
+			fmt.Fprintf(&b, "            streamSizeMB: %d\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.Captcha != nil {
+			b.WriteString("            captcha:\n")
+			if cfg.Response.Captcha.Provider != "" {
+				fmt.Fprintf(&b, "              provider: %s\n", cfg.Response.Captcha.Provider)
+			}
+			if cfg.Response.Captcha.SiteKey != "" {
+				fmt.Fprintf(&b, "              siteKey: %q\n", cfg.Response.Captcha.SiteKey)
+			}
+			if cfg.Response.Captcha.Title != "" {
+				fmt.Fprintf(&b, "              title: %q\n", cfg.Response.Captcha.Title)
+			}
+			if cfg.Response.Captcha.Template != "" {
+				fmt.Fprintf(&b, "              template: %q\n", cfg.Response.Captcha.Template)
+			}
+		}
+		if len(cfg.Response.Headers) > 0 {
+			b.WriteString("            headers:\n")
+			var hKeys []string
+			for k := range cfg.Response.Headers {
+				hKeys = append(hKeys, k)
+			}
+			sort.Strings(hKeys)
+			for _, k := range hKeys {
+				fmt.Fprintf(&b, "              %s: %q\n", k, cfg.Response.Headers[k])
+			}
+		}
+	}
+
+	return b.String()
+}
+
+// GenerateTraefikTOML outputs Traefik dynamic TOML middleware configuration.
+func (cfg *Config) GenerateTraefikTOML() string {
+	var b strings.Builder
+	b.WriteString("# Traefik dynamic TOML configuration generated by RouteWarden CLI\n")
+	b.WriteString("[http.middlewares.routewarden.plugin.routewarden]\n")
+	fmt.Fprintf(&b, "  enabled = %t\n", cfg.Enabled)
+	fmt.Fprintf(&b, "  enableDefaultPatterns = %t\n", cfg.EnableDefaultPatterns)
+	fmt.Fprintf(&b, "  enableDefaultAllowPatterns = %t\n", cfg.EnableDefaultAllowPatterns)
+	if cfg.Debug {
+		b.WriteString("  debug = true\n")
+	}
+	if !cfg.SecurityLog {
+		b.WriteString("  securityLog = false\n")
+	}
+
+	allBlocks := append([]string{}, cfg.PathPatterns...)
+	allBlocks = append(allBlocks, cfg.BlockPatterns...)
+	if len(allBlocks) > 0 {
+		b.WriteString("  pathPatterns = [")
+		for i, p := range allBlocks {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", p)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.AllowPatterns) > 0 {
+		b.WriteString("  allowPatterns = [")
+		for i, a := range cfg.AllowPatterns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", a)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.AllowedIPs) > 0 {
+		b.WriteString("  allowedIps = [")
+		for i, ip := range cfg.AllowedIPs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", ip)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.Methods) > 0 {
+		b.WriteString("  methods = [")
+		for i, m := range cfg.Methods {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", m)
+		}
+		b.WriteString("]\n")
+	}
+	if cfg.CheckQuery {
+		b.WriteString("  checkQuery = true\n")
+	}
+	if len(cfg.CheckHeaders) > 0 {
+		b.WriteString("  checkHeaders = [")
+		for i, h := range cfg.CheckHeaders {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", h)
+		}
+		b.WriteString("]\n")
+	}
+
+	mode, status, body := cfg.ResolveResponse()
+	b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response]\n")
+	fmt.Fprintf(&b, "  mode = %q\n", mode)
+	fmt.Fprintf(&b, "  statusCode = %d\n", status)
+	if body != "" {
+		fmt.Fprintf(&b, "  body = %q\n", body)
+	}
+	if cfg.Response != nil {
+		if cfg.Response.ContentType != "" {
+			fmt.Fprintf(&b, "  contentType = %q\n", cfg.Response.ContentType)
+		}
+		if cfg.Response.RedirectURL != "" {
+			fmt.Fprintf(&b, "  redirectUrl = %q\n", cfg.Response.RedirectURL)
+		}
+		if cfg.Response.ProxyURL != "" {
+			fmt.Fprintf(&b, "  proxyUrl = %q\n", cfg.Response.ProxyURL)
+		}
+		if cfg.Response.GzipBombMB > 0 {
+			fmt.Fprintf(&b, "  gzipBombMB = %d\n", cfg.Response.GzipBombMB)
+		}
+		if cfg.Response.RetryAfterSeconds > 0 {
+			fmt.Fprintf(&b, "  retryAfterSeconds = %d\n", cfg.Response.RetryAfterSeconds)
+		}
+		if cfg.Response.TarpitDelayMs > 0 {
+			fmt.Fprintf(&b, "  tarpitDelayMs = %d\n", cfg.Response.TarpitDelayMs)
+		}
+		if cfg.Response.TarpitMaxDurationSeconds > 0 {
+			fmt.Fprintf(&b, "  tarpitMaxDurationSeconds = %d\n", cfg.Response.TarpitMaxDurationSeconds)
+		}
+		if cfg.Response.StreamSizeMB > 0 {
+			fmt.Fprintf(&b, "  streamSizeMB = %d\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.Captcha != nil {
+			b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response.captcha]\n")
+			if cfg.Response.Captcha.Provider != "" {
+				fmt.Fprintf(&b, "  provider = %q\n", cfg.Response.Captcha.Provider)
+			}
+			if cfg.Response.Captcha.SiteKey != "" {
+				fmt.Fprintf(&b, "  siteKey = %q\n", cfg.Response.Captcha.SiteKey)
+			}
+			if cfg.Response.Captcha.Title != "" {
+				fmt.Fprintf(&b, "  title = %q\n", cfg.Response.Captcha.Title)
+			}
+			if cfg.Response.Captcha.Template != "" {
+				fmt.Fprintf(&b, "  template = %q\n", cfg.Response.Captcha.Template)
+			}
+		}
+		if len(cfg.Response.Headers) > 0 {
+			b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response.headers]\n")
+			var hKeys []string
+			for k := range cfg.Response.Headers {
+				hKeys = append(hKeys, k)
+			}
+			sort.Strings(hKeys)
+			for _, k := range hKeys {
+				fmt.Fprintf(&b, "  %s = %q\n", k, cfg.Response.Headers[k])
+			}
+		}
 	}
 
 	return b.String()
@@ -628,36 +817,80 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	var b strings.Builder
 	b.WriteString("labels:\n")
 	b.WriteString("  - \"traefik.enable=true\"\n")
-	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enabled="); fmt.Fprintf(&b, "%t", cfg.Enabled); b.WriteString("\"\n")
-	b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultPatterns="); fmt.Fprintf(&b, "%t", cfg.EnableDefaultPatterns); b.WriteString("\"\n")
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.enabled=%t\"\n", cfg.Enabled)
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultPatterns=%t\"\n", cfg.EnableDefaultPatterns)
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.enableDefaultAllowPatterns=%t\"\n", cfg.EnableDefaultAllowPatterns)
+	if cfg.Debug {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.debug=true\"\n")
+	}
+	if !cfg.SecurityLog {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.securityLog=false\"\n")
+	}
 
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	if len(allBlocks) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ","))
 	}
 	if len(cfg.AllowPatterns) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ","))
 	}
 	if len(cfg.AllowedIPs) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
 	}
 	if len(cfg.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ","))
 	}
 	if cfg.CheckQuery {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkQuery=true\"\n")
 	}
 	if len(cfg.CheckHeaders) > 0 {
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ",")))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ","))
 	}
 
 	mode, status, body := cfg.ResolveResponse()
-	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode))
-	b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status))
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode)
+	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status)
 	if body != "" {
 		escapedBody := strings.ReplaceAll(body, "\"", "\\\"")
-		b.WriteString(fmt.Sprintf("  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody))
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody)
+	}
+	if cfg.Response != nil {
+		if cfg.Response.ContentType != "" {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.contentType=%s\"\n", cfg.Response.ContentType)
+		}
+		if cfg.Response.RedirectURL != "" {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.redirectUrl=%s\"\n", cfg.Response.RedirectURL)
+		}
+		if cfg.Response.ProxyURL != "" {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", cfg.Response.ProxyURL)
+		}
+		if cfg.Response.GzipBombMB > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.gzipBombMB=%d\"\n", cfg.Response.GzipBombMB)
+		}
+		if cfg.Response.RetryAfterSeconds > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.retryAfterSeconds=%d\"\n", cfg.Response.RetryAfterSeconds)
+		}
+		if cfg.Response.TarpitDelayMs > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.tarpitDelayMs=%d\"\n", cfg.Response.TarpitDelayMs)
+		}
+		if cfg.Response.TarpitMaxDurationSeconds > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.tarpitMaxDurationSeconds=%d\"\n", cfg.Response.TarpitMaxDurationSeconds)
+		}
+		if cfg.Response.StreamSizeMB > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.streamSizeMB=%d\"\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.Captcha != nil {
+			if cfg.Response.Captcha.Provider != "" {
+				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.provider=%s\"\n", cfg.Response.Captcha.Provider)
+			}
+			if cfg.Response.Captcha.SiteKey != "" {
+				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.siteKey=%s\"\n", cfg.Response.Captcha.SiteKey)
+			}
+			if cfg.Response.Captcha.Title != "" {
+				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.title=%s\"\n", cfg.Response.Captcha.Title)
+			}
+		}
 	}
 	return b.String()
 }
@@ -675,37 +908,92 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if !cfg.EnableDefaultAllowPatterns {
 		b.WriteString("    disable_default_allow_patterns\n")
 	}
+	if cfg.Debug {
+		b.WriteString("    debug\n")
+	}
+	if !cfg.SecurityLog {
+		b.WriteString("    security_log false\n")
+	}
 	if cfg.CheckQuery {
 		b.WriteString("    check_query\n")
 	}
 	if len(cfg.CheckHeaders) > 0 {
-		b.WriteString(fmt.Sprintf("    check_headers %s\n", strings.Join(cfg.CheckHeaders, " ")))
+		fmt.Fprintf(&b, "    check_headers %s\n", strings.Join(cfg.CheckHeaders, " "))
 	}
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	for _, p := range allBlocks {
-		b.WriteString(fmt.Sprintf("    block_pattern %q\n", p))
+		fmt.Fprintf(&b, "    block_pattern %q\n", p)
 	}
 	for _, a := range cfg.AllowPatterns {
-		b.WriteString(fmt.Sprintf("    allow_pattern %q\n", a))
+		fmt.Fprintf(&b, "    allow_pattern %q\n", a)
 	}
 	for _, ip := range cfg.AllowedIPs {
-		b.WriteString(fmt.Sprintf("    allowed_ip %s\n", ip))
+		fmt.Fprintf(&b, "    allowed_ip %s\n", ip)
 	}
 	if len(cfg.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("    methods %s\n", strings.Join(cfg.Methods, " ")))
+		fmt.Fprintf(&b, "    methods %s\n", strings.Join(cfg.Methods, " "))
 	}
 	mode, status, body := cfg.ResolveResponse()
-	if mode != "" || status != 403 || body != "" {
+	hasExtended := false
+	if cfg.Response != nil {
+		hasExtended = cfg.Response.ContentType != "" || cfg.Response.RedirectURL != "" || cfg.Response.ProxyURL != "" ||
+			cfg.Response.GzipBombMB > 0 || cfg.Response.RetryAfterSeconds > 0 || cfg.Response.TarpitDelayMs > 0 ||
+			cfg.Response.TarpitMaxDurationSeconds > 0 || cfg.Response.StreamSizeMB > 0 || cfg.Response.Captcha != nil || len(cfg.Response.Headers) > 0
+	}
+	if mode != "" || status != 403 || body != "" || hasExtended {
 		b.WriteString("    response {\n")
 		if mode != "" {
-			b.WriteString(fmt.Sprintf("        mode %s\n", mode))
+			fmt.Fprintf(&b, "        mode %s\n", mode)
 		}
 		if status != 0 {
-			b.WriteString(fmt.Sprintf("        status %d\n", status))
+			fmt.Fprintf(&b, "        status %d\n", status)
 		}
 		if body != "" {
-			b.WriteString(fmt.Sprintf("        body %q\n", body))
+			fmt.Fprintf(&b, "        body %q\n", body)
+		}
+		if cfg.Response != nil {
+			if cfg.Response.ContentType != "" {
+				fmt.Fprintf(&b, "        content_type %s\n", cfg.Response.ContentType)
+			}
+			if cfg.Response.RedirectURL != "" {
+				fmt.Fprintf(&b, "        redirect_url %s\n", cfg.Response.RedirectURL)
+			}
+			if cfg.Response.ProxyURL != "" {
+				fmt.Fprintf(&b, "        proxy_url %s\n", cfg.Response.ProxyURL)
+			}
+			if cfg.Response.GzipBombMB > 0 {
+				fmt.Fprintf(&b, "        gzip_bomb_mb %d\n", cfg.Response.GzipBombMB)
+			}
+			if cfg.Response.RetryAfterSeconds > 0 {
+				fmt.Fprintf(&b, "        retry_after %d\n", cfg.Response.RetryAfterSeconds)
+			}
+			if cfg.Response.TarpitDelayMs > 0 {
+				fmt.Fprintf(&b, "        tarpit_delay_ms %d\n", cfg.Response.TarpitDelayMs)
+			}
+			if cfg.Response.TarpitMaxDurationSeconds > 0 {
+				fmt.Fprintf(&b, "        tarpit_max_duration %d\n", cfg.Response.TarpitMaxDurationSeconds)
+			}
+			if cfg.Response.StreamSizeMB > 0 {
+				fmt.Fprintf(&b, "        stream_size_mb %d\n", cfg.Response.StreamSizeMB)
+			}
+			if cfg.Response.Captcha != nil {
+				if cfg.Response.Captcha.Title != "" {
+					fmt.Fprintf(&b, "        captcha %s %s %q\n", cfg.Response.Captcha.Provider, cfg.Response.Captcha.SiteKey, cfg.Response.Captcha.Title)
+				} else if cfg.Response.Captcha.Provider != "" || cfg.Response.Captcha.SiteKey != "" {
+					fmt.Fprintf(&b, "        captcha %s %s\n", cfg.Response.Captcha.Provider, cfg.Response.Captcha.SiteKey)
+				}
+			}
+			if len(cfg.Response.Headers) > 0 {
+				var hKeys []string
+				for k := range cfg.Response.Headers {
+					hKeys = append(hKeys, k)
+				}
+				sort.Strings(hKeys)
+				for _, k := range hKeys {
+					fmt.Fprintf(&b, "        header %s %s\n", k, cfg.Response.Headers[k])
+				}
+			}
 		}
 		b.WriteString("    }\n")
 	}
@@ -718,35 +1006,42 @@ func (cfg *Config) GenerateNginxLua() string {
 	var b strings.Builder
 	b.WriteString("-- RouteWarden OpenResty configuration table\n")
 	b.WriteString("local routewarden_config = {\n")
-	b.WriteString(fmt.Sprintf("    enabled = %t,\n", cfg.Enabled))
-	b.WriteString(fmt.Sprintf("    enable_default_patterns = %t,\n", cfg.EnableDefaultPatterns))
+	fmt.Fprintf(&b, "    enabled = %t,\n", cfg.Enabled)
+	fmt.Fprintf(&b, "    enable_default_patterns = %t,\n", cfg.EnableDefaultPatterns)
+	fmt.Fprintf(&b, "    enable_default_allow_patterns = %t,\n", cfg.EnableDefaultAllowPatterns)
+	if cfg.Debug {
+		b.WriteString("    debug = true,\n")
+	}
+	if !cfg.SecurityLog {
+		b.WriteString("    security_log = false,\n")
+	}
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
 	if len(allBlocks) > 0 {
 		b.WriteString("    block_patterns = {\n")
 		for _, p := range allBlocks {
-			b.WriteString(fmt.Sprintf("        %q,\n", p))
+			fmt.Fprintf(&b, "        %q,\n", p)
 		}
 		b.WriteString("    },\n")
 	}
 	if len(cfg.AllowPatterns) > 0 {
 		b.WriteString("    allow_patterns = {\n")
 		for _, a := range cfg.AllowPatterns {
-			b.WriteString(fmt.Sprintf("        %q,\n", a))
+			fmt.Fprintf(&b, "        %q,\n", a)
 		}
 		b.WriteString("    },\n")
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allowed_ips = {\n")
 		for _, ip := range cfg.AllowedIPs {
-			b.WriteString(fmt.Sprintf("        %q,\n", ip))
+			fmt.Fprintf(&b, "        %q,\n", ip)
 		}
 		b.WriteString("    },\n")
 	}
 	if len(cfg.Methods) > 0 {
 		b.WriteString("    methods = {\n")
 		for _, m := range cfg.Methods {
-			b.WriteString(fmt.Sprintf("        %q,\n", m))
+			fmt.Fprintf(&b, "        %q,\n", m)
 		}
 		b.WriteString("    },\n")
 	}
@@ -756,23 +1051,76 @@ func (cfg *Config) GenerateNginxLua() string {
 	if len(cfg.CheckHeaders) > 0 {
 		b.WriteString("    check_headers = {\n")
 		for _, h := range cfg.CheckHeaders {
-			b.WriteString(fmt.Sprintf("        %q,\n", h))
+			fmt.Fprintf(&b, "        %q,\n", h)
 		}
 		b.WriteString("    },\n")
 	}
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("    response = {\n")
 	if mode != "" {
-		b.WriteString(fmt.Sprintf("        mode = %q,\n", mode))
+		fmt.Fprintf(&b, "        mode = %q,\n", mode)
 	}
 	if status != 0 {
-		b.WriteString(fmt.Sprintf("        status_code = %d,\n", status))
+		fmt.Fprintf(&b, "        status_code = %d,\n", status)
 	}
 	if body != "" {
-		b.WriteString(fmt.Sprintf("        body = %q,\n", body))
+		fmt.Fprintf(&b, "        body = %q,\n", body)
+	}
+	if cfg.Response != nil {
+		if cfg.Response.ContentType != "" {
+			fmt.Fprintf(&b, "        content_type = %q,\n", cfg.Response.ContentType)
+		}
+		if cfg.Response.RedirectURL != "" {
+			fmt.Fprintf(&b, "        redirect_url = %q,\n", cfg.Response.RedirectURL)
+		}
+		if cfg.Response.ProxyURL != "" {
+			fmt.Fprintf(&b, "        proxy_url = %q,\n", cfg.Response.ProxyURL)
+		}
+		if cfg.Response.GzipBombMB > 0 {
+			fmt.Fprintf(&b, "        gzip_bomb_mb = %d,\n", cfg.Response.GzipBombMB)
+		}
+		if cfg.Response.RetryAfterSeconds > 0 {
+			fmt.Fprintf(&b, "        retry_after_seconds = %d,\n", cfg.Response.RetryAfterSeconds)
+		}
+		if cfg.Response.TarpitDelayMs > 0 {
+			fmt.Fprintf(&b, "        tarpit_delay_ms = %d,\n", cfg.Response.TarpitDelayMs)
+		}
+		if cfg.Response.TarpitMaxDurationSeconds > 0 {
+			fmt.Fprintf(&b, "        tarpit_max_duration_seconds = %d,\n", cfg.Response.TarpitMaxDurationSeconds)
+		}
+		if cfg.Response.StreamSizeMB > 0 {
+			fmt.Fprintf(&b, "        stream_size_mb = %d,\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.Captcha != nil {
+			b.WriteString("        captcha = {\n")
+			if cfg.Response.Captcha.Provider != "" {
+				fmt.Fprintf(&b, "            provider = %q,\n", cfg.Response.Captcha.Provider)
+			}
+			if cfg.Response.Captcha.SiteKey != "" {
+				fmt.Fprintf(&b, "            site_key = %q,\n", cfg.Response.Captcha.SiteKey)
+			}
+			if cfg.Response.Captcha.Title != "" {
+				fmt.Fprintf(&b, "            title = %q,\n", cfg.Response.Captcha.Title)
+			}
+			if cfg.Response.Captcha.Template != "" {
+				fmt.Fprintf(&b, "            template = %q,\n", cfg.Response.Captcha.Template)
+			}
+			b.WriteString("        },\n")
+		}
+		if len(cfg.Response.Headers) > 0 {
+			b.WriteString("        headers = {\n")
+			var hKeys []string
+			for k := range cfg.Response.Headers {
+				hKeys = append(hKeys, k)
+			}
+			sort.Strings(hKeys)
+			for _, k := range hKeys {
+				fmt.Fprintf(&b, "            [%q] = %q,\n", k, cfg.Response.Headers[k])
+			}
+			b.WriteString("        },\n")
+		}
 	}
 	b.WriteString("    },\n")
 	b.WriteString("}\n")
 	return b.String()
 }
-

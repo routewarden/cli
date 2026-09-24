@@ -1,0 +1,43 @@
+# Standalone Traefik Dynamic YAML Sample
+# Test with:
+#   rwarden sandbox --config dynamic.yml --test
+#   rwarden sandbox --config dynamic.yml --print-config --dry-run
+
+http:
+  routers:
+    sample-router:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - web
+      middlewares:
+        - api-shield
+      service: ping@internal
+
+  middlewares:
+    api-shield:
+      plugin:
+        routewarden:
+          enabled: true
+          enableDefaultPatterns: true
+          enableDefaultAllowPatterns: true
+          pathPatterns:
+            - '(?i)^/admin/secret.*$'
+            - '(?i)^/api/v1/internal.*$'
+          allowPatterns:
+            - '(?i)^/api/v1/internal/healthz$'
+          allowedIps:
+            - '192.168.100.50'
+            - '10.99.0.0/16'
+          methods:
+            - 'GET'
+            - 'POST'
+          checkQuery: true
+          checkHeaders:
+            - 'X-Forwarded-Uri'
+            - 'X-Rewrite-URL'
+          response:
+            mode: 'json'
+            statusCode: 403
+            body: '{"error":"Forbidden by RouteWarden API Shield","service":"traefik"}'
+            headers:
+              X-Security-Warden: "Traefik-Active"
