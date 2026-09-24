@@ -111,6 +111,7 @@ func generateCaddySandboxFile(cfg *Config) string {
 	var b strings.Builder
 	b.WriteString("{\n")
 	b.WriteString("    admin off\n")
+	b.WriteString("    auto_https off\n")
 	b.WriteString("    order routewarden first\n")
 	b.WriteString("}\n\n")
 	b.WriteString(":8080 {\n")
