@@ -402,4 +402,3 @@ func TestEngine_GenerateSandboxConfig(t *testing.T) {
 		t.Fatalf("expected error for unsupported target")
 	}
 }
-

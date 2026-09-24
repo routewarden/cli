@@ -1,0 +1,29 @@
+{
+    admin off
+    order routewarden first
+}
+
+# Caddyfile Sample with RouteWarden Plugin
+# Test with:
+#   rwarden sandbox --config Caddyfile --test
+#   rwarden sandbox --config Caddyfile --print-config --dry-run
+
+:8080 {
+    routewarden {
+        debug
+        check_query
+        check_headers X-Forwarded-Uri X-Rewrite-URL
+        path_patterns (?i)^/admin/secret.*$ (?i)^/private/.*$
+        allow_patterns (?i)^/private/healthz$
+        allowed_ips 192.168.100.50 10.99.0.0/16
+        methods GET POST
+        response {
+            mode json
+            status 403
+            header X-Security-Warden Caddy-Active
+            body "{\"error\":\"Forbidden by RouteWarden Caddyfile\",\"gateway\":\"caddy\"}"
+        }
+    }
+
+    respond "OK: Upstream Reached (Caddyfile Sandbox)" 200
+}
