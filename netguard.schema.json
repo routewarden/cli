@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RouteWardenGuardConfig",
+  "description": "Schema for RouteWarden Guard TCP proxy configuration file (netguard.json)",
+  "type": "object",
+  "required": ["services"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "listen": { "type": "string", "default": "127.0.0.1:9091" },
+        "token": { "type": "string" }
+      }
+    },
+    "crowdsec": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "lapiUrl": { "type": "string", "format": "uri" },
+        "apiKey": { "type": "string" },
+        "updateIntervalSeconds": { "type": "integer", "default": 15 }
+      }
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "allowedIPs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "blockedIPs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "blockCountries": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 2, "maxLength": 2 }
+        },
+        "maxConnectionsPerIP": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "banAfterFailures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "banDurationSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3600
+        },
+        "tarpitMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "logFile": {
+          "type": "string"
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "listen", "upstream"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "listen": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["ssh", "smtp", "pop3", "imap", "tcp"],
+            "default": "tcp"
+          },
+          "allowedIPs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "blockedIPs": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "blockCountries": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 2, "maxLength": 2 }
+          },
+          "maxAuthFailures": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "banAfterFailures": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "banDurationSeconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rateLimit": {
+            "type": "object",
+            "properties": {
+              "connectionsPerMinute": { "type": "integer", "minimum": 0 },
+              "authAttemptsPerMinute": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": ["drop", "reject", "tarpit", "silent"],
+                "default": "reject"
+              },
+              "tarpitMs": { "type": "integer", "minimum": 0 },
+              "rejectMessage": { "type": "string" }
+            }
+          },
+          "blockedSenderDomains": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "requireSTARTTLS": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}

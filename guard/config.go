@@ -10,10 +10,27 @@ import (
 
 // Config is the top-level structure for netguard.json.
 type Config struct {
-	Enabled  bool            `json:"enabled"`
-	Dashboard DashboardCfg  `json:"dashboard"`
-	Global   GlobalPolicy   `json:"global"`
-	Services []ServiceConfig `json:"services"`
+	Enabled   bool            `json:"enabled"`
+	Dashboard DashboardCfg    `json:"dashboard"`
+	API       APIConfig       `json:"api"`
+	CrowdSec  CrowdSecConfig  `json:"crowdsec"`
+	Global    GlobalPolicy    `json:"global"`
+	Services  []ServiceConfig `json:"services"`
+}
+
+// APIConfig controls the guard management and metrics HTTP API.
+type APIConfig struct {
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"` // e.g. "127.0.0.1:9091"
+	Token   string `json:"token"`  // optional Bearer / X-Guard-Token
+}
+
+// CrowdSecConfig controls the CrowdSec LAPI bouncer integration.
+type CrowdSecConfig struct {
+	Enabled               bool   `json:"enabled"`
+	LAPIURL               string `json:"lapiUrl"`               // e.g. "http://127.0.0.1:8080"
+	APIKey                string `json:"apiKey"`                // Bouncer API key
+	UpdateIntervalSeconds int    `json:"updateIntervalSeconds"` // default 15s
 }
 
 // DashboardCfg controls the embedded dashboard integration.
@@ -113,6 +130,18 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("service %q: invalid IP %q", svc.Name, cidr)
 			}
 		}
+	}
+
+	if c.CrowdSec.Enabled {
+		if c.CrowdSec.LAPIURL == "" {
+			return fmt.Errorf("crowdsec: lapiUrl is required when enabled")
+		}
+		if c.CrowdSec.APIKey == "" {
+			return fmt.Errorf("crowdsec: apiKey is required when enabled")
+		}
+	}
+	if c.API.Enabled && c.API.Listen == "" {
+		c.API.Listen = "127.0.0.1:9091"
 	}
 	return nil
 }

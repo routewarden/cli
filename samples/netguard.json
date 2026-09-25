@@ -1,10 +1,26 @@
 {
   "$schema": "https://routewarden.github.io/cli/netguard.schema.json",
   "enabled": true,
+  "api": {
+    "enabled": true,
+    "listen": "127.0.0.1:9091",
+    "token": ""
+  },
+  "crowdsec": {
+    "enabled": false,
+    "lapiUrl": "http://127.0.0.1:8080",
+    "apiKey": "your-crowdsec-bouncer-api-key",
+    "updateIntervalSeconds": 15
+  },
   "global": {
+    "allowedIPs": [],
+    "blockedIPs": [],
+    "blockCountries": ["RU", "CN"],
+    "maxConnectionsPerIP": 50,
     "banAfterFailures": 5,
     "banDurationSeconds": 3600,
-    "logFile": "/var/log/netguard/events.log"
+    "tarpitMs": 3000,
+    "logFile": "/var/log/rwarden/guard.jsonl"
   },
   "services": [
     {
@@ -28,20 +44,50 @@
       "listen": ":2587",
       "upstream": "127.0.0.1:25",
       "protocol": "smtp",
+      "blockedSenderDomains": ["*.ru", "*.biz", "spammer.net"],
+      "requireSTARTTLS": false,
       "rateLimit": {
         "connectionsPerMinute": 30,
         "authAttemptsPerMinute": 5
       },
       "response": {
         "mode": "reject",
-        "rejectMessage": "550 5.7.1 Policy violation"
+        "rejectMessage": "550 5.7.1 Connection rejected by RouteWarden Guard"
       }
     },
     {
-      "name": "raw-tcp",
+      "name": "pop3",
       "enabled": true,
-      "listen": ":19999",
-      "upstream": "127.0.0.1:9999",
+      "listen": ":1110",
+      "upstream": "127.0.0.1:110",
+      "protocol": "pop3",
+      "banAfterFailures": 5,
+      "rateLimit": {
+        "connectionsPerMinute": 20
+      },
+      "response": {
+        "mode": "reject"
+      }
+    },
+    {
+      "name": "imap",
+      "enabled": true,
+      "listen": ":1143",
+      "upstream": "127.0.0.1:143",
+      "protocol": "imap",
+      "banAfterFailures": 5,
+      "rateLimit": {
+        "connectionsPerMinute": 20
+      },
+      "response": {
+        "mode": "reject"
+      }
+    },
+    {
+      "name": "database-tunnel",
+      "enabled": true,
+      "listen": ":15432",
+      "upstream": "127.0.0.1:5432",
       "protocol": "tcp",
       "allowedIPs": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"],
       "response": {

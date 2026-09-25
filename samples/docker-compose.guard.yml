@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # RouteWarden Guard — Protocol-aware TCP security proxy
+  guard:
+    image: routewarden/rwarden:latest
+    container_name: routewarden-guard
+    command: ["guard", "--config", "/etc/routewarden/netguard.json"]
+    restart: unless-stopped
+    ports:
+      - "2222:2222"   # SSH protected ingress
+      - "2525:2525"   # SMTP protected ingress
+      - "9091:9091"   # Guard API & health metrics
+    volumes:
+      - ./netguard.json:/etc/routewarden/netguard.json:ro
+      - guard-logs:/var/log/rwarden
+    environment:
+      - CROWDSEC_URL=http://crowdsec:8080
+      - CROWDSEC_KEY=guard-bouncer-secret-key
+    depends_on:
+      - crowdsec
+
+  # CrowdSec Security Engine
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      - BOUNCER_KEY_GUARD=guard-bouncer-secret-key
+      - COLLECTIONS=crowdsecurity/ssh-bf crowdsecurity/whitelist-good-actors
+    volumes:
+      - ./crowdsec/parsers:/etc/crowdsec/parsers
+      - ./crowdsec/scenarios:/etc/crowdsec/scenarios
+      - guard-logs:/var/log/rwarden:ro
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+
+volumes:
+  guard-logs:
+  crowdsec-db:
+  crowdsec-config:

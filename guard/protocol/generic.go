@@ -50,3 +50,21 @@ func Proxy(client, upstream net.Conn) ProxyResult {
 func DialUpstream(addr string) (net.Conn, error) {
 	return net.DialTimeout("tcp", addr, 10e9) // 10s
 }
+
+// BufferedConn wraps a reader and a net.Conn so that peeked or buffered
+// bytes can be seamlessly read before reading from the underlying conn.
+type BufferedConn struct {
+	io.Reader
+	net.Conn
+}
+
+func (b *BufferedConn) Read(p []byte) (int, error) {
+	return b.Reader.Read(p)
+}
+
+func NewBufferedConn(r io.Reader, c net.Conn) *BufferedConn {
+	return &BufferedConn{Reader: r, Conn: c}
+}
+
+type bufferedConn = BufferedConn
+

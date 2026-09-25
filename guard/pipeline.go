@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/routewarden/cli/dashboard"
+	"github.com/routewarden/cli/guard/crowdsec"
 	"github.com/routewarden/cli/guard/protocol"
 )
 
@@ -20,11 +21,32 @@ type Pipeline struct {
 	failures *FailureTracker
 	limiter  *RateLimiter
 	bus      *EventBus
+	stats    *StatsRegistry
+	logger   *LogWriter
+	crowdsec *crowdsec.Client
 }
 
 // NewPipeline creates a Pipeline wired to the shared daemon state.
-func NewPipeline(cfg *Config, bl *BanList, ft *FailureTracker, rl *RateLimiter, bus *EventBus) *Pipeline {
-	return &Pipeline{cfg: cfg, banlist: bl, failures: ft, limiter: rl, bus: bus}
+func NewPipeline(
+	cfg *Config,
+	bl *BanList,
+	ft *FailureTracker,
+	rl *RateLimiter,
+	bus *EventBus,
+	stats *StatsRegistry,
+	logger *LogWriter,
+	cs *crowdsec.Client,
+) *Pipeline {
+	return &Pipeline{
+		cfg:      cfg,
+		banlist:  bl,
+		failures: ft,
+		limiter:  rl,
+		bus:      bus,
+		stats:    stats,
+		logger:   logger,
+		crowdsec: cs,
+	}
 }
 
 // Handle runs the full 8-stage pipeline for an accepted connection.
@@ -33,6 +55,17 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *ServiceConfig
 
 	start := time.Now()
 	clientIP := parseClientIP(conn.RemoteAddr().String())
+
+	// Metrics: update total and active connections
+	var st *ServiceStats
+	if p.stats != nil {
+		st = p.stats.Get(svc.Name)
+	}
+	if st != nil {
+		st.TotalConns.Add(1)
+		st.ActiveConns.Add(1)
+		defer st.ActiveConns.Add(-1)
+	}
 
 	// Stage 1 — resolve GeoIP (non-blocking, best-effort)
 	geo := dashboard.LookupIP(clientIP)
@@ -58,14 +91,31 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *ServiceConfig
 		ev.Reason = reason
 		ev.ResponseMode = mode
 		ev.DurationMs = time.Since(start).Milliseconds()
+
+		if action == "BLOCK" && st != nil {
+			st.BlockedConns.Add(1)
+		}
+
 		p.bus.Publish(ev)
+		if p.logger != nil {
+			_ = p.logger.WriteEvent(ev)
+		}
 	}
 
-	// Stage 2 — banlist check
+	// Stage 2 — local banlist check
 	if banned, reason := p.banlist.IsBanned(clientIP); banned {
 		emit("BLOCK", "banned: "+reason, "drop")
 		applyResponse(conn, svc, "drop", "")
 		return
+	}
+
+	// Stage 2.5 — CrowdSec bouncer check
+	if p.crowdsec != nil {
+		if banned, csReason := p.crowdsec.IsBanned(clientIP); banned {
+			emit("BLOCK", csReason, "drop")
+			applyResponse(conn, svc, "drop", "")
+			return
+		}
 	}
 
 	// Stage 3 — CIDR allowlist (per-service then global)
@@ -104,10 +154,15 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *ServiceConfig
 	}
 
 	// Stage 7 — protocol-level inspection + proxy
-	result, blocked, blockReason := p.proxy(ctx, conn, svc, clientIP, geo)
+	result, blocked, blockReason := p.proxy(ctx, conn, svc, clientIP, geo, st)
 	if blocked {
 		emit("BLOCK", blockReason, svc.Response.Mode)
 		return
+	}
+
+	if st != nil {
+		st.BytesIn.Add(result.BytesIn)
+		st.BytesOut.Add(result.BytesOut)
 	}
 
 	ev.BytesIn = result.BytesIn
@@ -123,6 +178,7 @@ func (p *Pipeline) proxy(
 	svc *ServiceConfig,
 	clientIP string,
 	geo dashboard.GeoResult,
+	st *ServiceStats,
 ) (protocol.ProxyResult, bool, string) {
 
 	upstream, err := protocol.DialUpstream(svc.Upstream)
@@ -133,7 +189,13 @@ func (p *Pipeline) proxy(
 
 	switch strings.ToLower(svc.Protocol) {
 	case "ssh":
-		return p.proxySSH(ctx, client, upstream, svc, clientIP)
+		return p.proxySSH(ctx, client, upstream, svc, clientIP, st)
+	case "smtp":
+		return p.proxySMTP(ctx, client, upstream, svc, clientIP, st)
+	case "pop3":
+		return p.proxyPOP3(ctx, client, upstream, svc, clientIP, st)
+	case "imap":
+		return p.proxyIMAP(ctx, client, upstream, svc, clientIP, st)
 	default:
 		// Generic TCP: pure bidirectional proxy
 		res := protocol.Proxy(client, upstream)
@@ -147,6 +209,7 @@ func (p *Pipeline) proxySSH(
 	client, upstream net.Conn,
 	svc *ServiceConfig,
 	clientIP string,
+	st *ServiceStats,
 ) (protocol.ProxyResult, bool, string) {
 
 	insp := protocol.SSHInspector{}
@@ -161,8 +224,6 @@ func (p *Pipeline) proxySSH(
 		return protocol.ProxyResult{}, true, "SSH-1.x rejected"
 	}
 
-	// Re-inject the peeked banner bytes back through the bufio.Reader
-	// by creating a multi-reader that drains the buffer then reads raw conn.
 	clientWithBuf := &bufferedConn{Reader: io.MultiReader(br, client), Conn: client}
 
 	banThreshold := svc.EffectiveBanAfterFailures(&p.cfg.Global)
@@ -175,6 +236,9 @@ func (p *Pipeline) proxySSH(
 	authFails := 0
 	monitor := protocol.NewSSHAuthMonitor(func() {
 		authFails++
+		if st != nil {
+			st.AuthFailures.Add(1)
+		}
 		p.failures.Record(clientIP, svc.Name, "ssh auth failure",
 			banThreshold, banDur)
 		if maxAuthFail > 0 && authFails >= maxAuthFail {
@@ -185,6 +249,83 @@ func (p *Pipeline) proxySSH(
 	wrappedUpstream := monitor.WrapUpstream(upstream)
 	res := protocol.Proxy(clientWithBuf, wrappedUpstream)
 	return res, false, ""
+}
+
+// proxySMTP handles SMTP command inspection and domain policy.
+func (p *Pipeline) proxySMTP(
+	ctx context.Context,
+	client, upstream net.Conn,
+	svc *ServiceConfig,
+	clientIP string,
+	st *ServiceStats,
+) (protocol.ProxyResult, bool, string) {
+
+	banThreshold := svc.EffectiveBanAfterFailures(&p.cfg.Global)
+	banDur := time.Duration(svc.EffectiveBanDurationSeconds(&p.cfg.Global)) * time.Second
+
+	opts := protocol.SMTPInspectorOptions{
+		BlockedSenderDomains: svc.BlockedSenderDomains,
+		RequireSTARTTLS:      svc.RequireSTARTTLS,
+		OnAuthFailure: func() {
+			if st != nil {
+				st.AuthFailures.Add(1)
+			}
+			p.failures.Record(clientIP, svc.Name, "smtp auth failure", banThreshold, banDur)
+		},
+	}
+
+	smtpProxy := protocol.NewSMTPProxy(client, upstream, opts)
+	return smtpProxy.Run()
+}
+
+// proxyPOP3 handles POP3 command inspection and auth failure tracking.
+func (p *Pipeline) proxyPOP3(
+	ctx context.Context,
+	client, upstream net.Conn,
+	svc *ServiceConfig,
+	clientIP string,
+	st *ServiceStats,
+) (protocol.ProxyResult, bool, string) {
+
+	banThreshold := svc.EffectiveBanAfterFailures(&p.cfg.Global)
+	banDur := time.Duration(svc.EffectiveBanDurationSeconds(&p.cfg.Global)) * time.Second
+
+	opts := protocol.POP3InspectorOptions{
+		OnAuthFailure: func() {
+			if st != nil {
+				st.AuthFailures.Add(1)
+			}
+			p.failures.Record(clientIP, svc.Name, "pop3 auth failure", banThreshold, banDur)
+		},
+	}
+
+	pop3Proxy := protocol.NewPOP3Proxy(client, upstream, opts)
+	return pop3Proxy.Run()
+}
+
+// proxyIMAP handles IMAP command inspection and auth failure tracking.
+func (p *Pipeline) proxyIMAP(
+	ctx context.Context,
+	client, upstream net.Conn,
+	svc *ServiceConfig,
+	clientIP string,
+	st *ServiceStats,
+) (protocol.ProxyResult, bool, string) {
+
+	banThreshold := svc.EffectiveBanAfterFailures(&p.cfg.Global)
+	banDur := time.Duration(svc.EffectiveBanDurationSeconds(&p.cfg.Global)) * time.Second
+
+	opts := protocol.IMAPInspectorOptions{
+		OnAuthFailure: func() {
+			if st != nil {
+				st.AuthFailures.Add(1)
+			}
+			p.failures.Record(clientIP, svc.Name, "imap auth failure", banThreshold, banDur)
+		},
+	}
+
+	imapProxy := protocol.NewIMAPProxy(client, upstream, opts)
+	return imapProxy.Run()
 }
 
 // applyResponse closes the connection with the appropriate protocol-level
