@@ -1,0 +1,13 @@
+# Detect SMTP authentication attacks and sender domain abuse
+type: leaky
+name: routewarden/guard-smtp-bf
+description: "Detect SMTP brute-force or spam sender domain violations on RouteWarden Guard"
+filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.service == 'smtp' && (evt.Meta.reason contains 'auth failure' || evt.Meta.reason contains 'blocked sender domain' || evt.Meta.action == 'BLOCK')"
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: 2m
+blackhole: 15m
+labels:
+  service: smtp
+  confidence: 3
+  remediation: true

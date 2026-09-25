@@ -12,15 +12,24 @@ import (
 	"time"
 )
 
-// DecisionItem represents a single ban rule from CrowdSec LAPI.
+// DecisionItem represents a single decision rule from CrowdSec LAPI.
 type DecisionItem struct {
 	ID       int64  `json:"id"`
 	Origin   string `json:"origin"`
 	Scenario string `json:"scenario"`
 	Scope    string `json:"scope"` // "Ip" or "Range"
-	Type     string `json:"type"`  // "ban"
+	Type     string `json:"type"`  // "ban", "throttle", "bypass"
 	Value    string `json:"value"` // IP or CIDR
 	Duration string `json:"duration"`
+}
+
+// DecisionResult represents an active decision matching a queried IP.
+type DecisionResult struct {
+	Action   string `json:"action"`   // "ban", "throttle", "bypass"
+	Scenario string `json:"scenario"` // rule name
+	Origin   string `json:"origin"`   // "crowdsec", "CAPI", "cscli"
+	Scope    string `json:"scope"`    // "Ip" or "Range"
+	Value    string `json:"value"`    // IP or CIDR
 }
 
 // StreamResponse represents the response from /v1/decisions/stream.
@@ -31,7 +40,7 @@ type StreamResponse struct {
 
 type rangeItem struct {
 	net      *net.IPNet
-	scenario string
+	decision DecisionResult
 }
 
 // Client is a CrowdSec LAPI bouncer client that streams and caches decisions in memory.
@@ -42,11 +51,13 @@ type Client struct {
 	updateInterval time.Duration
 	httpClient     *http.Client
 
-	ipBans    map[string]string    // ip -> scenario
-	rangeBans map[string]rangeItem // cidr -> item
+	ipDecisions    map[string]DecisionResult // ip -> decision
+	rangeDecisions map[string]rangeItem      // cidr -> item
 
-	started bool
-	cancel  context.CancelFunc
+	lastSync time.Time
+	lastErr  error
+	started  bool
+	cancel   context.CancelFunc
 }
 
 // NewClient creates a new CrowdSec bouncer client.
@@ -54,7 +65,6 @@ func NewClient(lapiURL, apiKey string, intervalSeconds int) *Client {
 	if intervalSeconds <= 0 {
 		intervalSeconds = 15
 	}
-	// Normalize URL: remove trailing slash
 	lapiURL = strings.TrimRight(lapiURL, "/")
 
 	return &Client{
@@ -64,8 +74,8 @@ func NewClient(lapiURL, apiKey string, intervalSeconds int) *Client {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		ipBans:    make(map[string]string),
-		rangeBans: make(map[string]rangeItem),
+		ipDecisions:    make(map[string]DecisionResult),
+		rangeDecisions: make(map[string]rangeItem),
 	}
 }
 
@@ -94,26 +104,35 @@ func (c *Client) Stop() {
 	c.started = false
 }
 
-// IsBanned checks whether an IP is in the CrowdSec local cache.
-func (c *Client) IsBanned(ipStr string) (bool, string) {
+// Check queries whether an IP matches any cached CrowdSec decision.
+func (c *Client) Check(ipStr string) *DecisionResult {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// 1. Direct IP check
-	if scenario, found := c.ipBans[ipStr]; found {
-		return true, "crowdsec: " + scenario
+	// 1. Direct IP match
+	if dec, found := c.ipDecisions[ipStr]; found {
+		return &dec
 	}
 
-	// 2. Range / CIDR check
+	// 2. CIDR Range match
 	parsed := net.ParseIP(ipStr)
 	if parsed != nil {
-		for _, r := range c.rangeBans {
+		for _, r := range c.rangeDecisions {
 			if r.net.Contains(parsed) {
-				return true, "crowdsec: " + r.scenario
+				return &r.decision
 			}
 		}
 	}
 
+	return nil
+}
+
+// IsBanned checks whether an IP is banned in the CrowdSec local cache.
+func (c *Client) IsBanned(ipStr string) (bool, string) {
+	dec := c.Check(ipStr)
+	if dec != nil && (dec.Action == "ban" || dec.Action == "") {
+		return true, "crowdsec: " + dec.Scenario
+	}
 	return false, ""
 }
 
@@ -121,7 +140,78 @@ func (c *Client) IsBanned(ipStr string) (bool, string) {
 func (c *Client) DecisionCount() (int, int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.ipBans), len(c.rangeBans)
+	return len(c.ipDecisions), len(c.rangeDecisions)
+}
+
+// Status returns current sync status and last error if any.
+func (c *Client) Status() (bool, time.Time, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.started, c.lastSync, c.lastErr
+}
+
+// Ping verifies connectivity to the CrowdSec LAPI and checks API key validity.
+func (c *Client) Ping() error {
+	url := fmt.Sprintf("%s/v1/decisions?ip=127.0.0.1", c.lapiURL)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Api-Key", c.apiKey)
+	req.Header.Set("User-Agent", "RouteWarden-Guard-Bouncer/v1.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("authentication failed: invalid API key (HTTP %d)", resp.StatusCode)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected HTTP response from LAPI: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// QueryLive queries the CrowdSec LAPI directly for real-time decisions on an IP.
+func (c *Client) QueryLive(ipStr string) (*DecisionResult, error) {
+	url := fmt.Sprintf("%s/v1/decisions?ip=%s", c.lapiURL, ipStr)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Api-Key", c.apiKey)
+	req.Header.Set("User-Agent", "RouteWarden-Guard-Bouncer/v1.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("live query failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("LAPI returned HTTP %d", resp.StatusCode)
+	}
+
+	var decisions []DecisionItem
+	if err := json.NewDecoder(resp.Body).Decode(&decisions); err != nil {
+		return nil, fmt.Errorf("decoding LAPI response: %w", err)
+	}
+
+	if len(decisions) == 0 {
+		return nil, nil
+	}
+
+	first := decisions[0]
+	return &DecisionResult{
+		Action:   first.Type,
+		Scenario: first.Scenario,
+		Origin:   first.Origin,
+		Scope:    first.Scope,
+		Value:    first.Value,
+	}, nil
 }
 
 func (c *Client) runSyncLoop(ctx context.Context) {
@@ -154,6 +244,7 @@ func (c *Client) pollStream(startup bool) error {
 	url := fmt.Sprintf("%s/v1/decisions/stream?startup=%t", c.lapiURL, startup)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		c.recordErr(err)
 		return err
 	}
 	req.Header.Set("X-Api-Key", c.apiKey)
@@ -161,53 +252,77 @@ func (c *Client) pollStream(startup bool) error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request: %w", err)
+		err = fmt.Errorf("http request: %w", err)
+		c.recordErr(err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status %d from LAPI", resp.StatusCode)
+		err = fmt.Errorf("unexpected status %d from LAPI", resp.StatusCode)
+		c.recordErr(err)
+		return err
 	}
 
 	var data StreamResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return fmt.Errorf("decoding json: %w", err)
+		err = fmt.Errorf("decoding json: %w", err)
+		c.recordErr(err)
+		return err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.lastSync = time.Now()
+	c.lastErr = nil
+
 	if startup {
-		// Replace all
-		c.ipBans = make(map[string]string)
-		c.rangeBans = make(map[string]rangeItem)
+		c.ipDecisions = make(map[string]DecisionResult)
+		c.rangeDecisions = make(map[string]rangeItem)
 	}
 
 	// Process deleted decisions
 	for _, del := range data.Deleted {
 		if strings.EqualFold(del.Scope, "Ip") {
-			delete(c.ipBans, del.Value)
+			delete(c.ipDecisions, del.Value)
 		} else if strings.EqualFold(del.Scope, "Range") {
-			delete(c.rangeBans, del.Value)
+			delete(c.rangeDecisions, del.Value)
 		}
 	}
 
 	// Process new decisions
 	for _, item := range data.New {
-		if strings.EqualFold(item.Type, "ban") {
-			if strings.EqualFold(item.Scope, "Ip") {
-				c.ipBans[item.Value] = item.Scenario
-			} else if strings.EqualFold(item.Scope, "Range") {
-				_, ipNet, err := net.ParseCIDR(item.Value)
-				if err == nil {
-					c.rangeBans[item.Value] = rangeItem{
-						net:      ipNet,
-						scenario: item.Scenario,
-					}
+		act := strings.ToLower(item.Type)
+		if act == "" {
+			act = "ban"
+		}
+		res := DecisionResult{
+			Action:   act,
+			Scenario: item.Scenario,
+			Origin:   item.Origin,
+			Scope:    item.Scope,
+			Value:    item.Value,
+		}
+
+		if strings.EqualFold(item.Scope, "Ip") {
+			c.ipDecisions[item.Value] = res
+		} else if strings.EqualFold(item.Scope, "Range") {
+			_, ipNet, err := net.ParseCIDR(item.Value)
+			if err == nil {
+				c.rangeDecisions[item.Value] = rangeItem{
+					net:      ipNet,
+					decision: res,
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func (c *Client) recordErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastErr = err
 }

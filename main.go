@@ -250,10 +250,26 @@ Examples:
 	if *csURL != "" {
 		cfg.CrowdSec.Enabled = true
 		cfg.CrowdSec.LAPIURL = *csURL
+	} else if envURL := os.Getenv("CROWDSEC_URL"); envURL != "" {
+		cfg.CrowdSec.Enabled = true
+		cfg.CrowdSec.LAPIURL = envURL
+	} else if envURL := os.Getenv("CROWDSEC_LAPI_URL"); envURL != "" {
+		cfg.CrowdSec.Enabled = true
+		cfg.CrowdSec.LAPIURL = envURL
 	}
+
 	if *csKey != "" {
 		cfg.CrowdSec.Enabled = true
 		cfg.CrowdSec.APIKey = *csKey
+	} else if envKey := os.Getenv("CROWDSEC_KEY"); envKey != "" {
+		cfg.CrowdSec.Enabled = true
+		cfg.CrowdSec.APIKey = envKey
+	} else if envKey := os.Getenv("CROWDSEC_API_KEY"); envKey != "" {
+		cfg.CrowdSec.Enabled = true
+		cfg.CrowdSec.APIKey = envKey
+	} else if envKey := os.Getenv("BOUNCER_KEY_GUARD"); envKey != "" {
+		cfg.CrowdSec.Enabled = true
+		cfg.CrowdSec.APIKey = envKey
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -9,13 +9,25 @@ func TestCrowdSecDecisionCache(t *testing.T) {
 	client := NewClient("http://127.0.0.1:8080", "testkey", 10)
 
 	// Inject test IP decision
-	client.ipBans["198.51.100.42"] = "crowdsecurity/ssh-bf"
+	client.ipDecisions["198.51.100.42"] = DecisionResult{
+		Action:   "ban",
+		Scenario: "crowdsecurity/ssh-bf",
+		Origin:   "crowdsec",
+		Scope:    "Ip",
+		Value:    "198.51.100.42",
+	}
 
 	// Inject test CIDR decision
 	_, ipNet, _ := net.ParseCIDR("203.0.113.0/24")
-	client.rangeBans["203.0.113.0/24"] = rangeItem{
-		net:      ipNet,
-		scenario: "crowdsecurity/smtp-spam",
+	client.rangeDecisions["203.0.113.0/24"] = rangeItem{
+		net: ipNet,
+		decision: DecisionResult{
+			Action:   "ban",
+			Scenario: "crowdsecurity/smtp-spam",
+			Origin:   "CAPI",
+			Scope:    "Range",
+			Value:    "203.0.113.0/24",
+		},
 	}
 
 	// Test direct IP ban
@@ -24,10 +36,18 @@ func TestCrowdSecDecisionCache(t *testing.T) {
 		t.Fatalf("expected 198.51.100.42 banned, got %v (%s)", banned, reason)
 	}
 
+	dec := client.Check("198.51.100.42")
+	if dec == nil || dec.Action != "ban" || dec.Scenario != "crowdsecurity/ssh-bf" {
+		t.Fatalf("expected DecisionResult for 198.51.100.42, got %+v", dec)
+	}
+
 	// Test unbanned IP
 	banned, _ = client.IsBanned("1.1.1.1")
 	if banned {
 		t.Fatalf("expected 1.1.1.1 not banned")
+	}
+	if client.Check("1.1.1.1") != nil {
+		t.Fatalf("expected nil decision for 1.1.1.1")
 	}
 
 	// Test range match

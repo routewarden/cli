@@ -109,12 +109,34 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *ServiceConfig
 		return
 	}
 
-	// Stage 2.5 — CrowdSec bouncer check
+	// Stage 2.5 — CrowdSec bouncer decision check
 	if p.crowdsec != nil {
-		if banned, csReason := p.crowdsec.IsBanned(clientIP); banned {
-			emit("BLOCK", csReason, "drop")
-			applyResponse(conn, svc, "drop", "")
-			return
+		if dec := p.crowdsec.Check(clientIP); dec != nil {
+			switch strings.ToLower(dec.Action) {
+			case "bypass":
+				// CrowdSec whitelisted — skip remaining security checks and jump directly to proxy
+				ev.Action = "BYPASS"
+				ev.Reason = "crowdsec: " + dec.Scenario
+				p.bus.Publish(ev)
+				if p.logger != nil {
+					_ = p.logger.WriteEvent(ev)
+				}
+				result, _, _ := p.proxy(ctx, conn, svc, clientIP, geo, st)
+				if st != nil {
+					st.BytesIn.Add(result.BytesIn)
+					st.BytesOut.Add(result.BytesOut)
+				}
+				return
+			case "throttle":
+				// CrowdSec throttle — force tarpit response
+				emit("TARPIT", "crowdsec: "+dec.Scenario, "tarpit")
+				applyResponse(conn, svc, "tarpit", "")
+				return
+			default: // "ban" or standard remediation
+				emit("BLOCK", "crowdsec: "+dec.Scenario, "drop")
+				applyResponse(conn, svc, "drop", "")
+				return
+			}
 		}
 	}
 
