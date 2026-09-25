@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -262,11 +261,3 @@ func hashPath(path string) string {
 	return fmt.Sprintf("f%08x", h)
 }
 
-// fileInode extracts the inode number from os.FileInfo.
-// On non-Unix systems it always returns 0 (rotation detected by size only).
-func fileInode(info os.FileInfo) uint64 {
-	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-		return sys.Ino
-	}
-	return 0
-}
