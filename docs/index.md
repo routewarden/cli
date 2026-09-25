@@ -982,6 +982,31 @@ caddy adapt --config Caddyfile --pretty
 
 All notable changes to the RouteWarden CLI (`rwarden`) are documented below. The CLI adheres to [Semantic Versioning](https://semver.org/).
 
+### [v3.0.0] - 2026-09-25
+
+#### Added
+- **Self-Hosted Security Dashboard (`rwarden dashboard`)**:
+  - Real-time, zero-dependency web UI embedded in the `rwarden` binary — no Node.js, no external database, no cloud services required.
+  - **Zero-Config Docker Discovery**: Auto-detects and streams logs from running Traefik, Caddy, and NGINX containers via the local Docker socket.
+  - **Log File Tailing**: Tail local log files or wildcard glob patterns with automatic log rotation support.
+  - **Real-Time Live Event Feed**: WebSocket / SSE stream of blocked requests with full-text search, container filtering, pause/resume, and clear controls.
+  - **Attack Analytics**: Interactive timelines (24h, 6h, 1h), blocks-per-minute chart, top attacked endpoints, top offender IPs, and response mode distribution.
+  - **Sources & Container Management**: View all active log sources with live status badges and one-click filtering.
+- **v1.2 — GeoIP & IP Intelligence**:
+  - Country resolution with flag emojis via embedded GeoLite2 MMDB or `ip-api.com` live fallback.
+  - **Deep IP Intelligence** (`/api/ip/:ip`): Threat risk score, ISP / ASN resolution, geographic location, behavioral patterns, top targeted endpoints, and paginated event history.
+  - **Config Viewer** (`/api/config/:id`): Inspect and render the live `routewarden.json` from any discovered container.
+- **Tailscale & NetBird Mesh VPN Auto-Detection**:
+  - Native identification of Tailscale CGNAT peers (`100.64.0.0/10`) and NetBird ULA overlay peers (`fd00::/8`) with dedicated metadata and flag emoji (`🔒`).
+  - RFC 5737 documentation ranges correctly classified as `LAN / Reserved Test Network`.
+
+#### Changed
+- Documentation site updated with a dedicated **Security Dashboard** section in the VitePress sidebar, covering all views with real screenshots.
+- Sidebar scroll-spy updated to track all dashboard subsection anchors and auto-scroll the sidebar to keep the active item visible.
+- Top navigation updated with a direct **Dashboard** link.
+
+---
+
 ### [v2.1.0] - 2026-09-24
 
 #### Added
