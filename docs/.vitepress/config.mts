@@ -42,11 +42,13 @@ export default defineConfig({
         items: [
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
+          { text: 'Security Dashboard', link: '/#dashboard' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
           { text: 'Production Integration', link: '/#production' },
           { text: 'Changelog', link: '/#changelog' }
         ]
       },
+      { text: 'Dashboard', link: '/#dashboard' },
       { text: 'Schema', link: '/#json-schema' },
       { text: 'Changelog', link: '/#changelog' },
       { text: 'Main Docs', link: 'https://routewarden.github.io/docs/' }
@@ -60,6 +62,20 @@ export default defineConfig({
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
           { text: 'Production Integration', link: '/#production' },
           { text: 'Changelog', link: '/#changelog' }
+        ]
+      },
+      {
+        text: 'Security Dashboard',
+        items: [
+          { text: 'Overview & Capabilities', link: '/#dashboard' },
+          { text: 'Live Event Feed', link: '/#dashboard-live-feed' },
+          { text: 'Analytics & Attack Trends', link: '/#dashboard-analytics' },
+          { text: 'Sources & Containers', link: '/#dashboard-sources' },
+          { text: 'IP Intelligence & Threat Score', link: '/#dashboard-ip-intelligence' },
+          { text: 'Tailscale & NetBird VPN', link: '/#dashboard-mesh-vpn' },
+          { text: 'CLI & Docker Usage', link: '/#dashboard-usage' },
+          { text: 'Command Flags', link: '/#dashboard-flags' },
+          { text: 'REST & WebSocket API', link: '/#dashboard-api' }
         ]
       }
     ],

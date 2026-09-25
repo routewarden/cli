@@ -19,3 +19,4 @@ docs/.vitepress/cache/
 *.log
 dashboard/dist
 web/dist
+.chrome-temp-data/

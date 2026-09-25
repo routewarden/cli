@@ -438,15 +438,52 @@ In **production deployments**, edge reverse proxies (Cloudflare, AWS ALB, Traefi
 
 Launch a lightweight, self-hosted web dashboard to visualize real-time security events, blocked probes, honeypot tarpit engagements, and attack analytics across your Traefik, Caddy, and NGINX instances.
 
-The dashboard features:
-- **Zero-Config Docker Discovery**: Reads container logs directly via the local Docker socket (`/var/run/docker.sock`) to auto-detect and stream logs from running Traefik, Caddy, and NGINX gateways.
-- **Log File Tailing**: Tail local log files or wildcard patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation handling.
-- **Real-Time Live Feed**: Live WebSocket / SSE stream of blocked requests, client IPs, matched patterns, HTTP methods, and triggered response modes.
-- **Rich Visual Analytics**: 24-hour attack trends, blocks per minute, top attacked endpoints, top offender IPs, response mode breakdown (block, tarpit, gzipBomb, silentDrop, fakeSuccess), and gateway distribution.
-- **Zero-Dependency Single Binary**: The modern React SPA frontend is pre-compiled and embedded directly inside the `rwarden` Go binary (`go:embed`). No Node.js runtime, no external databases, and no background services required.
-- **Docker Ready**: Runs as a lightweight standalone container or alongside your reverse proxies in `docker-compose.yml`.
+![RouteWarden Dashboard - Live Event Feed](/dashboard-feed.png)
 
-#### CLI Usage Examples
+#### Key Capabilities {#dashboard-features}
+
+- **Zero-Config Docker Discovery**: Attaches directly to the local Docker daemon (`/var/run/docker.sock`) to auto-discover and stream logs from running Traefik, Caddy, and NGINX gateway containers in real time.
+- **Log File Tailing**: Tail local log files or wildcard patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation handling.
+- **Real-Time Live Feed**: Low-latency WebSocket / SSE stream of blocked requests, client IPs with flag emojis, matched URI patterns, HTTP methods, and triggered response modes.
+- **Visual Analytics**: Interactive 24-hour attack timelines, blocks per minute, top attacked endpoints, top offender IPs, response mode breakdown (`block`, `tarpit`, `gzipBomb`, `silentDrop`, `fakeSuccess`), and gateway distribution.
+- **v1.2 Config Viewer**: Inspect running container configuration and `routewarden.json` labels directly from the UI without leaving the dashboard.
+- **GeoIP & Autonomous System Intelligence**: Country resolution with flag emojis via embedded MaxMind GeoLite2 MMDB or live fallback, including ASN, ISP, and location metadata.
+- **Tailscale & NetBird Mesh Auto-Detection**: Native identification for Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) and NetBird (`100.64.0.0/16`, `fd00::/8`) overlay networks as well as RFC 5737 testnets (`203.0.113.0/24`).
+- **Deep IP Intelligence View**: Comprehensive threat risk scoring (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), payload patterns, targeted gateways, and paginated event histories per IP.
+- **Zero-Dependency Single Binary**: The modern React SPA frontend is pre-compiled and embedded directly inside the `rwarden` Go binary (`go:embed`). No Node.js runtime, external database, or cloud dependencies required.
+
+---
+
+#### Dashboard Views {#dashboard-views}
+
+##### 1. Live Event Feed {#dashboard-live-feed}
+Stream security events from all gateways with instant search, container filtering, pause/resume, and server-assisted pagination.
+
+![RouteWarden Dashboard - Live Event Feed](/dashboard-feed.png)
+
+##### 2. Analytics & Attack Trends {#dashboard-analytics}
+Inspect 24-hour, 6-hour, and 1-hour attack timelines, rolling block rates, and distribution charts for endpoints, offender IPs, and defense actions.
+
+![RouteWarden Dashboard - Attack Analytics & Statistics](/dashboard-stats.png)
+
+##### 3. Sources & Container Management {#dashboard-sources}
+Monitor all discovered Docker containers and tailed log files. Inspect the active `routewarden.json` configuration for any gateway with a single click.
+
+![RouteWarden Dashboard - Active Log Sources & Containers](/dashboard-sources.png)
+
+##### 4. Deep IP Intelligence & Risk Scoring {#dashboard-ip-intelligence}
+Analyze any IP address with behavioral profiling, ASN/ISP lookup, geographic location, and threat risk assessment.
+
+![RouteWarden Dashboard - IP Threat Intelligence](/dashboard-ip-details.png)
+
+##### 5. Mesh VPN & Private Overlay Recognition {#dashboard-mesh-vpn}
+Automatic recognition of Tailscale and NetBird mesh peers (`100.64.0.0/10` CGNAT, `fd7a:115c:a1e0::/48`, and `fd00::/8` ULA) with dedicated `🔒` indicator badges.
+
+![RouteWarden Dashboard - Tailscale & NetBird VPN Intelligence](/dashboard-ip-vpn.png)
+
+---
+
+#### CLI Usage Examples {#dashboard-usage}
 
 ::: code-group
 
@@ -517,7 +554,7 @@ services:
 
 :::
 
-#### Command Flags
+#### Command Flags {#dashboard-flags}
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
@@ -529,7 +566,7 @@ services:
 | `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
-#### Built-in REST & WebSocket Endpoints
+#### Built-in REST & WebSocket Endpoints {#dashboard-api}
 
 The dashboard server exposes an HTTP API for external integrations, status checks, and monitoring systems:
 
@@ -539,6 +576,10 @@ The dashboard server exposes an HTTP API for external integrations, status check
 | `/api/events?n=500` | `GET` | Fetch the last `n` recorded security events as JSON |
 | `/api/stats?hours=24` | `GET` | Aggregated analytics snapshot (rates, top IPs, top paths, response modes, gateway distribution) |
 | `/api/sources` | `GET` | List of active log sources (Docker containers & tailed files) and their statuses |
+| `/api/sources/clear` | `POST` | Remove stopped or disconnected log sources from memory |
+| `/api/config/:id` | `GET` | Retrieve and parse `routewarden.json` configuration from a Docker container |
+| `/api/geoip?ip=...` | `GET` | Resolve IP geolocation, country code, flag emoji, and ISP details |
+| `/api/ip/:ip` | `GET` | Deep intelligence summary for a specific IP (threat score, top paths, methods, history) |
 | `/ws/events` | `GET` | Real-time WebSocket connection for live event streaming |
 
 ---

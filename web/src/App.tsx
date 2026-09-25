@@ -18,26 +18,50 @@ const NAV_ITEMS: { id: Page; label: string; Icon: LucideIcon }[] = [
 ]
 
 export default function App() {
-  const [page, setPage] = useState<Page>('feed')
+  const [page, setPage] = useState<Page>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace('#', '').toLowerCase()
+      if (hash === 'stats' || hash === 'sources' || hash === 'ip') return hash as Page
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('ip')) return 'ip'
+      const p = params.get('page')
+      if (p === 'stats' || p === 'sources' || p === 'ip') return p as Page
+    }
+    return 'feed'
+  })
   const [selectedContainer, setSelectedContainer] = useState<string>('all')
-  const [selectedIP, setSelectedIP] = useState<string>('')
+  const [selectedIP, setSelectedIP] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const ip = params.get('ip')
+      if (ip) return ip
+    }
+    return ''
+  })
   const [feedFilter, setFeedFilter] = useState<string>('')
   const [configSource, setConfigSource] = useState<Source | null>(null)
   const { events, sources, connected, paused, setPaused, clear, clearStoppedSources } = useEventStream()
 
+  const navigateTo = (newPage: Page) => {
+    setPage(newPage)
+    if (typeof window !== 'undefined') {
+      window.location.hash = newPage
+    }
+  }
+
   const handleSelectSource = (name: string) => {
     setSelectedContainer(name)
-    setPage('feed')
+    navigateTo('feed')
   }
 
   const handleSelectIP = (ip: string) => {
     setSelectedIP(ip)
-    setPage('ip')
+    navigateTo('ip')
   }
 
   const handleFilterInFeed = (ip: string) => {
     setFeedFilter(ip)
-    setPage('feed')
+    navigateTo('feed')
   }
 
   return (
@@ -73,7 +97,7 @@ export default function App() {
           <button
             key={id}
             className={`nav-item ${page === id ? 'active' : ''}`}
-            onClick={() => setPage(id)}
+            onClick={() => navigateTo(id)}
           >
             <Icon size={16} />
             <span className="nav-label">{label}</span>
@@ -156,7 +180,7 @@ export default function App() {
           <button
             key={id}
             className={`bottom-nav-item ${page === id ? 'active' : ''}`}
-            onClick={() => setPage(id)}
+            onClick={() => navigateTo(id)}
           >
             <div className="bottom-nav-icon-wrap">
               <Icon size={18} />
