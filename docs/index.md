@@ -845,12 +845,35 @@ RouteWarden Guard provides **bidirectional integration** with CrowdSec:
    - Keeps an in-memory cached copy of global IP and CIDR range bans.
    - Lookups occur at memory speeds with zero HTTP latency on incoming connections.
    - If CrowdSec restarts or goes offline, Guard continues protecting services using its last cached decisions and local banlist.
+   - **Supported Decision Actions**:
+     - `ban`: Connection is immediately dropped or rejected with no data forwarded upstream.
+     - `throttle`: Engages dynamic socket tarpitting to starve attacker concurrency slots.
+     - `bypass`: Whitelists trusted actors/peers, immediately allowing the connection through and bypassing downstream security blocks.
 
 2. **Log Source for CrowdSec Scenarios (Event Export)**:
    - When `logFile` is configured, Guard outputs structured single-line JSON events for every connection decision.
-   - CrowdSec ingests these events to trigger community or custom defense scenarios.
+   - CrowdSec ingests these events via acquisition to trigger community or custom defense scenarios.
 
-##### CrowdSec Parser (`routewarden-guard.yaml`)
+##### Environment Variables
+
+When deploying in Docker or 12-factor environments, CrowdSec settings can be supplied directly via environment variables:
+
+| Variable | Description |
+|:---|:---|
+| `CROWDSEC_URL`, `CROWDSEC_LAPI_URL` | CrowdSec LAPI base address (e.g. `http://crowdsec:8080`) |
+| `CROWDSEC_KEY`, `CROWDSEC_API_KEY`, `BOUNCER_KEY_GUARD` | Bouncer API key generated via `cscli bouncers add` |
+
+##### 1. CrowdSec Acquisition (`acquis.yaml`)
+Place in `/etc/crowdsec/acquis.d/routewarden-guard.yaml`:
+
+```yaml
+filenames:
+  - /var/log/rwarden/guard.jsonl
+labels:
+  type: routewarden-guard
+```
+
+##### 2. CrowdSec Parser (`routewarden-guard.yaml`)
 Place in `/etc/crowdsec/parsers/s01-parse/routewarden-guard.yaml`:
 
 ```yaml
@@ -885,24 +908,60 @@ nodes:
         expression: "evt.Parsed.country_code"
 ```
 
-##### CrowdSec Scenario (`routewarden-guard-bf.yaml`)
-Place in `/etc/crowdsec/scenarios/routewarden-guard-bf.yaml`:
+##### 3. CrowdSec Scenarios
 
-```yaml
+::: code-group
+
+```yaml [SSH Brute Force]
+# /etc/crowdsec/scenarios/routewarden-guard-ssh-bf.yaml
 type: leaky
-name: routewarden/guard-bruteforce
-description: "Detect brute-force or policy violation floods on RouteWarden Guard TCP ports"
-filter: "evt.Meta.log_type == 'guard_event' && (evt.Meta.action == 'BLOCK' || evt.Meta.reason contains 'auth failure')"
+name: routewarden/guard-ssh-bf
+description: "Detect SSH brute-force authentication attacks on RouteWarden Guard"
+filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.service == 'ssh' && (evt.Meta.reason contains 'auth failure' || evt.Meta.reason contains 'invalid SSH banner' || evt.Meta.action == 'BLOCK')"
 groupby: evt.Meta.source_ip
-distinct: evt.Meta.service
 capacity: 5
-leakspeed: 30s
-blackhole: 5m
+leakspeed: 1m
+blackhole: 10m
 labels:
-  service: routewarden-guard
-  type: bruteforce
+  service: ssh
+  confidence: 3
   remediation: true
 ```
+
+```yaml [SMTP Auth & Spam Flood]
+# /etc/crowdsec/scenarios/routewarden-guard-smtp-bf.yaml
+type: leaky
+name: routewarden/guard-smtp-bf
+description: "Detect SMTP brute-force or spam sender domain violations on RouteWarden Guard"
+filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.service == 'smtp' && (evt.Meta.reason contains 'auth failure' || evt.Meta.reason contains 'blocked sender domain' || evt.Meta.action == 'BLOCK')"
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: 2m
+blackhole: 15m
+labels:
+  service: smtp
+  confidence: 3
+  remediation: true
+```
+
+```yaml [Cross-Service Port Scan]
+# /etc/crowdsec/scenarios/routewarden-guard-portscan.yaml
+type: leaky
+name: routewarden/guard-portscan
+description: "Detect multi-service port probing and scanning on RouteWarden Guard"
+filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.action == 'BLOCK'"
+groupby: evt.Meta.source_ip
+distinct: evt.Meta.service
+capacity: 3
+leakspeed: 30s
+blackhole: 1h
+labels:
+  service: portscan
+  confidence: 4
+  remediation: true
+```
+
+:::
 
 ---
 
