@@ -7,7 +7,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -71,6 +73,29 @@ func NewServer(opts Options) *Server {
 	return s
 }
 
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	// Static SPA assets — served from embedded FS defined in embed.go
+	mux.Handle("/", http.FileServer(getSPAFileSystem()))
+
+	// API routes
+	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/sources", s.handleSources)
+	mux.HandleFunc("/api/sources/clear", s.handleClearSources)
+	mux.HandleFunc("/api/config/", s.handleConfig)
+	mux.HandleFunc("/api/geoip", s.handleGeoIP)
+	mux.HandleFunc("/api/ip/", s.handleIPDetails)
+	mux.HandleFunc("/api/ip", s.handleIPDetails)
+	mux.HandleFunc("/api/health", s.handleHealth)
+
+	// WebSocket
+	mux.HandleFunc("/ws/events", s.handleWS)
+
+	return corsMiddleware(mux)
+}
+
 // Run starts all background watchers and serves HTTP until the context is
 // cancelled or the process receives SIGTERM.
 func (s *Server) Run(ctx context.Context) error {
@@ -82,25 +107,10 @@ func (s *Server) Run(ctx context.Context) error {
 		go s.tailer.Run(ctx)
 	}
 
-	mux := http.NewServeMux()
-
-	// Static SPA assets — served from embedded FS defined in server_embed.go
-	mux.Handle("/", http.FileServer(getSPAFileSystem()))
-
-	// API routes
-	mux.HandleFunc("/api/events", s.handleEvents)
-	mux.HandleFunc("/api/stats", s.handleStats)
-	mux.HandleFunc("/api/sources", s.handleSources)
-	mux.HandleFunc("/api/sources/clear", s.handleClearSources)
-	mux.HandleFunc("/api/health", s.handleHealth)
-
-	// WebSocket
-	mux.HandleFunc("/ws/events", s.handleWS)
-
 	addr := net.JoinHostPort(s.opts.Host, strconv.Itoa(s.opts.Port))
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      corsMiddleware(mux),
+		Handler:      s.Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 0, // streaming responses need unlimited write time
 		IdleTimeout:  120 * time.Second,
@@ -132,14 +142,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			n = v
 		}
 	}
-	src := r.URL.Query().Get("source")
-	data, err := s.buf.MarshalRecent(n, src)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+src := r.URL.Query().Get("source")
+	events := s.buf.RecentFiltered(n, src)
+	for i := range events {
+		if events[i].CountryCode == "" && events[i].ClientIP != "" {
+			events[i] = EnrichGeoIP(events[i])
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(data)
+	_ = json.NewEncoder(w).Encode(events)
 }
 
 // GET /api/stats?hours=24&source=containerName
@@ -181,10 +192,135 @@ func (s *Server) handleClearSources(w http.ResponseWriter, r *http.Request) {
 	if s.tailer != nil {
 		s.tailer.ClearStopped()
 	}
-	sources := s.allSources()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sources)
+	_ = json.NewEncoder(w).Encode(s.allSources())
 }
+
+// GET /api/config/:id — returns routewarden.json configuration for a container/source
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/config/")
+	id = strings.TrimSpace(id)
+	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(ConfigResponse{
+			Error: "Missing container or source ID in URL path",
+		})
+		return
+	}
+
+	var resp ConfigResponse
+
+	// 1. Check Docker if available
+	if s.docker != nil {
+		resp = s.docker.GetContainerConfig(id)
+		if resp.HasConfig {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	// 2. Check local filesystem fallback (for file sources, local testing, or standalone)
+	localPaths := []string{
+		"routewarden.json",
+		"./routewarden.json",
+		"../routewarden.json",
+		"samples/json/routewarden.json",
+		"../samples/json/routewarden.json",
+		"/etc/routewarden/routewarden.json",
+	}
+	for _, p := range localPaths {
+		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			var parsed map[string]any
+			if err := json.Unmarshal(data, &parsed); err == nil {
+				resp = ConfigResponse{
+					ID:        id,
+					Name:      id,
+					Kind:      "file",
+					HasConfig: true,
+					LabelKey:  p,
+					Config:    parsed,
+					Raw:       string(data),
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+				return
+			}
+		}
+	}
+
+	// If container was found in Docker but lacked routewarden.json label, return Docker's helpful message
+	if resp.Name != "" {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Container/source not found
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	_ = json.NewEncoder(w).Encode(ConfigResponse{
+		ID:        id,
+		HasConfig: false,
+		Error:     fmt.Sprintf("Container or log source %q not found", id),
+		Hint:      "Make sure the Docker container is running and has label routewarden.json='{...}'",
+	})
+}
+
+// GET /api/geoip?ip=1.1.1.1 — returns GeoIP country and flag emoji
+func (s *Server) handleGeoIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	ipStr := r.URL.Query().Get("ip")
+	if ipStr == "" {
+		http.Error(w, `{"error":"missing ip query parameter"}`, http.StatusBadRequest)
+		return
+	}
+
+	res := LookupIP(ipStr)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// GET /api/ip/:ip or /api/ip?ip=...
+// Returns complete geolocation, threat intelligence, and event history for an IP address.
+func (s *Server) handleIPDetails(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	ipStr := strings.TrimPrefix(r.URL.Path, "/api/ip/")
+	ipStr = strings.TrimPrefix(ipStr, "/api/ip")
+	ipStr = strings.Trim(ipStr, "/")
+	if ipStr == "" {
+		ipStr = r.URL.Query().Get("ip")
+	}
+	ipStr = strings.TrimSpace(ipStr)
+
+	if ipStr == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "Missing IP parameter in path or query string",
+		})
+		return
+	}
+
+	resp := s.buf.IPDetails(ipStr)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 
 // GET /api/health
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

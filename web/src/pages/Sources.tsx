@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-  Container, FileText, Trash2, Radio, Search,
+  Container, FileText, Trash2, Radio, Search, FileCode,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react'
 import type { Source } from '../types'
@@ -10,9 +10,10 @@ interface SourcesProps {
   sources: Source[]
   onClearStopped?: () => void
   onSelectSource?: (name: string) => void
+  onOpenConfig?: (source: Source) => void
 }
 
-export default function Sources({ sources, onClearStopped, onSelectSource }: SourcesProps) {
+export default function Sources({ sources, onClearStopped, onSelectSource, onOpenConfig }: SourcesProps) {
   const [filter, setFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -93,6 +94,7 @@ export default function Sources({ sources, onClearStopped, onSelectSource }: Sou
               key={src.id}
               source={src}
               onSelectSource={onSelectSource}
+              onOpenConfig={onOpenConfig}
             />
           ))}
         </div>
@@ -187,9 +189,11 @@ export default function Sources({ sources, onClearStopped, onSelectSource }: Sou
 function SourceCard({
   source: s,
   onSelectSource,
+  onOpenConfig,
 }: {
   source: Source
   onSelectSource?: (name: string) => void
+  onOpenConfig?: (source: Source) => void
 }) {
   const Icon = s.kind === 'docker' ? Container : FileText
 
@@ -222,6 +226,17 @@ function SourceCard({
             {s.status}
           </span>
         </div>
+
+        {onOpenConfig && (
+          <button
+            className="source-action-btn"
+            onClick={() => onOpenConfig(s)}
+            title={`View RouteWarden configuration for ${s.name}`}
+          >
+            <FileCode size={12} />
+            Config
+          </button>
+        )}
 
         {onSelectSource && (
           <button

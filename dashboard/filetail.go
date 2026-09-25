@@ -197,6 +197,7 @@ func (f *FileTailer) tailFile(ctx context.Context, path string, src *Source) {
 						src.Plugin = e.Plugin
 						f.mu.Unlock()
 					}
+					e = EnrichGeoIP(e)
 					f.buf.Push(e)
 					f.hub.Broadcast(e)
 				}

@@ -2,8 +2,10 @@ package dashboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -197,3 +199,135 @@ func topN(m map[string]int, n int) []CountEntry {
 	}
 	return entries
 }
+
+// IPDetails returns detailed intelligence, aggregates, and activity history for a specific IP.
+func (r *RingBuffer) IPDetails(ipStr string) IPDetailsResponse {
+	clean := cleanIPString(ipStr)
+	geo := LookupIP(clean)
+
+	r.mu.RLock()
+	allEvents := r.Recent(0)
+	r.mu.RUnlock()
+
+	var matched []SecurityEvent
+	pathCounts := make(map[string]int)
+	methodCounts := make(map[string]int)
+	patternCounts := make(map[string]int)
+	modeCounts := make(map[string]int)
+	sourceCounts := make(map[string]int)
+
+	var firstSeen, lastSeen *time.Time
+	hasExploitProbe := false
+
+	// Iterate in reverse (newest first)
+	for i := len(allEvents) - 1; i >= 0; i-- {
+		e := allEvents[i]
+		if cleanIPString(e.ClientIP) != clean {
+			continue
+		}
+
+		if e.CountryCode == "" {
+			e.CountryCode = geo.CountryCode
+			e.CountryName = geo.CountryName
+			e.FlagEmoji = geo.FlagEmoji
+		}
+
+		matched = append(matched, e)
+
+		t := e.Timestamp
+		if lastSeen == nil || t.After(*lastSeen) {
+			tCopy := t
+			lastSeen = &tCopy
+		}
+		if firstSeen == nil || t.Before(*firstSeen) {
+			tCopy := t
+			firstSeen = &tCopy
+		}
+
+		if e.Path != "" {
+			pathCounts[e.Path]++
+		}
+		if e.Method != "" {
+			methodCounts[e.Method]++
+		}
+		if e.Pattern != "" {
+			patternCounts[e.Pattern]++
+		}
+		mode := e.ResponseMode
+		if mode == "" {
+			mode = e.Action
+		}
+		if mode != "" {
+			modeCounts[mode]++
+		}
+		src := e.Source
+		if src == "" {
+			src = e.Plugin
+		}
+		if src != "" {
+			sourceCounts[src]++
+		}
+
+		lowerPath := strings.ToLower(e.Path)
+		lowerPattern := strings.ToLower(e.Pattern)
+		if strings.Contains(lowerPath, ".env") ||
+			strings.Contains(lowerPath, "wp-config") ||
+			strings.Contains(lowerPath, "passwd") ||
+			strings.Contains(lowerPath, "xmlrpc") ||
+			strings.Contains(lowerPattern, "sqli") ||
+			strings.Contains(lowerPattern, "rce") ||
+			strings.Contains(lowerPattern, "xss") ||
+			strings.Contains(lowerPattern, "traversal") ||
+			strings.Contains(lowerPattern, "eval") {
+			hasExploitProbe = true
+		}
+	}
+
+	totalEvents := len(matched)
+	riskScore := "low"
+	riskReason := "Minimal activity detected"
+
+	if totalEvents == 0 {
+		riskScore = "low"
+		riskReason = "No security events recorded for this IP address."
+	} else if hasExploitProbe || totalEvents >= 50 {
+		riskScore = "critical"
+		if hasExploitProbe && totalEvents >= 50 {
+			riskReason = fmt.Sprintf("High volume attack (%d events) with active exploit/credential probe attempts.", totalEvents)
+		} else if hasExploitProbe {
+			riskReason = "Detected targeted exploitation attempts (e.g. sensitive files, SQLi/RCE, or path traversal)."
+		} else {
+			riskReason = fmt.Sprintf("Excessive malicious request volume (%d blocked requests).", totalEvents)
+		}
+	} else if totalEvents >= 15 {
+		riskScore = "high"
+		riskReason = fmt.Sprintf("Repeated attack signatures detected across multiple endpoints (%d events).", totalEvents)
+	} else if totalEvents >= 3 {
+		riskScore = "medium"
+		riskReason = fmt.Sprintf("Multiple reconnaissance probes or policy violations detected (%d events).", totalEvents)
+	} else {
+		riskScore = "low"
+		riskReason = "Isolated suspicious request blocked by RouteWarden."
+	}
+
+	if len(matched) > 200 {
+		matched = matched[:200]
+	}
+
+	return IPDetailsResponse{
+		IP:            clean,
+		Geo:           geo,
+		TotalEvents:   totalEvents,
+		FirstSeen:     firstSeen,
+		LastSeen:      lastSeen,
+		RiskScore:     riskScore,
+		RiskReason:    riskReason,
+		TopPaths:      topN(pathCounts, 8),
+		TopMethods:    topN(methodCounts, 8),
+		TopPatterns:   topN(patternCounts, 8),
+		ResponseModes: topN(modeCounts, 8),
+		TargetSources: topN(sourceCounts, 8),
+		Events:        matched,
+	}
+}
+

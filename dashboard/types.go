@@ -33,6 +33,24 @@ type SecurityEvent struct {
 	// Source metadata (added by dashboard, not the middleware)
 	Source   string `json:"source,omitempty"`    // container name or file path
 	SourceID string `json:"source_id,omitempty"` // container ID or file path hash
+
+	// GeoIP metadata (added by dashboard)
+	CountryCode string `json:"country_code,omitempty"` // e.g. "US", "DE", "LAN"
+	CountryName string `json:"country_name,omitempty"` // e.g. "United States", "Local Network"
+	FlagEmoji   string `json:"flag_emoji,omitempty"`   // e.g. "🇺🇸", "🏠"
+}
+
+// ConfigResponse is returned by GET /api/config/:id.
+type ConfigResponse struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Kind      string         `json:"kind"`
+	HasConfig bool           `json:"has_config"`
+	LabelKey  string         `json:"label_key,omitempty"`
+	Config    map[string]any `json:"config,omitempty"`
+	Raw       string         `json:"raw,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Hint      string         `json:"hint,omitempty"`
 }
 
 // Source represents a single log origin: a Docker container or a log file.
@@ -67,4 +85,21 @@ type CountEntry struct {
 type RatePoint struct {
 	Minute string `json:"minute"` // "HH:MM" UTC
 	Count  int    `json:"count"`
+}
+
+// IPDetailsResponse represents comprehensive intelligence and historical events for a single IP.
+type IPDetailsResponse struct {
+	IP            string          `json:"ip"`
+	Geo           GeoResult       `json:"geo"`
+	TotalEvents   int             `json:"total_events"`
+	FirstSeen     *time.Time      `json:"first_seen,omitempty"`
+	LastSeen      *time.Time      `json:"last_seen,omitempty"`
+	RiskScore     string          `json:"risk_score"`  // "critical" | "high" | "medium" | "low"
+	RiskReason    string          `json:"risk_reason"` // human readable reason for threat classification
+	TopPaths      []CountEntry    `json:"top_paths"`
+	TopMethods    []CountEntry    `json:"top_methods"`
+	TopPatterns   []CountEntry    `json:"top_patterns"`
+	ResponseModes []CountEntry    `json:"response_modes"`
+	TargetSources []CountEntry    `json:"target_sources"`
+	Events        []SecurityEvent `json:"events"`
 }

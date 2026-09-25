@@ -17,6 +17,9 @@ interface LiveFeedProps {
   paused: boolean
   onPause: (p: boolean) => void
   onClear: () => void
+  onSelectIP?: (ip: string) => void
+  filter?: string
+  onFilterChange?: (f: string) => void
 }
 
 export default function LiveFeed({
@@ -27,8 +30,16 @@ export default function LiveFeed({
   paused,
   onPause,
   onClear,
+  onSelectIP,
+  filter: controlledFilter,
+  onFilterChange,
 }: LiveFeedProps) {
-  const [filter, setFilter] = useState('')
+  const [internalFilter, setInternalFilter] = useState('')
+  const filter = controlledFilter !== undefined ? controlledFilter : internalFilter
+  const handleFilterChange = (val: string) => {
+    if (onFilterChange) onFilterChange(val)
+    setInternalFilter(val)
+  }
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const eventListRef = useRef<HTMLDivElement>(null)
@@ -101,7 +112,7 @@ export default function LiveFeed({
             className="filter-input"
             placeholder="Filter by IP, path, method, pattern…"
             value={filter}
-            onChange={e => setFilter(e.target.value)}
+            onChange={e => handleFilterChange(e.target.value)}
           />
 
           {/* Container filter dropdown */}
@@ -166,6 +177,7 @@ export default function LiveFeed({
                   key={`${e.timestamp}-${startIndex + i}`}
                   event={e}
                   onSelectContainer={onSelectContainer}
+                  onSelectIP={onSelectIP}
                 />
               ))
             )}
@@ -270,16 +282,38 @@ export default function LiveFeed({
 function EventRow({
   event: e,
   onSelectContainer,
+  onSelectIP,
 }: {
   event: SecurityEvent
   onSelectContainer: (c: string) => void
+  onSelectIP?: (ip: string) => void
 }) {
   return (
     <div className="event-row">
       <span className="event-time" title={e.timestamp}>
         {relativeTime(e.timestamp)}
       </span>
-      <span className="event-ip mono">{e.client_ip || '—'}</span>
+      <span className="event-ip mono" title={e.country_name ? `${e.client_ip} (${e.country_name})` : e.client_ip}>
+        {e.flag_emoji && (
+          <span className="event-flag" title={e.country_name || e.country_code}>
+            {e.flag_emoji}
+          </span>
+        )}
+        {onSelectIP && e.client_ip ? (
+          <button
+            className="event-ip-btn"
+            onClick={(ev) => {
+              ev.stopPropagation()
+              onSelectIP(e.client_ip)
+            }}
+            title={`View complete intelligence & details for ${e.client_ip}`}
+          >
+            {e.client_ip}
+          </button>
+        ) : (
+          <span className="event-ip-addr">{e.client_ip || '—'}</span>
+        )}
+      </span>
       <span>
         <span className={methodBadgeClass(e.method)}>{e.method || '—'}</span>
       </span>

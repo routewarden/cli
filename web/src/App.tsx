@@ -1,25 +1,42 @@
 import { useState } from 'react'
-import { Shield, BarChart2, Radio, Layers, type LucideIcon } from 'lucide-react'
+import { Shield, BarChart2, Radio, Layers, Globe, type LucideIcon } from 'lucide-react'
 import { useEventStream } from './hooks/useEventStream'
 import LiveFeed from './pages/LiveFeed'
 import Stats from './pages/Stats'
 import Sources from './pages/Sources'
+import IPDetails from './pages/IPDetails'
+import ConfigDrawer from './components/ConfigDrawer'
+import type { Source } from './types'
 
-type Page = 'feed' | 'stats' | 'sources'
+type Page = 'feed' | 'stats' | 'sources' | 'ip'
 
 const NAV_ITEMS: { id: Page; label: string; Icon: LucideIcon }[] = [
-  { id: 'feed',    label: 'Live Feed',  Icon: Radio },
-  { id: 'stats',   label: 'Statistics', Icon: BarChart2 },
-  { id: 'sources', label: 'Sources',    Icon: Layers },
+  { id: 'feed',    label: 'Live Feed',   Icon: Radio },
+  { id: 'stats',   label: 'Statistics',  Icon: BarChart2 },
+  { id: 'sources', label: 'Sources',     Icon: Layers },
+  { id: 'ip',      label: 'IP Details',  Icon: Globe },
 ]
 
 export default function App() {
   const [page, setPage] = useState<Page>('feed')
   const [selectedContainer, setSelectedContainer] = useState<string>('all')
+  const [selectedIP, setSelectedIP] = useState<string>('')
+  const [feedFilter, setFeedFilter] = useState<string>('')
+  const [configSource, setConfigSource] = useState<Source | null>(null)
   const { events, sources, connected, paused, setPaused, clear, clearStoppedSources } = useEventStream()
 
   const handleSelectSource = (name: string) => {
     setSelectedContainer(name)
+    setPage('feed')
+  }
+
+  const handleSelectIP = (ip: string) => {
+    setSelectedIP(ip)
+    setPage('ip')
+  }
+
+  const handleFilterInFeed = (ip: string) => {
+    setFeedFilter(ip)
     setPage('feed')
   }
 
@@ -89,6 +106,9 @@ export default function App() {
             paused={paused}
             onPause={setPaused}
             onClear={clear}
+            onSelectIP={handleSelectIP}
+            filter={feedFilter}
+            onFilterChange={setFeedFilter}
           />
         )}
         {page === 'stats' && (
@@ -96,6 +116,7 @@ export default function App() {
             sources={sources}
             selectedContainer={selectedContainer}
             onSelectContainer={setSelectedContainer}
+            onSelectIP={handleSelectIP}
           />
         )}
         {page === 'sources' && (
@@ -103,9 +124,31 @@ export default function App() {
             sources={sources}
             onClearStopped={clearStoppedSources}
             onSelectSource={handleSelectSource}
+            onOpenConfig={setConfigSource}
+          />
+        )}
+        {page === 'ip' && (
+          <IPDetails
+            ip={selectedIP || events[0]?.client_ip || '127.0.0.1'}
+            onBack={() => setPage('feed')}
+            onSelectContainer={handleSelectSource}
+            onFilterInFeed={handleFilterInFeed}
+            recentEvents={events}
+            onSelectIP={setSelectedIP}
           />
         )}
       </main>
+
+      {/* ── Config Viewer Drawer (Read-Only) ── */}
+      {configSource && (
+        <ConfigDrawer
+          sourceId={configSource.id}
+          sourceName={configSource.name}
+          sourcePlugin={configSource.plugin}
+          sourceKind={configSource.kind}
+          onClose={() => setConfigSource(null)}
+        />
+      )}
 
       {/* ── Mobile / Tablet Bottom Navigation ── */}
       <nav className="bottom-nav">

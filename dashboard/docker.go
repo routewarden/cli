@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,49 @@ func (d *dockerClient) listContainers() ([]dockerContainer, error) {
 		return nil, fmt.Errorf("docker decode containers: %w", err)
 	}
 	return containers, nil
+}
+
+// inspectContainer returns the inspected details of a container by ID or name.
+func (d *dockerClient) inspectContainer(idOrName string) (id string, name string, labels map[string]string, err error) {
+	// First try direct inspect endpoint: GET /containers/{idOrName}/json
+	resp, err := d.get("/containers/" + url.PathEscape(idOrName) + "/json")
+	if err == nil && resp.StatusCode == http.StatusOK {
+		defer resp.Body.Close()
+		var inspectData struct {
+			ID     string `json:"Id"`
+			Name   string `json:"Name"`
+			Config struct {
+				Labels map[string]string `json:"Labels"`
+			} `json:"Config"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&inspectData); err == nil {
+			cName := strings.TrimPrefix(inspectData.Name, "/")
+			return inspectData.ID, cName, inspectData.Config.Labels, nil
+		}
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	// Fallback: list all containers and match by prefix of ID or Name
+	containers, listErr := d.listContainers()
+	if listErr != nil {
+		return "", "", nil, listErr
+	}
+
+	cleanTarget := strings.TrimPrefix(idOrName, "/")
+	for _, c := range containers {
+		cName := containerName(c)
+		shortID := c.ID
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		if c.ID == idOrName || shortID == idOrName || cName == cleanTarget || strings.EqualFold(cName, cleanTarget) {
+			return c.ID, cName, c.Labels, nil
+		}
+	}
+
+	return "", "", nil, fmt.Errorf("container %q not found", idOrName)
 }
 
 // isRouteWardenContainer returns true when the container is likely to emit
@@ -327,6 +371,7 @@ func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 
 		go func(id, name, plugin string) {
 			err := w.client.tailLogs(ctx, id, name, plugin, w.since, func(e SecurityEvent) {
+				e = EnrichGeoIP(e)
 				w.buf.Push(e)
 				w.hub.Broadcast(e)
 			})
@@ -373,6 +418,81 @@ func (w *DockerWatcher) Sources() []Source {
 		out = append(out, *s)
 	}
 	return out
+}
+
+// GetContainerConfig looks for the "routewarden.json" label on the specified container.
+func (w *DockerWatcher) GetContainerConfig(idOrName string) ConfigResponse {
+	w.mu.Lock()
+	client := w.client
+	w.mu.Unlock()
+
+	if client == nil {
+		return ConfigResponse{
+			ID:        idOrName,
+			HasConfig: false,
+			Error:     "Docker client unavailable",
+		}
+	}
+
+	cID, cName, labels, err := client.inspectContainer(idOrName)
+	if err != nil {
+		return ConfigResponse{
+			ID:        idOrName,
+			HasConfig: false,
+			Error:     fmt.Sprintf("Container %q not found in Docker", idOrName),
+		}
+	}
+
+	shortID := cID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+
+	// Look for routewarden.json label
+	var rawConfig string
+	var labelKey string
+	for k, v := range labels {
+		kl := strings.ToLower(strings.TrimSpace(k))
+		if kl == "routewarden.json" || kl == "routewarden_json" || kl == "routewarden.config" {
+			rawConfig = v
+			labelKey = k
+			break
+		}
+	}
+
+	if rawConfig == "" {
+		return ConfigResponse{
+			ID:        shortID,
+			Name:      cName,
+			Kind:      "docker",
+			HasConfig: false,
+			Error:     fmt.Sprintf("No routewarden.json label found on container %q.", cName),
+			Hint:      "Add LABEL routewarden.json='{...}' in your Dockerfile or --label routewarden.json='{...}' when running the container.",
+		}
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(rawConfig), &parsed); err != nil {
+		return ConfigResponse{
+			ID:        shortID,
+			Name:      cName,
+			Kind:      "docker",
+			HasConfig: true,
+			LabelKey:  labelKey,
+			Raw:       rawConfig,
+			Error:     fmt.Sprintf("Invalid JSON in label %q: %v", labelKey, err),
+		}
+	}
+
+	return ConfigResponse{
+		ID:        shortID,
+		Name:      cName,
+		Kind:      "docker",
+		HasConfig: true,
+		LabelKey:  labelKey,
+		Config:    parsed,
+		Raw:       rawConfig,
+	}
 }
 
 // SourceList returns a thread-safe copy of all sources.

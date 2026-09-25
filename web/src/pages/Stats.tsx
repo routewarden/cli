@@ -23,12 +23,14 @@ interface StatsProps {
   sources?: Source[]
   selectedContainer?: string
   onSelectContainer?: (c: string) => void
+  onSelectIP?: (ip: string) => void
 }
 
 export default function Stats({
   sources = [],
   selectedContainer = 'all',
   onSelectContainer,
+  onSelectIP,
 }: StatsProps) {
   const [hours, setHours] = useState(24)
   const [stats, setStats] = useState<StatsSnapshot | null>(null)
@@ -278,9 +280,31 @@ export default function Stats({
                   radius={[0, 4, 4, 0]}
                   barSize={14}
                   label={{ position: 'right', fill: 'var(--text-muted)', fontSize: 10, offset: 6 }}
+                  cursor={onSelectIP ? 'pointer' : 'default'}
+                  onClick={(entry: any) => {
+                    if (onSelectIP && entry?.label) {
+                      onSelectIP(entry.label)
+                    }
+                  }}
                 />
               </BarChart>
             </ResponsiveContainer>
+            {onSelectIP && stats.top_ips && stats.top_ips.length > 0 && (
+              <div className="stats-top-ips-pills">
+                <span className="stats-top-ips-label">Inspect IP:</span>
+                {stats.top_ips.slice(0, 5).map(item => (
+                  <button
+                    key={item.label}
+                    className="stats-ip-pill"
+                    onClick={() => onSelectIP(item.label)}
+                    title={`Inspect full intelligence for ${item.label}`}
+                  >
+                    <span className="mono">{item.label}</span>
+                    <span className="stats-ip-count">{item.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Response modes donut */}

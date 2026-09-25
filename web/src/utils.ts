@@ -81,6 +81,8 @@ export function filterEvents(events: SecurityEvent[], query: string): SecurityEv
   const q = query.toLowerCase()
   return events.filter(e =>
     e.client_ip?.toLowerCase().includes(q) ||
+    e.country_name?.toLowerCase().includes(q) ||
+    e.country_code?.toLowerCase().includes(q) ||
     e.path?.toLowerCase().includes(q) ||
     e.plugin?.toLowerCase().includes(q) ||
     e.method?.toLowerCase().includes(q) ||
