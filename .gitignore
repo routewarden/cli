@@ -17,3 +17,5 @@ docs/.vitepress/cache/
 # To rebuild: cd web && npm run build
 # dashboard/dist/ is intentionally NOT ignored
 *.log
+dashboard/dist
+web/dist
