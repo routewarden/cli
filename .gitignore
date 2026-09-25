@@ -15,8 +15,6 @@ docs/.vitepress/cache/
 
 # Dashboard: keep dashboard/dist committed (needed for go:embed)
 # To rebuild: cd web && npm run build
-# dashboard/dist/ is intentionally NOT ignored
+# dashboard/dist/ is intentionally NOT ignored here — required for //go:embed
 *.log
-dashboard/dist
-web/dist
 .chrome-temp-data/
