@@ -37,44 +37,90 @@ export default {
         }
       }, { passive: true })
 
-      // 3. Robust left-sidebar scroll spy for single-page documentation
-      const sectionIds = ['installation', 'commands', 'json-schema', 'production', 'changelog']
-
+      // 3. Robust left-sidebar scroll spy and auto-scroll for single-page documentation
       const updateActiveSidebar = () => {
         const sidebarLinks = Array.from(
           document.querySelectorAll<HTMLAnchorElement>('.VPSidebar .VPSidebarItem.is-link a')
         )
         if (!sidebarLinks.length) return
 
-        // Compute current section based on scroll position
-        const scrollPosition = window.scrollY + 160
-        let currentSectionId = ''
-
-        for (const id of sectionIds) {
-          const el = document.getElementById(id)
-          if (el) {
-            const rect = el.getBoundingClientRect()
-            const absoluteTop = rect.top + window.scrollY
-            if (scrollPosition >= absoluteTop) {
-              currentSectionId = id
+        // Extract all section anchor IDs dynamically from sidebar links
+        const targetIds: string[] = []
+        sidebarLinks.forEach((link) => {
+          const href = link.getAttribute('href') || ''
+          const hashIdx = href.indexOf('#')
+          if (hashIdx !== -1) {
+            const id = href.slice(hashIdx + 1).trim()
+            if (id && !targetIds.includes(id)) {
+              targetIds.push(id)
             }
+          }
+        })
+
+        // Ensure all dashboard and main sections are included
+        const fallbackSectionIds = [
+          'installation',
+          'commands',
+          'dashboard',
+          'dashboard-features',
+          'dashboard-views',
+          'dashboard-live-feed',
+          'dashboard-analytics',
+          'dashboard-sources',
+          'dashboard-ip-intelligence',
+          'dashboard-mesh-vpn',
+          'dashboard-usage',
+          'dashboard-flags',
+          'dashboard-api',
+          'json-schema',
+          'production',
+          'changelog',
+        ]
+        fallbackSectionIds.forEach((id) => {
+          if (!targetIds.includes(id)) {
+            targetIds.push(id)
+          }
+        })
+
+        // Sort elements by their actual top offset on the page
+        const scrollPosition = window.scrollY + 180
+        const elementsWithOffsets = targetIds
+          .map((id) => {
+            const el = document.getElementById(id)
+            if (!el) return null
+            const rect = el.getBoundingClientRect()
+            return { id, top: rect.top + window.scrollY }
+          })
+          .filter((item): item is { id: string; top: number } => item !== null)
+          .sort((a, b) => a.top - b.top)
+
+        let currentSectionId = ''
+        for (const item of elementsWithOffsets) {
+          if (scrollPosition >= item.top) {
+            currentSectionId = item.id
           }
         }
 
         // If at top of the page, default to first section
-        if (!currentSectionId && window.scrollY < 200) {
-          currentSectionId = sectionIds[0]
+        if (!currentSectionId && elementsWithOffsets.length > 0 && window.scrollY < 200) {
+          currentSectionId = elementsWithOffsets[0].id
         }
+
+        let activeItemEl: HTMLElement | null = null
 
         sidebarLinks.forEach((link) => {
           const href = link.getAttribute('href') || ''
           const itemDiv = link.closest('.VPSidebarItem') as HTMLElement | null
           const linkText = link.querySelector('.text') as HTMLElement | null
-          const isActive = currentSectionId ? href.includes(`#${currentSectionId}`) : false
+
+          const hashIdx = href.indexOf('#')
+          const linkAnchor = hashIdx !== -1 ? href.slice(hashIdx + 1) : ''
+          const isActive = currentSectionId ? linkAnchor === currentSectionId : false
 
           if (itemDiv) {
             if (isActive) {
               itemDiv.classList.add('is-active')
+              activeItemEl = itemDiv
               if (linkText) {
                 linkText.style.color = 'var(--vp-c-brand-1)'
                 linkText.style.fontWeight = '600'
@@ -88,6 +134,29 @@ export default {
             }
           }
         })
+
+        // Auto-scroll the left sidebar container so the active section stays in view
+        if (activeItemEl) {
+          const sidebarContainer =
+            (activeItemEl as HTMLElement).closest('.VPSidebar') ||
+            document.querySelector('.VPSidebar')
+          if (sidebarContainer) {
+            const containerRect = sidebarContainer.getBoundingClientRect()
+            const itemRect = (activeItemEl as HTMLElement).getBoundingClientRect()
+
+            // If the item is near or outside the top or bottom of the sidebar container, scroll it smoothly into view
+            if (
+              itemRect.top < containerRect.top + 80 ||
+              itemRect.bottom > containerRect.bottom - 80
+            ) {
+              (activeItemEl as HTMLElement).scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest',
+                inline: 'nearest',
+              })
+            }
+          }
+        }
       }
 
       window.addEventListener('scroll', updateActiveSidebar, { passive: true })

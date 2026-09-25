@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_2.1.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_2.1.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_2.1.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_2.1.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_2.1.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v2.1.0/rwarden_2.1.0_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_3.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_3.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_3.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_3.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_3.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 2.1.0
+# rwarden version 3.0.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 2.1.0
+# rwarden version 3.0.0
 ```
 
 :::
@@ -434,7 +434,157 @@ In **production deployments**, edge reverse proxies (Cloudflare, AWS ALB, Traefi
 
 ---
 
-### 6. Cleanup Sandbox Containers (`cleanup`)
+### 6. Self-Hosted Security Dashboard (`dashboard`) {#dashboard}
+
+Launch a lightweight, self-hosted web dashboard to visualize real-time security events, blocked probes, honeypot tarpit engagements, and attack analytics across your Traefik, Caddy, and NGINX instances.
+
+![RouteWarden Dashboard - Live Event Feed](/dashboard-feed.png)
+
+#### Key Capabilities {#dashboard-features}
+
+- **Zero-Config Docker Discovery**: Attaches directly to the local Docker daemon (`/var/run/docker.sock`) to auto-discover and stream logs from running Traefik, Caddy, and NGINX gateway containers in real time.
+- **Log File Tailing**: Tail local log files or wildcard patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation handling.
+- **Real-Time Live Feed**: Low-latency WebSocket / SSE stream of blocked requests, client IPs with flag emojis, matched URI patterns, HTTP methods, and triggered response modes.
+- **Visual Analytics**: Interactive 24-hour attack timelines, blocks per minute, top attacked endpoints, top offender IPs, response mode breakdown (`block`, `tarpit`, `gzipBomb`, `silentDrop`, `fakeSuccess`), and gateway distribution.
+- **v1.2 Config Viewer**: Inspect running container configuration and `routewarden.json` labels directly from the UI without leaving the dashboard.
+- **GeoIP & Autonomous System Intelligence**: Country resolution with flag emojis via embedded MaxMind GeoLite2 MMDB or live fallback, including ASN, ISP, and location metadata.
+- **Tailscale & NetBird Mesh Auto-Detection**: Native identification for Tailscale (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) and NetBird (`100.64.0.0/16`, `fd00::/8`) overlay networks as well as RFC 5737 testnets (`203.0.113.0/24`).
+- **Deep IP Intelligence View**: Comprehensive threat risk scoring (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), payload patterns, targeted gateways, and paginated event histories per IP.
+- **Zero-Dependency Single Binary**: The modern React SPA frontend is pre-compiled and embedded directly inside the `rwarden` Go binary (`go:embed`). No Node.js runtime, external database, or cloud dependencies required.
+
+---
+
+#### Dashboard Views {#dashboard-views}
+
+##### 1. Live Event Feed {#dashboard-live-feed}
+Stream security events from all gateways with instant search, container filtering, pause/resume, and server-assisted pagination.
+
+![RouteWarden Dashboard - Live Event Feed](/dashboard-feed.png)
+
+##### 2. Analytics & Attack Trends {#dashboard-analytics}
+Inspect 24-hour, 6-hour, and 1-hour attack timelines, rolling block rates, and distribution charts for endpoints, offender IPs, and defense actions.
+
+![RouteWarden Dashboard - Attack Analytics & Statistics](/dashboard-stats.png)
+
+##### 3. Sources & Container Management {#dashboard-sources}
+Monitor all discovered Docker containers and tailed log files. Inspect the active `routewarden.json` configuration for any gateway with a single click.
+
+![RouteWarden Dashboard - Active Log Sources & Containers](/dashboard-sources.png)
+
+##### 4. Deep IP Intelligence & Risk Scoring {#dashboard-ip-intelligence}
+Analyze any IP address with behavioral profiling, ASN/ISP lookup, geographic location, and threat risk assessment.
+
+![RouteWarden Dashboard - IP Threat Intelligence](/dashboard-ip-details.png)
+
+##### 5. Mesh VPN & Private Overlay Recognition {#dashboard-mesh-vpn}
+Automatic recognition of Tailscale and NetBird mesh peers (`100.64.0.0/10` CGNAT, `fd7a:115c:a1e0::/48`, and `fd00::/8` ULA) with dedicated `🔒` indicator badges.
+
+![RouteWarden Dashboard - Tailscale & NetBird VPN Intelligence](/dashboard-ip-vpn.png)
+
+---
+
+#### CLI Usage Examples {#dashboard-usage}
+
+::: code-group
+
+```bash [CLI]
+# 1. Start dashboard with Docker auto-discovery and open browser automatically
+rwarden dashboard
+
+# 2. Bind to a custom port without auto-opening the browser
+rwarden dashboard --port 8080 --no-open
+
+# 3. Tail one or more local RouteWarden log files
+rwarden dashboard --log /var/log/routewarden.log
+
+# 4. Tail wildcard patterns and multiple log sources simultaneously
+rwarden dashboard --log "/var/log/routewarden/*.log" --log /var/log/nginx/access.log
+
+# 5. Standalone file-only mode (disable Docker socket discovery)
+rwarden dashboard --no-docker --log /var/log/routewarden.log
+
+# 6. Customize memory retention (number of past events loaded)
+rwarden dashboard --history 2500 --port 9090
+```
+
+```bash [Docker]
+# Auto-discover gateway containers via Docker socket
+docker run -d \
+  --name routewarden-dashboard \
+  --restart unless-stopped \
+  -p 9090:9090 \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  ghcr.io/routewarden/cli:latest
+
+# Or tail log files from a host volume
+docker run -d \
+  --name routewarden-dashboard \
+  --restart unless-stopped \
+  -p 9090:9090 \
+  -v /var/log/routewarden:/logs:ro \
+  ghcr.io/routewarden/cli:latest \
+  dashboard --host 0.0.0.0 --no-docker --log "/logs/*.log"
+```
+
+```yaml [Docker Compose]
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+
+  routewarden-dashboard:
+    image: ghcr.io/routewarden/cli:latest
+    container_name: routewarden-dashboard
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+```
+
+:::
+
+#### Command Flags {#dashboard-flags}
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `--port` | int | `9090` | Port to serve the dashboard web interface |
+| `--host` | string | `127.0.0.1` | Host address to bind (`0.0.0.0` in Docker / remote access) |
+| `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
+| `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
+| `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
+| `--no-open` | bool | `false` | Do not automatically launch the system default browser |
+
+#### Built-in REST & WebSocket Endpoints {#dashboard-api}
+
+The dashboard server exposes an HTTP API for external integrations, status checks, and monitoring systems:
+
+| Endpoint | Method | Description |
+|:---|:---|:---|
+| `/api/health` | `GET` | Health check returning status, version, and active client count |
+| `/api/events?n=500` | `GET` | Fetch the last `n` recorded security events as JSON |
+| `/api/stats?hours=24` | `GET` | Aggregated analytics snapshot (rates, top IPs, top paths, response modes, gateway distribution) |
+| `/api/sources` | `GET` | List of active log sources (Docker containers & tailed files) and their statuses |
+| `/api/sources/clear` | `POST` | Remove stopped or disconnected log sources from memory |
+| `/api/config/:id` | `GET` | Retrieve and parse `routewarden.json` configuration from a Docker container |
+| `/api/geoip?ip=...` | `GET` | Resolve IP geolocation, country code, flag emoji, and ISP details |
+| `/api/ip/:ip` | `GET` | Deep intelligence summary for a specific IP (threat score, top paths, methods, history) |
+| `/ws/events` | `GET` | Real-time WebSocket connection for live event streaming |
+
+---
+
+### 7. Cleanup Sandbox Containers (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -455,7 +605,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 7. Check CLI Version (`version`)
+### 8. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 
@@ -831,6 +981,31 @@ caddy adapt --config Caddyfile --pretty
 ## Changelog {#changelog}
 
 All notable changes to the RouteWarden CLI (`rwarden`) are documented below. The CLI adheres to [Semantic Versioning](https://semver.org/).
+
+### [v3.0.0] - 2026-09-25
+
+#### Added
+- **Self-Hosted Security Dashboard (`rwarden dashboard`)**:
+  - Real-time, zero-dependency web UI embedded in the `rwarden` binary — no Node.js, no external database, no cloud services required.
+  - **Zero-Config Docker Discovery**: Auto-detects and streams logs from running Traefik, Caddy, and NGINX containers via the local Docker socket.
+  - **Log File Tailing**: Tail local log files or wildcard glob patterns with automatic log rotation support.
+  - **Real-Time Live Event Feed**: WebSocket / SSE stream of blocked requests with full-text search, container filtering, pause/resume, and clear controls.
+  - **Attack Analytics**: Interactive timelines (24h, 6h, 1h), blocks-per-minute chart, top attacked endpoints, top offender IPs, and response mode distribution.
+  - **Sources & Container Management**: View all active log sources with live status badges and one-click filtering.
+- **v1.2 — GeoIP & IP Intelligence**:
+  - Country resolution with flag emojis via embedded GeoLite2 MMDB or `ip-api.com` live fallback.
+  - **Deep IP Intelligence** (`/api/ip/:ip`): Threat risk score, ISP / ASN resolution, geographic location, behavioral patterns, top targeted endpoints, and paginated event history.
+  - **Config Viewer** (`/api/config/:id`): Inspect and render the live `routewarden.json` from any discovered container.
+- **Tailscale & NetBird Mesh VPN Auto-Detection**:
+  - Native identification of Tailscale CGNAT peers (`100.64.0.0/10`) and NetBird ULA overlay peers (`fd00::/8`) with dedicated metadata and flag emoji (`🔒`).
+  - RFC 5737 documentation ranges correctly classified as `LAN / Reserved Test Network`.
+
+#### Changed
+- Documentation site updated with a dedicated **Security Dashboard** section in the VitePress sidebar, covering all views with real screenshots.
+- Sidebar scroll-spy updated to track all dashboard subsection anchors and auto-scroll the sidebar to keep the active item visible.
+- Top navigation updated with a direct **Dashboard** link.
+
+---
 
 ### [v2.1.0] - 2026-09-24
 

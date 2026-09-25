@@ -11,18 +11,20 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/routewarden/cli/dashboard"
 	"github.com/routewarden/cli/engine"
 )
 
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "2.1.0"
+var version = "3.0.0"
 
 type stringSlice []string
 
@@ -52,6 +54,9 @@ Commands:
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
+  dashboard   Start the self-hosted security dashboard web UI
+                e.g. rwarden dashboard
+                e.g. rwarden dashboard --port 9090 --log /var/log/routewarden.log
   cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
@@ -82,6 +87,9 @@ func main() {
 	case "sandbox":
 		handleSandbox(os.Args[2:])
 
+	case "dashboard":
+		handleDashboard(os.Args[2:])
+
 	case "cleanup":
 		handleCleanup(os.Args[2:])
 
@@ -96,6 +104,90 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+func handleDashboard(args []string) {
+	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
+	port := fs.Int("port", 9090, "Port to serve the dashboard (default: 9090)")
+	host := fs.String("host", "127.0.0.1", "Host to bind (default: 127.0.0.1; use 0.0.0.0 in Docker)")
+	noDocker := fs.Bool("no-docker", false, "Disable Docker socket log discovery")
+	socketPath := fs.String("socket", "/var/run/docker.sock", "Docker socket path")
+	historyN := fs.Int("history", 1000, "Number of past events to load on startup")
+	noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
+	var logFiles stringSlice
+	fs.Var(&logFiles, "log", "Path or glob to a log file to tail (repeatable)")
+	_ = fs.Parse(args)
+
+	opts := dashboard.Options{
+		Host:       *host,
+		Port:       *port,
+		LogFiles:   logFiles,
+		NoDocker:   *noDocker,
+		SocketPath: *socketPath,
+		HistoryN:   *historyN,
+		Version:    version,
+	}
+
+	addr := fmt.Sprintf("http://%s:%d", *host, *port)
+	if *host == "0.0.0.0" {
+		addr = fmt.Sprintf("http://localhost:%d", *port)
+	}
+
+	fmt.Printf("🛡️  RouteWarden Dashboard\n")
+	fmt.Printf("   Version:    %s\n", version)
+	fmt.Printf("   Address:    %s\n", addr)
+	if !*noDocker {
+		fmt.Printf("   Docker:     %s\n", *socketPath)
+	}
+	if len(logFiles) > 0 {
+		fmt.Printf("   Log files:  %v\n", []string(logFiles))
+	}
+	fmt.Printf("\n   Press Ctrl+C to stop.\n\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Graceful shutdown on SIGINT / SIGTERM
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n🛑 Shutting down dashboard...")
+		cancel()
+	}()
+
+	srv := dashboard.NewServer(opts)
+
+	// Open browser after a short delay to let the server start
+	if !*noOpen {
+		go func() {
+			time.Sleep(600 * time.Millisecond)
+			openBrowser(addr)
+		}()
+	}
+
+	if err := srv.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// openBrowser opens the given URL in the default system browser.
+func openBrowser(url string) {
+	var cmd string
+	var cmdArgs []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		cmdArgs = []string{url}
+	case "windows":
+		cmd = "rundll32"
+		cmdArgs = []string{"url.dll,FileProtocolHandler", url}
+	default: // linux, freebsd, etc.
+		cmd = "xdg-open"
+		cmdArgs = []string{url}
+	}
+	_ = exec.Command(cmd, cmdArgs...).Start()
 }
 
 func handleCleanup(args []string) {
