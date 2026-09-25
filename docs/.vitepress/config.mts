@@ -61,6 +61,8 @@ export default defineConfig({
         items: [
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
+          { text: 'Security Dashboard', link: '/#dashboard' },
+          { text: 'Guard TCP Proxy', link: '/#guard' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
           { text: 'Production Integration', link: '/#production' },
           { text: 'Changelog', link: '/#changelog' }
