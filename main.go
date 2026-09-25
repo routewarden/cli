@@ -19,6 +19,7 @@ import (
 
 	"github.com/routewarden/cli/dashboard"
 	"github.com/routewarden/cli/engine"
+	"github.com/routewarden/cli/guard"
 )
 
 //go:embed config.schema.json
@@ -57,6 +58,9 @@ Commands:
   dashboard   Start the self-hosted security dashboard web UI
                 e.g. rwarden dashboard
                 e.g. rwarden dashboard --port 9090 --log /var/log/routewarden.log
+  guard       Start the TCP security proxy daemon (SSH, SMTP, POP3, raw TCP)
+                e.g. rwarden guard --config netguard.json
+                e.g. rwarden guard validate --config netguard.json
   cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
@@ -89,6 +93,9 @@ func main() {
 
 	case "dashboard":
 		handleDashboard(os.Args[2:])
+
+	case "guard":
+		handleGuard(os.Args[2:])
 
 	case "cleanup":
 		handleCleanup(os.Args[2:])
@@ -171,6 +178,91 @@ func handleDashboard(args []string) {
 		os.Exit(1)
 	}
 }
+
+func handleGuard(args []string) {
+	// Sub-subcommand: rwarden guard validate
+	if len(args) > 0 && args[0] == "validate" {
+		handleGuardValidate(args[1:])
+		return
+	}
+
+	fs := flag.NewFlagSet("guard", flag.ExitOnError)
+	configPath := fs.String("config", "netguard.json", "Path to netguard.json config file")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Usage: rwarden guard [flags]
+
+Start the RouteWarden TCP security proxy daemon. Listens on configured ports
+and proxies connections through a policy pipeline (CIDR, geo-block, rate limit,
+protocol inspection, auto-ban) before forwarding to upstream services.
+
+Flags:
+`)
+		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  rwarden guard --config netguard.json
+  rwarden guard validate --config netguard.json
+`)
+	}
+	_ = fs.Parse(args)
+
+	cfg, err := guard.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Guard config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n🛑 Shutting down guard...")
+		cancel()
+	}()
+
+	d := guard.NewDaemon(cfg)
+
+	fmt.Printf("🛡️  RouteWarden Guard\n")
+	fmt.Printf("   Version:  %s\n", version)
+	for _, svc := range cfg.Services {
+		if svc.Enabled {
+			fmt.Printf("   %-8s %s → %s\n", svc.Name, svc.Listen, svc.Upstream)
+		}
+	}
+	fmt.Printf("\n   Press Ctrl+C to stop.\n\n")
+
+	if err := d.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Guard error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleGuardValidate(args []string) {
+	fs := flag.NewFlagSet("guard validate", flag.ExitOnError)
+	configPath := fs.String("config", "netguard.json", "Path to netguard.json config file")
+	_ = fs.Parse(args)
+
+	cfg, err := guard.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Config valid — %d service(s) defined\n", len(cfg.Services))
+	for _, svc := range cfg.Services {
+		status := "enabled"
+		if !svc.Enabled {
+			status = "disabled"
+		}
+		fmt.Printf("   %-8s [%s] %s → %s (%s)\n",
+			svc.Name, status, svc.Listen, svc.Upstream, svc.Protocol)
+	}
+	_ = cfg
+}
+
 
 // openBrowser opens the given URL in the default system browser.
 func openBrowser(url string) {

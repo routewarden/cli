@@ -1,0 +1,52 @@
+{
+  "$schema": "https://routewarden.github.io/cli/netguard.schema.json",
+  "enabled": true,
+  "global": {
+    "banAfterFailures": 5,
+    "banDurationSeconds": 3600,
+    "logFile": "/var/log/netguard/events.log"
+  },
+  "services": [
+    {
+      "name": "ssh",
+      "enabled": true,
+      "listen": ":2222",
+      "upstream": "127.0.0.1:22",
+      "protocol": "ssh",
+      "maxAuthFailures": 3,
+      "banAfterFailures": 3,
+      "rateLimit": {
+        "connectionsPerMinute": 10
+      },
+      "response": {
+        "mode": "reject"
+      }
+    },
+    {
+      "name": "smtp",
+      "enabled": true,
+      "listen": ":2587",
+      "upstream": "127.0.0.1:25",
+      "protocol": "smtp",
+      "rateLimit": {
+        "connectionsPerMinute": 30,
+        "authAttemptsPerMinute": 5
+      },
+      "response": {
+        "mode": "reject",
+        "rejectMessage": "550 5.7.1 Policy violation"
+      }
+    },
+    {
+      "name": "raw-tcp",
+      "enabled": true,
+      "listen": ":19999",
+      "upstream": "127.0.0.1:9999",
+      "protocol": "tcp",
+      "allowedIPs": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"],
+      "response": {
+        "mode": "drop"
+      }
+    }
+  ]
+}
