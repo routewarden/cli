@@ -1,6 +1,6 @@
 {
   "name": "@routewarden/cli-docs",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Documentation site for RouteWarden CLI (rwarden)",
   "private": true,
   "type": "module",
@@ -8,7 +8,9 @@
     "version:update": "./scripts/update-version.sh",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "dashboard:dev": "npm --prefix web run dev",
+    "dashboard:build": "npm --prefix web run build"
   },
   "devDependencies": {
     "vitepress": "^1.6.3"

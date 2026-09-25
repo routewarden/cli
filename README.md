@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 2.1.0
+# rwarden version 3.0.0
 ```
 
 ---
@@ -432,7 +432,120 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ---
 
-### 6. Cleanup Sandboxes (`cleanup`)
+### 6. Self-Hosted Security Dashboard (`dashboard`)
+
+Launch a lightweight, self-hosted web dashboard to visualize real-time security events, blocked probes, honeypot tarpit engagements, and attack analytics across your Traefik, Caddy, and NGINX instances.
+
+The dashboard features:
+- **Zero-Config Docker Discovery**: Reads container logs directly via the local Docker socket (`/var/run/docker.sock`) to auto-detect and stream logs from running Traefik, Caddy, and NGINX gateways.
+- **Log File Tailing**: Tail local log files or wildcard patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation handling.
+- **Real-Time Live Feed**: Live WebSocket stream of blocked requests, client IPs, matched patterns, HTTP methods, and triggered response modes.
+- **Rich Visual Analytics**: 24-hour attack trends, blocks per minute, top attacked endpoints, top offender IPs, response mode breakdown (block, tarpit, gzipBomb, silentDrop, fakeSuccess), and gateway distribution.
+- **Zero-Dependency Single Binary**: The modern React SPA frontend is pre-compiled and embedded directly inside the `rwarden` Go binary (`go:embed`). No Node.js runtime, no external databases, and no background services required.
+- **Docker Ready**: Runs as a lightweight standalone container or alongside your reverse proxies in `docker-compose.yml`.
+
+#### CLI Usage Examples
+
+```bash
+# 1. Start dashboard with Docker auto-discovery and open browser automatically
+rwarden dashboard
+
+# 2. Bind to a custom port without auto-opening the browser
+rwarden dashboard --port 8080 --no-open
+
+# 3. Tail one or more local RouteWarden log files
+rwarden dashboard --log /var/log/routewarden.log
+
+# 4. Tail wildcard patterns and multiple log sources simultaneously
+rwarden dashboard --log "/var/log/routewarden/*.log" --log /var/log/nginx/access.log
+
+# 5. Standalone file-only mode (disable Docker socket discovery)
+rwarden dashboard --no-docker --log /var/log/routewarden.log
+
+# 6. Customize memory retention (number of past events loaded)
+rwarden dashboard --history 2500 --port 9090
+```
+
+#### Running via Docker (`ghcr.io/routewarden/cli`)
+
+The official `ghcr.io/routewarden/cli` container image starts the dashboard by default, bound to `0.0.0.0:9090`:
+
+```bash
+# Auto-discover gateway containers via Docker socket
+docker run -d \
+  --name routewarden-dashboard \
+  --restart unless-stopped \
+  -p 9090:9090 \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  ghcr.io/routewarden/cli:latest
+
+# Or tail log files from a host volume
+docker run -d \
+  --name routewarden-dashboard \
+  --restart unless-stopped \
+  -p 9090:9090 \
+  -v /var/log/routewarden:/logs:ro \
+  ghcr.io/routewarden/cli:latest \
+  dashboard --host 0.0.0.0 --no-docker --log "/logs/*.log"
+```
+
+#### Docker Compose Example
+
+Deploy the dashboard alongside your existing reverse proxy infrastructure:
+
+```yaml
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+
+  routewarden-dashboard:
+    image: ghcr.io/routewarden/cli:latest
+    container_name: routewarden-dashboard
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+```
+
+#### Command Flags
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `--port` | int | `9090` | Port to serve the dashboard web interface |
+| `--host` | string | `127.0.0.1` | Host address to bind (`0.0.0.0` for Docker / remote access) |
+| `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
+| `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
+| `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
+| `--no-open` | bool | `false` | Do not automatically launch the system default browser |
+
+#### Built-in REST & WebSocket Endpoints
+
+The dashboard server exposes an HTTP API for external integrations, status checks, and alerting scripts:
+
+| Endpoint | Method | Description |
+|:---|:---|:---|
+| `/api/health` | `GET` | Health check returning status, version, and active client count |
+| `/api/events?n=500` | `GET` | Fetch the last `n` recorded security events as JSON |
+| `/api/stats?hours=24` | `GET` | Aggregated analytics snapshot (rates, top IPs, top paths, response modes, gateway distribution) |
+| `/api/sources` | `GET` | List of active log sources (Docker containers & tailed files) and their statuses |
+| `/ws/events` | `GET` | Real-time WebSocket connection for live event streaming |
+
+---
+
+### 7. Cleanup Sandboxes (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -451,7 +564,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 7. Check CLI Version (`version`)
+### 8. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 

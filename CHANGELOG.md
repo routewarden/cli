@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v3.0.0] - 2026-09-25
+
+### Added
+
+- **Self-Hosted Security Dashboard (`rwarden dashboard`)**:
+  - Launch a real-time, zero-dependency web dashboard embedded directly inside the `rwarden` binary (`go:embed`) — no Node.js, no external database, no cloud services required.
+  - **Zero-Config Docker Discovery**: Auto-detects and streams logs from running Traefik, Caddy, and NGINX gateway containers via the local Docker socket (`/var/run/docker.sock`).
+  - **Log File Tailing**: Tail local log files or wildcard glob patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation support.
+  - **Real-Time Live Event Feed**: Low-latency WebSocket / SSE stream of blocked requests with paginated feed, full-text search, container filtering, pause/resume, and clear controls.
+  - **Attack Analytics**: Interactive 24-hour, 6-hour, and 1-hour timelines, blocks-per-minute chart, top attacked endpoints, top offender IPs, response mode distribution.
+  - **Sources & Container Management**: View all active Docker containers and tailed log files with live status badges and one-click filtering.
+
+- **v1.2 — GeoIP & IP Intelligence**:
+  - Country resolution with flag emojis via embedded MaxMind GeoLite2 MMDB or free `ip-api.com` live fallback.
+  - **Deep IP Intelligence View** (`/api/ip/:ip`): Comprehensive per-IP profiling including threat risk score (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), ISP / ASN resolution, geographic location, behavioral pattern breakdown, top targeted endpoints, HTTP methods, response modes, and paginated event history.
+  - **Config Viewer** (`/api/config/:id`): Inspect and render the live `routewarden.json` label configuration read from any discovered Docker container without leaving the dashboard.
+
+- **Tailscale & NetBird Mesh VPN Auto-Detection**:
+  - Native identification of Tailscale CGNAT peers (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) and NetBird overlay peers (`100.64.0.0/16`, `fd00::/8 ULA`) with dedicated `🔒` flag emoji, `VPN` country code, and full ISP/network metadata.
+  - RFC 5737 documentation networks (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`) correctly classified as `LAN` / `Reserved Test Network`.
+
+- **Dashboard REST & WebSocket API**:
+  - `GET /api/health` — health check
+  - `GET /api/events?n=N` — last N security events
+  - `GET /api/stats?hours=N` — aggregated analytics
+  - `GET /api/sources` — active log sources list
+  - `POST /api/sources/clear` — remove stopped sources
+  - `GET /api/config/:id` — container config viewer
+  - `GET /api/geoip?ip=...` — IP geolocation lookup
+  - `GET /api/ip/:ip` or `GET /api/ip?ip=...` — full IP intelligence
+  - `WS /ws/events` — live event streaming
+
+- **CLI Flags for `dashboard` command**:
+
+  | Flag | Default | Description |
+  |:---|:---|:---|
+  | `--port` | `9090` | Port to serve the dashboard |
+  | `--host` | `127.0.0.1` | Bind address (`0.0.0.0` for Docker/remote) |
+  | `--log` | `""` | Log file path or glob pattern (repeatable) |
+  | `--no-docker` | `false` | Disable Docker socket discovery |
+  | `--socket` | `/var/run/docker.sock` | Docker socket path |
+  | `--history` | `1000` | Events retained in memory |
+  | `--no-open` | `false` | Suppress auto-opening the browser |
+
+### Changed
+
+- Documentation site updated with a dedicated **Security Dashboard** section in the VitePress sidebar, covering all dashboard views with real screenshots.
+- Sidebar scroll-spy updated to dynamically track all anchor IDs (including all dashboard subsections) and auto-scroll the sidebar container to keep the active section in view.
+- Top navigation bar updated with a direct **Dashboard** entry.
+
+---
+
 ## [v2.1.0] - 2026-09-24
 
 ### Added
