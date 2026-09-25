@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,13 +19,12 @@ import (
 
 	"github.com/routewarden/cli/dashboard"
 	"github.com/routewarden/cli/engine"
-	"github.com/routewarden/cli/guard"
 )
 
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "3.0.0"
+var version = "4.0.0"
 
 type stringSlice []string
 
@@ -51,17 +49,15 @@ Commands:
                 e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
   validate    Validate a RouteWarden configuration file (JSON)
                 e.g. rwarden validate [routewarden.json]
-  generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx)
+  generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden)
                 e.g. rwarden generate caddy [routewarden.json]
+                e.g. rwarden generate tcp-warden [routewarden.json]
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
   dashboard   Start the self-hosted security dashboard web UI
                 e.g. rwarden dashboard
                 e.g. rwarden dashboard --port 9090 --log /var/log/routewarden.log
-  guard       Start the TCP security proxy daemon (SSH, SMTP, POP3, raw TCP)
-                e.g. rwarden guard --config netguard.json
-                e.g. rwarden guard validate --config netguard.json
   cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
@@ -94,9 +90,6 @@ func main() {
 
 	case "dashboard":
 		handleDashboard(os.Args[2:])
-
-	case "guard":
-		handleGuard(os.Args[2:])
 
 	case "cleanup":
 		handleCleanup(os.Args[2:])
@@ -179,267 +172,6 @@ func handleDashboard(args []string) {
 		os.Exit(1)
 	}
 }
-
-func handleGuard(args []string) {
-	if len(args) > 0 {
-		switch args[0] {
-		case "validate":
-			handleGuardValidate(args[1:])
-			return
-		case "status":
-			handleGuardStatus(args[1:])
-			return
-		case "banlist":
-			handleGuardBanlist(args[1:])
-			return
-		case "unban":
-			handleGuardUnban(args[1:])
-			return
-		}
-	}
-
-	fs := flag.NewFlagSet("guard", flag.ExitOnError)
-	configPath := fs.String("config", "netguard.json", "Path to netguard.json config file")
-	apiListen := fs.String("api-listen", "", "Override API listen address (e.g. 127.0.0.1:9091)")
-	logFile := fs.String("log-file", "", "Override JSON events log file path")
-	csURL := fs.String("crowdsec-url", "", "Override CrowdSec LAPI URL (e.g. http://127.0.0.1:8080)")
-	csKey := fs.String("crowdsec-key", "", "Override CrowdSec bouncer API key")
-
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: rwarden guard [subcommand] [flags]
-
-RouteWarden Guard — Protocol-aware L4 TCP security proxy daemon.
-Protects SSH, SMTP, POP3, IMAP, and raw TCP services with real-time rate limiting,
-GeoIP/CIDR blocking, protocol inspection, CrowdSec LAPI bouncer, and automatic IP bans.
-
-Subcommands:
-  (none)      Run the guard proxy daemon
-  validate    Validate netguard.json configuration file
-  status      Query live health & metrics from running daemon
-  banlist     Show active IP bans
-  unban <ip>  Unban an IP address
-
-Flags:
-`)
-		fs.PrintDefaults()
-		fmt.Fprintf(os.Stderr, `
-Examples:
-  rwarden guard --config netguard.json
-  rwarden guard validate --config netguard.json
-  rwarden guard status --api http://127.0.0.1:9091
-  rwarden guard banlist --api http://127.0.0.1:9091
-  rwarden guard unban 192.0.2.1 --api http://127.0.0.1:9091
-`)
-	}
-	_ = fs.Parse(args)
-
-	cfg, err := guard.LoadConfig(*configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Guard config error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Apply CLI flag overrides
-	if *apiListen != "" {
-		cfg.API.Enabled = true
-		cfg.API.Listen = *apiListen
-	}
-	if *logFile != "" {
-		cfg.Global.LogFile = *logFile
-	}
-	if *csURL != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.LAPIURL = *csURL
-	} else if envURL := os.Getenv("CROWDSEC_URL"); envURL != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.LAPIURL = envURL
-	} else if envURL := os.Getenv("CROWDSEC_LAPI_URL"); envURL != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.LAPIURL = envURL
-	}
-
-	if *csKey != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.APIKey = *csKey
-	} else if envKey := os.Getenv("CROWDSEC_KEY"); envKey != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.APIKey = envKey
-	} else if envKey := os.Getenv("CROWDSEC_API_KEY"); envKey != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.APIKey = envKey
-	} else if envKey := os.Getenv("BOUNCER_KEY_GUARD"); envKey != "" {
-		cfg.CrowdSec.Enabled = true
-		cfg.CrowdSec.APIKey = envKey
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Println("\n🛑 Shutting down guard...")
-		cancel()
-	}()
-
-	d, err := guard.NewDaemon(cfg, *configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Guard initialization error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("🛡️  RouteWarden Guard\n")
-	fmt.Printf("   Version:  %s\n", version)
-	if cfg.API.Enabled {
-		fmt.Printf("   API:      http://%s\n", cfg.API.Listen)
-	}
-	if cfg.CrowdSec.Enabled {
-		fmt.Printf("   CrowdSec: %s\n", cfg.CrowdSec.LAPIURL)
-	}
-	if cfg.Global.LogFile != "" {
-		fmt.Printf("   Logs:     %s\n", cfg.Global.LogFile)
-	}
-	fmt.Println("   Services:")
-	for _, svc := range cfg.Services {
-		if svc.Enabled {
-			fmt.Printf("     • %-8s %s → %s (%s)\n", svc.Name, svc.Listen, svc.Upstream, svc.Protocol)
-		}
-	}
-	fmt.Printf("\n   Press Ctrl+C to stop, kill -HUP %d to reload config.\n\n", os.Getpid())
-
-	if err := d.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Guard error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func handleGuardValidate(args []string) {
-	fs := flag.NewFlagSet("guard validate", flag.ExitOnError)
-	configPath := fs.String("config", "netguard.json", "Path to netguard.json config file")
-	_ = fs.Parse(args)
-
-	cfg, err := guard.LoadConfig(*configPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("✅ Config valid — %d service(s) defined\n", len(cfg.Services))
-	for _, svc := range cfg.Services {
-		status := "enabled"
-		if !svc.Enabled {
-			status = "disabled"
-		}
-		fmt.Printf("   %-8s [%s] %s → %s (%s)\n",
-			svc.Name, status, svc.Listen, svc.Upstream, svc.Protocol)
-	}
-	if cfg.CrowdSec.Enabled {
-		fmt.Printf("   CrowdSec: enabled (%s)\n", cfg.CrowdSec.LAPIURL)
-	}
-	if cfg.API.Enabled {
-		fmt.Printf("   API:      enabled (%s)\n", cfg.API.Listen)
-	}
-}
-
-func handleGuardStatus(args []string) {
-	fs := flag.NewFlagSet("guard status", flag.ExitOnError)
-	apiAddr := fs.String("api", "http://127.0.0.1:9091", "Guard API URL")
-	_ = fs.Parse(args)
-
-	url := strings.TrimRight(*apiAddr, "/") + "/api/guard/health"
-	resp, err := http.Get(url)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to connect to guard daemon: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	var data map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error parsing daemon response: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("🛡️  RouteWarden Guard Status:")
-	fmt.Printf("   Status:    %v\n", data["status"])
-	fmt.Printf("   Uptime:    %v\n", data["uptime"])
-	fmt.Printf("   Services:  %v\n", data["services_count"])
-	fmt.Printf("   Active Bans: %v\n", data["active_bans_count"])
-	fmt.Printf("   CrowdSec:  connected=%v (cached decisions: %v)\n", data["crowdsec_connected"], data["crowdsec_decisions"])
-}
-
-func handleGuardBanlist(args []string) {
-	fs := flag.NewFlagSet("guard banlist", flag.ExitOnError)
-	apiAddr := fs.String("api", "http://127.0.0.1:9091", "Guard API URL")
-	_ = fs.Parse(args)
-
-	url := strings.TrimRight(*apiAddr, "/") + "/api/guard/banlist"
-	resp, err := http.Get(url)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to connect to guard daemon: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	var data struct {
-		Count int `json:"count"`
-		Bans  []struct {
-			IP               string `json:"ip"`
-			Reason           string `json:"reason"`
-			Service          string `json:"service"`
-			RemainingSeconds int64  `json:"remaining_seconds"`
-		} `json:"bans"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error parsing daemon response: %v\n", err)
-		os.Exit(1)
-	}
-
-	if data.Count == 0 {
-		fmt.Println("No active bans.")
-		return
-	}
-
-	fmt.Printf("Active Bans (%d):\n", data.Count)
-	fmt.Printf("  %-16s %-10s %-12s %s\n", "IP ADDRESS", "SERVICE", "REMAINING", "REASON")
-	fmt.Println("  ----------------------------------------------------------------")
-	for _, b := range data.Bans {
-		dur := time.Duration(b.RemainingSeconds) * time.Second
-		fmt.Printf("  %-16s %-10s %-12s %s\n", b.IP, b.Service, dur.String(), b.Reason)
-	}
-}
-
-func handleGuardUnban(args []string) {
-	fs := flag.NewFlagSet("guard unban", flag.ExitOnError)
-	apiAddr := fs.String("api", "http://127.0.0.1:9091", "Guard API URL")
-	_ = fs.Parse(args)
-
-	remaining := fs.Args()
-	if len(remaining) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: rwarden guard unban <ip> [--api <url>]")
-		os.Exit(1)
-	}
-	targetIP := remaining[0]
-
-	url := strings.TrimRight(*apiAddr, "/") + "/api/guard/unban"
-	payload, _ := json.Marshal(map[string]string{"ip": targetIP})
-	resp, err := http.Post(url, "application/json", strings.NewReader(string(payload)))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to connect to guard daemon: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		fmt.Printf("✅ Successfully unbanned %s\n", targetIP)
-	} else {
-		fmt.Fprintf(os.Stderr, "❌ Unban request failed (HTTP %d)\n", resp.StatusCode)
-		os.Exit(1)
-	}
-}
-
-
 
 // openBrowser opens the given URL in the default system browser.
 func openBrowser(url string) {
@@ -525,7 +257,7 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 
 func handleGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
-	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx")
+	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden")
 	shortTarget := fs.String("t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
 	shortConfig := fs.String("c", "", "Alias for --config")
@@ -547,7 +279,7 @@ func handleGenerate(args []string) {
 	}
 
 	if *target == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx> is required")
+		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx|tcp-warden> is required")
 		os.Exit(1)
 	}
 
@@ -943,6 +675,12 @@ func handleValidate(args []string) {
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
 		os.Exit(1)
+	}
+
+	if strings.Contains(string(data), "services:") && (strings.HasSuffix(targetName, ".yaml") || strings.HasSuffix(targetName, ".yml") || strings.Contains(string(data), "version:")) {
+		fmt.Printf("✓ Configuration %s is VALID (TCP Warden YAML format).\n", targetName)
+		fmt.Println("  - Target: RouteWarden TCP Warden (tcp-warden)")
+		return
 	}
 
 	cfg := engine.CreateConfig()

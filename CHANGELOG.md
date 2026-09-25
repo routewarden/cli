@@ -11,33 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **RouteWarden Guard — Protocol-Aware L4 TCP Security Proxy (`rwarden guard`)**:
-  - Complete daemon architecture protecting non-HTTP edge services (**SSH**, **SMTP**, **POP3**, **IMAP**, and **Generic TCP Tunnels**).
-  - **8-Stage Pipeline**: Real-time evaluation spanning GeoIP metadata, local TTL banlist, CrowdSec LAPI bouncer cache, CIDR allowlists/blocklists, ISO country geo-blocking, sliding-window rate limiting, protocol inspection, and SIEM logging.
-- **Protocol Inspectors**:
-  - **SSH**: Version banner validation, legacy SSH-1 rejection, and automatic brute-force detection via `SSH_MSG_USERAUTH_FAILURE` byte inspection.
-  - **SMTP**: EHLO/HELO relay, `MAIL FROM` domain matching (`blockedSenderDomains` with glob wildcards e.g. `*.ru`, `*.biz`), `AUTH` failure tracking (`535`/`5xx`), and seamless handover on `STARTTLS` and `DATA`.
-  - **POP3**: Server greeting relay, `USER`/`PASS` inspection, `-ERR` authentication failure tracking, and `STLS` stream handover.
-  - **IMAP**: Tagged command parser, `LOGIN`/`AUTHENTICATE` tracking (`NO`/`BAD`), and `STARTTLS` stream handover.
-  - **Generic TCP**: Transparent high-throughput proxy with half-close EOF handling for database ingress (Postgres, MySQL, Redis).
-- **CrowdSec LAPI Bouncer Integration**:
-  - Direct connection to CrowdSec Local API stream (`GET /v1/decisions/stream`).
-  - Zero-latency in-memory cache of IP and CIDR decisions with background polling.
-- **Management REST & SSE API**:
-  - Endpoints on configurable port (`:9091`): `/health`, `/api/guard/health`, `/api/guard/services`, `/api/guard/stats`, `/api/guard/banlist`, `/api/guard/unban`, `/api/guard/ban`, `/api/guard/events`.
-  - Server-Sent Events (SSE) feed emitting real-time connection decisions.
-- **Runtime SIGHUP Hot-Reload**:
-  - Graceful configuration reload via `kill -HUP <pid>` without dropping active connections.
-- **CLI Subcommands**:
-  - `rwarden guard [run]` — Run the proxy daemon.
-  - `rwarden guard validate` — Verify `netguard.json` syntax and semantic validity.
-  - `rwarden guard status` — Query live health and metrics from running daemon.
-  - `rwarden guard banlist` — Display active bans and TTL countdowns.
-  - `rwarden guard unban <ip>` — Instantly remove an IP ban.
-- **Deployment & Schema**:
-  - Official JSON Schema `netguard.schema.json` published for editor autocompletion.
-  - Ready-to-use Docker Compose recipe with RouteWarden Guard, CrowdSec, and services.
-  - Official CrowdSec parser (`routewarden-guard.yaml`) and scenario (`routewarden-guard-bf.yaml`).
+- **RouteWarden TCP Warden Integration (`rwarden generate tcp-warden` & `rwarden validate`)**:
+  - Declarative generation of `tcp-warden.yaml` configurations directly from centralized RouteWarden JSON policies (`rwarden generate tcp-warden`).
+  - Strict syntax, schema, and CIDR validation for `tcp-warden.yaml` via CLI arguments or standard input pipelines (`rwarden validate`).
+- **Real-Time TCP Monitoring in RouteWarden Dashboard**:
+  - Direct ingestion and real-time visualization of structured `tcp-warden.jsonl` event streams (`rwarden dashboard --log /var/log/routewarden/tcp-warden.jsonl`).
+  - Real-time traffic velocity, protocol breakdown, GeoIP origins, and active ban countdowns.
+- **RouteWarden TCP Warden Standalone Application** ([`github.com/routewarden/tcp-warden`](https://github.com/routewarden/tcp-warden)):
+  - Dedicated Layer 4 TCP proxy daemon with zero-allocation architecture protecting SSH, SMTP, POP3, IMAP, and generic TCP streams.
+  - Native YAML syntax (`tcp-warden.yaml`), published JSON schema, CrowdSec LAPI bouncer integration, and management REST/SSE API.
 
 ---
 

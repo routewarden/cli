@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_3.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_3.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_3.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_3.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_3.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_4.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_4.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_4.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_4.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_4.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 :::
@@ -194,6 +194,9 @@ rwarden validate -c routewarden.json
 # Auto-detects routewarden.json in current directory if omitted
 rwarden validate
 
+# Validate tcp-warden.yaml configuration
+rwarden validate tcp-warden.yaml
+
 # Validate piped config via stdin
 cat routewarden.json | rwarden validate
 ```
@@ -201,6 +204,9 @@ cat routewarden.json | rwarden validate
 ```bash [Docker]
 # Validate mounted config file
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate /routewarden.json
+
+# Validate mounted tcp-warden.yaml file
+docker run --rm -v $(pwd)/tcp-warden.yaml:/tcp-warden.yaml ghcr.io/routewarden/cli:latest validate /tcp-warden.yaml
 ```
 
 :::
@@ -266,6 +272,9 @@ rwarden generate caddy [routewarden.json]
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 rwarden generate nginx [routewarden.json]
+
+# TCP Warden: tcp-warden.yaml configuration
+rwarden generate tcp-warden [routewarden.json] > tcp-warden.yaml
 ```
 
 ```bash [Docker]
@@ -283,13 +292,16 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 # NGINX / OpenResty: output as Lua init table for nginx.conf
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate nginx /routewarden.json
+
+# TCP Warden: output as tcp-warden.yaml configuration
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate tcp-warden /routewarden.json > tcp-warden.yaml
 ```
 
 :::
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `<target>`, `-t`, `--target` | string | `""` | Target gateway format (e.g. `traefik-yaml`, `caddy`, `nginx`) |
+| `<target>`, `-t`, `--target` | string | `""` | Target gateway format (e.g. `traefik-yaml`, `caddy`, `nginx`, `tcp-warden`) |
 | `[config]`, `-c`, `--config` | string | `"routewarden.json"` | Path to RouteWarden JSON config file (or `-` for stdin) |
 
 **Available Targets & Aliases:**
@@ -301,6 +313,7 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `traefik-labels`, `compose`, `docker-compose`, `labels` | Docker Compose `labels:` block |
 | `caddy`, `caddyfile` | Caddyfile `routewarden { ... }` directive block |
 | `nginx`, `openresty` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+| `tcp-warden`, `tcp`, `tcpwarden` | TCP Warden YAML configuration (`tcp-warden.yaml`) |
 
 ---
 
@@ -505,6 +518,9 @@ rwarden dashboard --no-docker --log /var/log/routewarden.log
 
 # 6. Customize memory retention (number of past events loaded)
 rwarden dashboard --history 2500 --port 9090
+
+# 7. Ingest structured logs from RouteWarden TCP Warden
+rwarden dashboard --log /var/log/routewarden/tcp-warden.jsonl
 ```
 
 ```bash [Docker]
@@ -584,484 +600,7 @@ The dashboard server exposes an HTTP API for external integrations, status check
 
 ---
 
-### 7. TCP Security Proxy Daemon (`guard`) {#guard}
-
-`rwarden guard` is a **protocol-aware Layer 4 TCP security proxy daemon** designed to protect non-HTTP services from brute-force authentication, botnet reconnaissance, volumetric floods, and credential stuffing.
-
-While RouteWarden's HTTP gateway plugins protect web traffic on Traefik, Caddy, and NGINX, `guard` stands in front of underlying infrastructure protocols:
-- **SSH** (secure shell, git over SSH)
-- **SMTP & SMTPS** (mail transfer, submission, anti-spam)
-- **POP3 & POP3S** (post office protocol)
-- **IMAP & IMAPS** (internet message access protocol)
-- **Database Tunnels & Raw TCP** (PostgreSQL, MySQL, Redis, custom TCP daemons)
-
-```
-                       ┌─────────────────────────────────────────────────────┐
-                       │               Incoming TCP Connection               │
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 1: GeoIP & ASN Metadata Resolution        │ ──► Dashboard Feed
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 2: Live In-Memory TTL Banlist Check       │ ──► [DROP] if active ban
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 2.5: CrowdSec LAPI Bouncer Decision Cache │ ──► [DROP] if banned by CrowdSec
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 3: CIDR & IP Allowlist (Service/Global)   │ ──► [REJECT] if not in allowlist
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 4: Explicit IP / CIDR Blocklist           │ ──► [DROP] if matched
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 5: ISO Country Code Geo-Block             │ ──► [REJECT] if blacklisted
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 6: Sliding-Window Rate Limiter            │ ──► [REJECT] if exceeded
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 7: Protocol Inspector & Relay Handover    │
-                       │  • SSH: Banner checks, SSH-1 drop, USERAUTH monitor │
-                       │  • SMTP: Domain filtering, AUTH tracker, STARTTLS   │
-                       │  • POP3: USER/PASS monitor, auth fail tracking, STLS│
-                       │  • IMAP: Tagged LOGIN tracker, STARTTLS handover    │
-                       │  • TCP: High-throughput bidirectional proxy         │
-                       └──────────────────────────┬──────────────────────────┘
-                                                  │
-                                                  ▼
-                       ┌─────────────────────────────────────────────────────┐
-                       │     Stage 8: Atomic Metrics & JSON Log Exporter     │ ──► CrowdSec / SIEM / SSE Stream
-                       └─────────────────────────────────────────────────────┘
-```
-
----
-
-#### Commands & Subcommands {#guard-commands}
-
-::: code-group
-
-```bash [CLI]
-# 1. Start the guard proxy daemon (default reads netguard.json)
-rwarden guard --config netguard.json
-
-# 2. Validate configuration file syntax and semantics
-rwarden guard validate --config netguard.json
-
-# 3. Query live health and runtime stats from the running daemon
-rwarden guard status --api http://127.0.0.1:9091
-
-# 4. View active IP bans and TTL countdowns
-rwarden guard banlist --api http://127.0.0.1:9091
-
-# 5. Manually unban an IP address in real-time
-rwarden guard unban 192.0.2.100 --api http://127.0.0.1:9091
-```
-
-```bash [Docker]
-# Run guard in Docker with host networking (recommended for low-overhead L4 proxying)
-docker run -d \
-  --name routewarden-guard \
-  --network host \
-  -v $(pwd)/netguard.json:/etc/routewarden/netguard.json:ro \
-  -v /var/log/rwarden:/var/log/rwarden \
-  ghcr.io/routewarden/cli:latest guard --config /etc/routewarden/netguard.json
-
-# Validate mounted configuration
-docker run --rm \
-  -v $(pwd)/netguard.json:/etc/routewarden/netguard.json:ro \
-  ghcr.io/routewarden/cli:latest guard validate --config /etc/routewarden/netguard.json
-
-# Check live daemon status via API
-docker run --rm ghcr.io/routewarden/cli:latest guard status --api http://host.docker.internal:9091
-```
-
-:::
-
-##### CLI Flags
-
-| Flag | Type | Default | Description |
-|:---|:---|:---|:---|
-| `--config` | string | `"netguard.json"` | Path to the `netguard.json` configuration file |
-| `--api-listen` | string | `""` | Override the HTTP API bind address (e.g. `127.0.0.1:9091` or `0.0.0.0:9091`) |
-| `--log-file` | string | `""` | Override the structured JSON log output path (e.g. `/var/log/rwarden/guard.jsonl`) |
-| `--crowdsec-url` | string | `""` | Override the CrowdSec Local API (LAPI) base URL (e.g. `http://127.0.0.1:8080`) |
-| `--crowdsec-key` | string | `""` | Override the CrowdSec bouncer API key |
-
----
-
-#### Configuration Guide (`netguard.json`) {#guard-config}
-
-RouteWarden Guard is configured using a declarative JSON file (`netguard.json`). The official schema is available at `https://routewarden.github.io/cli/netguard.schema.json`.
-
-```json
-{
-  "$schema": "https://routewarden.github.io/cli/netguard.schema.json",
-  "enabled": true,
-  "api": {
-    "enabled": true,
-    "listen": "127.0.0.1:9091",
-    "token": ""
-  },
-  "crowdsec": {
-    "enabled": true,
-    "lapiUrl": "http://127.0.0.1:8080",
-    "apiKey": "your-bouncer-api-key",
-    "updateIntervalSeconds": 15
-  },
-  "global": {
-    "allowedIPs": [],
-    "blockedIPs": ["198.51.100.0/24"],
-    "blockCountries": ["RU", "CN"],
-    "maxConnectionsPerIP": 50,
-    "banAfterFailures": 5,
-    "banDurationSeconds": 3600,
-    "tarpitMs": 3000,
-    "logFile": "/var/log/rwarden/guard.jsonl"
-  },
-  "services": [
-    {
-      "name": "ssh",
-      "enabled": true,
-      "listen": ":2222",
-      "upstream": "127.0.0.1:22",
-      "protocol": "ssh",
-      "maxAuthFailures": 3,
-      "banAfterFailures": 3,
-      "banDurationSeconds": 7200,
-      "rateLimit": {
-        "connectionsPerMinute": 10
-      },
-      "response": {
-        "mode": "reject"
-      }
-    },
-    {
-      "name": "smtp",
-      "enabled": true,
-      "listen": ":2525",
-      "upstream": "127.0.0.1:25",
-      "protocol": "smtp",
-      "blockedSenderDomains": ["*.ru", "*.biz", "spammer.net"],
-      "requireSTARTTLS": false,
-      "rateLimit": {
-        "connectionsPerMinute": 30,
-        "authAttemptsPerMinute": 5
-      },
-      "response": {
-        "mode": "reject",
-        "rejectMessage": "550 5.7.1 Connection rejected by RouteWarden Guard"
-      }
-    },
-    {
-      "name": "pop3",
-      "enabled": true,
-      "listen": ":1110",
-      "upstream": "127.0.0.1:110",
-      "protocol": "pop3",
-      "banAfterFailures": 5,
-      "rateLimit": {
-        "connectionsPerMinute": 20
-      },
-      "response": {
-        "mode": "reject"
-      }
-    },
-    {
-      "name": "imap",
-      "enabled": true,
-      "listen": ":1143",
-      "upstream": "127.0.0.1:143",
-      "protocol": "imap",
-      "banAfterFailures": 5,
-      "rateLimit": {
-        "connectionsPerMinute": 20
-      },
-      "response": {
-        "mode": "reject"
-      }
-    },
-    {
-      "name": "database-tunnel",
-      "enabled": true,
-      "listen": ":15432",
-      "upstream": "127.0.0.1:5432",
-      "protocol": "tcp",
-      "allowedIPs": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"],
-      "response": {
-        "mode": "drop"
-      }
-    }
-  ]
-}
-```
-
-##### Policy Inheritance & Response Modes
-
-- **Global vs. Service**: Settings defined in `global` apply across all services unless specifically overridden in a service's block.
-- **Auto-Ban Threshold (`banAfterFailures`)**: Automatically registers an IP in the shared in-memory TTL ban store upon exceeding failed authentication attempts. A ban in one service (e.g. SSH brute force) immediately shields all other services (SMTP, IMAP, etc.).
-- **Response Modes**:
-  - `reject`: Actively closes or sends a protocol rejection banner before disconnecting.
-  - `drop`: Immediate TCP RST/close with zero bytes sent back.
-  - `tarpit`: Holds the connection socket open for `tarpitMs` (wasting attacker thread pools and concurrency slots) before disconnecting.
-  - `silent`: Keeps the connection open indefinitely until the client times out.
-
----
-
-#### Protocol Inspectors {#guard-protocols}
-
-| Protocol | Inspector Capabilities |
-|:---|:---|
-| **SSH** (`ssh`) | • Validates SSH version banner format (`SSH-2.0-...`).<br>• Instantly rejects obsolete `SSH-1.x` protocol attempts.<br>• Monitors byte stream for `SSH_MSG_USERAUTH_FAILURE` (type 51) messages without terminating or decrypting SSH cryptography.<br>• Disconnects and bans attackers upon reaching `maxAuthFailures`. |
-| **SMTP** (`smtp`) | • Relays upstream server greeting and negotiates `HELO` / `EHLO` exchanges.<br>• Intercepts `MAIL FROM:<...>` commands and evaluates sender domains against `blockedSenderDomains` (supports wildcards e.g. `*.ru`, `*.biz`).<br>• If blocked, immediately issues `550 5.7.1 Sender domain rejected by RouteWarden Guard` without taxing the upstream mail transfer agent (Postfix, Exim).<br>• Intercepts `AUTH` attempts and counts auth failures (`535` / `5xx`).<br>• Seamlessly transitions into raw bidirectional stream mode upon `STARTTLS` (code 220) or `DATA` (code 354). |
-| **POP3** (`pop3`) | • Relays server greeting and command exchanges (`USER`, `PASS`, `CAPA`, `LIST`, `STAT`).<br>• Inspects server response to `PASS`: detects `-ERR` authentication failures and invokes auto-ban logic.<br>• Seamlessly transitions into raw streaming mode upon `STLS` (RFC 2595). |
-| **IMAP** (`imap`) | • Relays server untagged greeting banner.<br>• Parses client command tags (e.g. `A01 LOGIN ...`) and tracks tagged server completion responses.<br>• Detects tagged `NO` or `BAD` responses to `LOGIN` and `AUTHENTICATE` commands to trigger auto-ban tracking.<br>• Transitions into raw streaming mode upon `STARTTLS`. |
-| **Generic TCP** (`tcp`) | • Transparent, zero-copy bidirectional relay for database ingress, Redis caches, or arbitrary TCP daemons.<br>• Enforces GeoIP, CIDR allowlists, and rate limits prior to opening upstream connections.<br>• Clean half-close TCP EOF signaling. |
-
----
-
-#### CrowdSec Integration {#guard-crowdsec}
-
-RouteWarden Guard provides **bidirectional integration** with CrowdSec:
-
-1. **CrowdSec LAPI Bouncer (Decision Ingestion)**:
-   - Connects directly to the CrowdSec Local API stream (`GET /v1/decisions/stream`).
-   - Keeps an in-memory cached copy of global IP and CIDR range bans.
-   - Lookups occur at memory speeds with zero HTTP latency on incoming connections.
-   - If CrowdSec restarts or goes offline, Guard continues protecting services using its last cached decisions and local banlist.
-   - **Supported Decision Actions**:
-     - `ban`: Connection is immediately dropped or rejected with no data forwarded upstream.
-     - `throttle`: Engages dynamic socket tarpitting to starve attacker concurrency slots.
-     - `bypass`: Whitelists trusted actors/peers, immediately allowing the connection through and bypassing downstream security blocks.
-
-2. **Log Source for CrowdSec Scenarios (Event Export)**:
-   - When `logFile` is configured, Guard outputs structured single-line JSON events for every connection decision.
-   - CrowdSec ingests these events via acquisition to trigger community or custom defense scenarios.
-
-##### Environment Variables
-
-When deploying in Docker or 12-factor environments, CrowdSec settings can be supplied directly via environment variables:
-
-| Variable | Description |
-|:---|:---|
-| `CROWDSEC_URL`, `CROWDSEC_LAPI_URL` | CrowdSec LAPI base address (e.g. `http://crowdsec:8080`) |
-| `CROWDSEC_KEY`, `CROWDSEC_API_KEY`, `BOUNCER_KEY_GUARD` | Bouncer API key generated via `cscli bouncers add` |
-
-##### 1. CrowdSec Acquisition (`acquis.yaml`)
-Place in `/etc/crowdsec/acquis.d/routewarden-guard.yaml`:
-
-```yaml
-filenames:
-  - /var/log/rwarden/guard.jsonl
-labels:
-  type: routewarden-guard
-```
-
-##### 2. CrowdSec Parser (`routewarden-guard.yaml`)
-Place in `/etc/crowdsec/parsers/s01-parse/routewarden-guard.yaml`:
-
-```yaml
-name: routewarden/guard-logs
-description: "Parse RouteWarden Guard L4 TCP proxy events"
-filter: "evt.Line.Labels.type == 'routewarden-guard'"
-onsuccess: next_stage
-nodes:
-  - filter: "true"
-    grok:
-      pattern: '^%{GREEDYDATA:json_payload}$'
-      apply_on: Line.Raw
-    statics:
-      - meta: log_type
-        value: guard_event
-  - filter: "evt.Parsed.json_payload != ''"
-    json:
-      target: evt.Parsed
-      apply_on: json_payload
-    statics:
-      - meta: source_ip
-        expression: "evt.Parsed.client_ip"
-      - meta: service
-        expression: "evt.Parsed.service"
-      - meta: protocol
-        expression: "evt.Parsed.protocol"
-      - meta: action
-        expression: "evt.Parsed.action"
-      - meta: reason
-        expression: "evt.Parsed.reason"
-      - meta: country
-        expression: "evt.Parsed.country_code"
-```
-
-##### 3. CrowdSec Scenarios
-
-::: code-group
-
-```yaml [SSH Brute Force]
-# /etc/crowdsec/scenarios/routewarden-guard-ssh-bf.yaml
-type: leaky
-name: routewarden/guard-ssh-bf
-description: "Detect SSH brute-force authentication attacks on RouteWarden Guard"
-filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.service == 'ssh' && (evt.Meta.reason contains 'auth failure' || evt.Meta.reason contains 'invalid SSH banner' || evt.Meta.action == 'BLOCK')"
-groupby: evt.Meta.source_ip
-capacity: 5
-leakspeed: 1m
-blackhole: 10m
-labels:
-  service: ssh
-  confidence: 3
-  remediation: true
-```
-
-```yaml [SMTP Auth & Spam Flood]
-# /etc/crowdsec/scenarios/routewarden-guard-smtp-bf.yaml
-type: leaky
-name: routewarden/guard-smtp-bf
-description: "Detect SMTP brute-force or spam sender domain violations on RouteWarden Guard"
-filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.service == 'smtp' && (evt.Meta.reason contains 'auth failure' || evt.Meta.reason contains 'blocked sender domain' || evt.Meta.action == 'BLOCK')"
-groupby: evt.Meta.source_ip
-capacity: 5
-leakspeed: 2m
-blackhole: 15m
-labels:
-  service: smtp
-  confidence: 3
-  remediation: true
-```
-
-```yaml [Cross-Service Port Scan]
-# /etc/crowdsec/scenarios/routewarden-guard-portscan.yaml
-type: leaky
-name: routewarden/guard-portscan
-description: "Detect multi-service port probing and scanning on RouteWarden Guard"
-filter: "evt.Meta.log_type == 'guard_event' && evt.Meta.action == 'BLOCK'"
-groupby: evt.Meta.source_ip
-distinct: evt.Meta.service
-capacity: 3
-leakspeed: 30s
-blackhole: 1h
-labels:
-  service: portscan
-  confidence: 4
-  remediation: true
-```
-
-:::
-
----
-
-#### Management REST & SSE API {#guard-api}
-
-When `api.enabled` is `true`, Guard runs a high-performance HTTP management server on `api.listen` (default: `127.0.0.1:9091`):
-
-| Endpoint | Method | Description |
-|:---|:---|:---|
-| `/health` or `/api/guard/health` | `GET` | Health check returning daemon uptime, services count, active ban count, and CrowdSec status |
-| `/api/guard/services` | `GET` | List all active proxied services, listen ports, protocols, and upstreams |
-| `/api/guard/stats` | `GET` | Live atomic metrics: total connections, active connections, blocked attempts, bytes in/out, auth failures |
-| `/api/guard/banlist` | `GET` | List of currently active IP bans, reasons, origin services, and TTL countdown in seconds |
-| `/api/guard/unban` | `POST` | Manually unban an IP immediately: `{"ip": "198.51.100.42"}` |
-| `/api/guard/ban` | `POST` | Manually ban an IP: `{"ip": "198.51.100.42", "duration_seconds": 3600, "reason": "admin"}` |
-| `/api/guard/events` | `GET` | Server-Sent Events (SSE) real-time streaming feed of all connection decisions |
-
-##### Example API Queries
-
-```bash
-# Check daemon health
-curl -s http://127.0.0.1:9091/api/guard/health | jq .
-
-# Inspect live per-service connection metrics
-curl -s http://127.0.0.1:9091/api/guard/stats | jq .
-
-# Stream real-time events via SSE
-curl -N http://127.0.0.1:9091/api/guard/events
-```
-
----
-
-#### Docker & Docker Compose Deployment {#guard-docker}
-
-Deploy RouteWarden Guard together with CrowdSec and protected backend services using Docker Compose:
-
-```yaml
-version: '3.8'
-
-services:
-  # RouteWarden Guard — Protocol-aware TCP security proxy
-  guard:
-    image: routewarden/rwarden:latest
-    container_name: routewarden-guard
-    command: ["guard", "--config", "/etc/routewarden/netguard.json"]
-    restart: unless-stopped
-    ports:
-      - "2222:2222"   # SSH protected ingress
-      - "2525:2525"   # SMTP protected ingress
-      - "9091:9091"   # Guard API & health metrics
-    volumes:
-      - ./netguard.json:/etc/routewarden/netguard.json:ro
-      - guard-logs:/var/log/rwarden
-    environment:
-      - CROWDSEC_URL=http://crowdsec:8080
-      - CROWDSEC_KEY=guard-bouncer-secret-key
-    depends_on:
-      - crowdsec
-
-  # CrowdSec Security Engine
-  crowdsec:
-    image: crowdsecurity/crowdsec:latest
-    container_name: crowdsec
-    restart: unless-stopped
-    environment:
-      - BOUNCER_KEY_GUARD=guard-bouncer-secret-key
-      - COLLECTIONS=crowdsecurity/ssh-bf crowdsecurity/whitelist-good-actors
-    volumes:
-      - ./crowdsec/parsers:/etc/crowdsec/parsers
-      - ./crowdsec/scenarios:/etc/crowdsec/scenarios
-      - guard-logs:/var/log/rwarden:ro
-      - crowdsec-db:/var/lib/crowdsec/data
-      - crowdsec-config:/etc/crowdsec
-
-volumes:
-  guard-logs:
-  crowdsec-db:
-  crowdsec-config:
-```
-
----
-
-#### Configuration Hot-Reload (`SIGHUP`) {#guard-hot-reload}
-
-RouteWarden Guard supports zero-downtime runtime configuration reloads via POSIX signals:
-
-```bash
-# Trigger hot-reload on the running daemon
-kill -HUP $(pgrep rwarden)
-```
-
-The daemon immediately:
-1. Reloads and semantically validates `netguard.json` from disk.
-2. Updates global policy (IP blocklists, CIDR allowlists, geo-blocking countries) without terminating existing active connections.
-3. Automatically registers newly enabled services and metrics counters.
-4. Logs reload status to stdout: `[guard] configuration reloaded successfully`.
-
----
-
-### 8. Cleanup Sandbox Containers (`cleanup`)
+### 7. Cleanup Sandbox Containers (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -1082,7 +621,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 9. Check CLI Version (`version`)
+### 8. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 
@@ -1460,33 +999,17 @@ caddy adapt --config Caddyfile --pretty
 ### [v4.0.0] - 2026-09-25
 
 #### Added
-- **RouteWarden Guard — Protocol-Aware L4 TCP Security Proxy (`rwarden guard`)**:
-  - Complete daemon architecture protecting non-HTTP edge services (**SSH**, **SMTP**, **POP3**, **IMAP**, and **Generic TCP Tunnels**).
-  - **8-Stage Pipeline**: Real-time evaluation spanning GeoIP metadata, local TTL banlist, CrowdSec LAPI bouncer cache, CIDR allowlists/blocklists, ISO country geo-blocking, sliding-window rate limiting, protocol inspection, and SIEM logging.
-- **Protocol Inspectors**:
-  - **SSH**: Version banner validation, legacy SSH-1 rejection, and automatic brute-force detection via `SSH_MSG_USERAUTH_FAILURE` byte inspection.
-  - **SMTP**: EHLO/HELO relay, `MAIL FROM` domain matching (`blockedSenderDomains` with glob wildcards e.g. `*.ru`, `*.biz`), `AUTH` failure tracking (`535`/`5xx`), and seamless handover on `STARTTLS` and `DATA`.
-  - **POP3**: Server greeting relay, `USER`/`PASS` inspection, `-ERR` authentication failure tracking, and `STLS` stream handover.
-  - **IMAP**: Tagged command parser, `LOGIN`/`AUTHENTICATE` tracking (`NO`/`BAD`), and `STARTTLS` stream handover.
-  - **Generic TCP**: Transparent high-throughput proxy with half-close EOF handling for database ingress (Postgres, MySQL, Redis).
-- **CrowdSec LAPI Bouncer Integration**:
-  - Direct connection to CrowdSec Local API stream (`GET /v1/decisions/stream`).
-  - Zero-latency in-memory cache of IP and CIDR decisions with background polling.
-- **Management REST & SSE API**:
-  - Endpoints on configurable port (`:9091`): `/health`, `/api/guard/health`, `/api/guard/services`, `/api/guard/stats`, `/api/guard/banlist`, `/api/guard/unban`, `/api/guard/ban`, `/api/guard/events`.
-  - Server-Sent Events (SSE) feed emitting real-time connection decisions.
-- **Runtime SIGHUP Hot-Reload**:
-  - Graceful configuration reload via `kill -HUP <pid>` without dropping active connections.
-- **CLI Subcommands**:
-  - `rwarden guard [run]` — Run the proxy daemon.
-  - `rwarden guard validate` — Verify `netguard.json` syntax and semantic validity.
-  - `rwarden guard status` — Query live health and metrics from running daemon.
-  - `rwarden guard banlist` — Display active bans and TTL countdowns.
-  - `rwarden guard unban <ip>` — Instantly remove an IP ban.
-- **Deployment & Schema**:
-  - Official JSON Schema `netguard.schema.json` published for editor autocompletion.
-  - Ready-to-use Docker Compose recipe with RouteWarden Guard, CrowdSec, and services.
-  - Official CrowdSec parser (`routewarden-guard.yaml`) and scenario (`routewarden-guard-bf.yaml`).
+- **RouteWarden TCP Warden Integration (`rwarden generate tcp-warden` & `rwarden validate`)**:
+  - Declarative generation of `tcp-warden.yaml` configurations directly from centralized RouteWarden JSON policies.
+  - Strict syntax, schema, and CIDR validation for `tcp-warden.yaml` via CLI arguments or stdin pipelines.
+- **Real-Time TCP Monitoring in RouteWarden Dashboard**:
+  - Direct ingestion and real-time visualization of structured `tcp-warden.jsonl` event streams.
+  - GeoIP mapping, protocol breakdowns, connection velocity metrics, and dynamic ban tracking.
+- **RouteWarden TCP Warden Standalone Application** ([`github.com/routewarden/tcp-warden`](https://github.com/routewarden/tcp-warden)):
+  - Dedicated, zero-allocation Layer 4 TCP security proxy daemon for SSH, SMTP, POP3, IMAP, and generic TCP tunnels.
+  - Bidirectional CrowdSec integration (LAPI bouncer decision ingestion and scenario log export).
+  - Built-in management REST and SSE API (`:9091`) with hot-reload support (`SIGHUP`).
+  - Official JSON Schema `tcp-warden.schema.json` and Docker Compose recipes.
 
 ---
 

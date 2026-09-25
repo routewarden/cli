@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 ---
@@ -214,6 +214,9 @@ rwarden validate -c routewarden.json
 # Auto-detects routewarden.json in current directory if omitted
 rwarden validate
 
+# Validate tcp-warden.yaml directly
+rwarden validate tcp-warden.yaml
+
 # Validate piped config via stdin
 cat routewarden.json | rwarden validate
 ```
@@ -221,6 +224,7 @@ cat routewarden.json | rwarden validate
 **Docker:**
 ```bash
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate /routewarden.json
+docker run --rm -v $(pwd)/tcp-warden.yaml:/tcp-warden.yaml ghcr.io/routewarden/cli:latest validate /tcp-warden.yaml
 ```
 
 **Example Output**:
@@ -277,6 +281,9 @@ rwarden generate caddy [routewarden.json]
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 rwarden generate nginx [routewarden.json]
+
+# TCP Warden: tcp-warden.yaml configuration
+rwarden generate tcp-warden [routewarden.json] > tcp-warden.yaml
 ```
 
 **Docker:**
@@ -295,6 +302,9 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate nginx /routewarden.json
+
+# TCP Warden: output as tcp-warden.yaml configuration
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate tcp-warden /routewarden.json > tcp-warden.yaml
 ```
 
 | Target / Alias | Output |
@@ -304,6 +314,7 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `traefik-labels`, `compose`, `labels` | Docker Compose `labels:` block |
 | `caddy`, `caddyfile` | Caddyfile `routewarden { ... }` directive block |
 | `nginx`, `openresty` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+| `tcp-warden`, `tcp`, `tcpwarden` | TCP Warden YAML configuration (`tcp-warden.yaml`) |
 
 ---
 
@@ -545,126 +556,7 @@ The dashboard server exposes an HTTP API for external integrations, status check
 
 ---
 
-### 7. TCP Security Proxy Daemon (`guard`)
-
-`rwarden guard` is a **protocol-aware Layer 4 TCP security proxy daemon** designed to protect non-HTTP services from brute-force authentication, botnet reconnaissance, volumetric floods, and credential stuffing.
-
-Protects infrastructure protocols:
-- **SSH** (secure shell, git over SSH)
-- **SMTP & SMTPS** (mail transfer, submission, anti-spam)
-- **POP3 & POP3S** (post office protocol)
-- **IMAP & IMAPS** (internet message access protocol)
-- **Database Tunnels & Raw TCP** (PostgreSQL, MySQL, Redis, custom TCP daemons)
-
-#### Architecture & Pipeline
-
-Connections pass through an 8-stage pipeline:
-1. **GeoIP & Metadata Resolution**: Non-blocking IP geolocation, flag emoji, and ISP/ASN mapping.
-2. **In-Memory TTL Banlist**: Immediate drop if client IP has an active local ban.
-3. **CrowdSec LAPI Bouncer**: Zero-latency lookup in cached CrowdSec IP & CIDR range decisions.
-4. **CIDR & IP Allowlist**: Per-service and global allowlists.
-5. **Explicit Blocklist**: Immediate connection drop for forbidden IPs/CIDRs.
-6. **Geo-Blocking**: Instant rejection for connections originating from blacklisted country codes.
-7. **Sliding-Window Rate Limiting**: Per-IP connection and authentication attempt rate limits.
-8. **Protocol Inspection & Proxy**:
-   - **SSH**: Banner format validation, SSH-1 rejection, and `USERAUTH_FAILURE` byte inspection.
-   - **SMTP**: EHLO/HELO relay, `MAIL FROM` domain matching (`blockedSenderDomains` wildcards), `AUTH` failure tracking, and handover on `STARTTLS` & `DATA`.
-   - **POP3**: Greeting relay, `USER`/`PASS` inspection, auth failure tracking, and `STLS` handover.
-   - **IMAP**: Tagged command parsing, `LOGIN` auth failure tracking, and `STARTTLS` handover.
-   - **Generic TCP**: Transparent high-throughput proxy with half-close EOF handling.
-9. **Metrics & SIEM Log Exporter**: Atomic counters and single-line JSON log writer (`/var/log/rwarden/guard.jsonl`).
-
-#### CLI Usage Examples
-
-```bash
-# 1. Start guard daemon with netguard.json configuration
-rwarden guard --config netguard.json
-
-# 2. Validate configuration syntax and rules offline
-rwarden guard validate --config netguard.json
-
-# 3. Query live health and runtime stats from the running daemon
-rwarden guard status --api http://127.0.0.1:9091
-
-# 4. View active IP bans and TTL countdowns
-rwarden guard banlist --api http://127.0.0.1:9091
-
-# 5. Manually unban an IP address in real-time
-rwarden guard unban 192.0.2.100 --api http://127.0.0.1:9091
-```
-
-#### Running via Docker
-
-```bash
-# Run guard with host networking for minimal overhead
-docker run -d \
-  --name routewarden-guard \
-  --network host \
-  -v $(pwd)/netguard.json:/etc/routewarden/netguard.json:ro \
-  -v /var/log/rwarden:/var/log/rwarden \
-  ghcr.io/routewarden/cli:latest guard --config /etc/routewarden/netguard.json
-```
-
-#### Command Flags
-
-| Flag | Type | Default | Description |
-|:---|:---|:---|:---|
-| `--config` | string | `"netguard.json"` | Path to the `netguard.json` configuration file |
-| `--api-listen` | string | `""` | Override the HTTP API bind address (e.g. `127.0.0.1:9091`) |
-| `--log-file` | string | `""` | Override structured JSON log output path |
-| `--crowdsec-url` | string | `""` | Override CrowdSec Local API base URL (e.g. `http://127.0.0.1:8080`) |
-| `--crowdsec-key` | string | `""` | Override CrowdSec bouncer API key |
-
-#### Configuration (`netguard.json`)
-
-```json
-{
-  "$schema": "https://routewarden.github.io/cli/netguard.schema.json",
-  "enabled": true,
-  "api": {
-    "enabled": true,
-    "listen": "127.0.0.1:9091"
-  },
-  "crowdsec": {
-    "enabled": true,
-    "lapiUrl": "http://127.0.0.1:8080",
-    "apiKey": "guard-bouncer-secret-key"
-  },
-  "global": {
-    "blockCountries": ["RU", "CN"],
-    "banAfterFailures": 5,
-    "banDurationSeconds": 3600,
-    "logFile": "/var/log/rwarden/guard.jsonl"
-  },
-  "services": [
-    {
-      "name": "ssh",
-      "enabled": true,
-      "listen": ":2222",
-      "upstream": "127.0.0.1:22",
-      "protocol": "ssh",
-      "maxAuthFailures": 3,
-      "banAfterFailures": 3,
-      "rateLimit": { "connectionsPerMinute": 10 },
-      "response": { "mode": "reject" }
-    },
-    {
-      "name": "smtp",
-      "enabled": true,
-      "listen": ":2525",
-      "upstream": "127.0.0.1:25",
-      "protocol": "smtp",
-      "blockedSenderDomains": ["*.ru", "*.biz"],
-      "rateLimit": { "connectionsPerMinute": 30, "authAttemptsPerMinute": 5 },
-      "response": { "mode": "reject" }
-    }
-  ]
-}
-```
-
----
-
-### 8. Cleanup Sandboxes (`cleanup`)
+### 7. Cleanup Sandboxes (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -683,7 +575,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 9. Check CLI Version (`version`)
+### 8. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 

@@ -43,14 +43,12 @@ export default defineConfig({
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
           { text: 'Security Dashboard', link: '/#dashboard' },
-          { text: 'Guard TCP Proxy', link: '/#guard' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
           { text: 'Production Integration', link: '/#production' },
           { text: 'Changelog', link: '/#changelog' }
         ]
       },
       { text: 'Dashboard', link: '/#dashboard' },
-      { text: 'Guard Proxy', link: '/#guard' },
       { text: 'Schema', link: '/#json-schema' },
       { text: 'Changelog', link: '/#changelog' },
       { text: 'Main Docs', link: 'https://routewarden.github.io/docs/' }
@@ -61,8 +59,6 @@ export default defineConfig({
         items: [
           { text: 'Installation', link: '/#installation' },
           { text: 'Commands Reference', link: '/#commands' },
-          { text: 'Security Dashboard', link: '/#dashboard' },
-          { text: 'Guard TCP Proxy', link: '/#guard' },
           { text: 'JSON Schema & IDE Setup', link: '/#json-schema' },
           { text: 'Production Integration', link: '/#production' },
           { text: 'Changelog', link: '/#changelog' }
@@ -80,19 +76,6 @@ export default defineConfig({
           { text: 'CLI & Docker Usage', link: '/#dashboard-usage' },
           { text: 'Command Flags', link: '/#dashboard-flags' },
           { text: 'REST & WebSocket API', link: '/#dashboard-api' }
-        ]
-      },
-      {
-        text: 'Guard TCP Proxy',
-        items: [
-          { text: 'Overview & Architecture', link: '/#guard' },
-          { text: 'Commands & Subcommands', link: '/#guard-commands' },
-          { text: 'Configuration (netguard.json)', link: '/#guard-config' },
-          { text: 'Protocol Inspectors', link: '/#guard-protocols' },
-          { text: 'CrowdSec Integration', link: '/#guard-crowdsec' },
-          { text: 'Management REST & SSE API', link: '/#guard-api' },
-          { text: 'Docker & Compose Deployment', link: '/#guard-docker' },
-          { text: 'Configuration Hot-Reload', link: '/#guard-hot-reload' }
         ]
       }
     ],

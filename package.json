@@ -1,6 +1,6 @@
 {
   "name": "@routewarden/cli-docs",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Documentation site for RouteWarden CLI (rwarden)",
   "private": true,
   "type": "module",

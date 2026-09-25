@@ -1,6 +1,0 @@
-# CrowdSec log acquisition configuration for RouteWarden Guard
-# Copy or symlink to /etc/crowdsec/acquis.d/routewarden-guard.yaml
-filenames:
-  - /var/log/rwarden/guard.jsonl
-labels:
-  type: routewarden-guard
