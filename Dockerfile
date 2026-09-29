@@ -1,26 +1,52 @@
+# syntax=docker/dockerfile:1.7
 # Multi-stage Dockerfile for RouteWarden CLI (rwarden) with embedded dashboard
-# Stage 1: Build the Vite/React dashboard
-FROM node:20-alpine AS webbuilder
+#
+# Build-time args injected by docker buildx / goreleaser:
+#   BUILDPLATFORM  – native platform of the builder host  (e.g. linux/amd64)
+#   TARGETOS       – target OS                            (e.g. linux)
+#   TARGETARCH     – target CPU arch                      (e.g. arm64)
+#   VERSION        – binary version string                (e.g. v4.0.0)
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1: Build the Vite/React dashboard on the native builder platform
+# ──────────────────────────────────────────────────────────────────────────────
+FROM --platform=$BUILDPLATFORM node:20-alpine AS webbuilder
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
-RUN npm ci --prefer-offline
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline
 COPY web/ ./
 RUN npm run build
 
-# Stage 2: Build the Go binary with embedded dashboard assets
-FROM golang:1.25-alpine AS builder
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2: Build the Go binary on native platform with cross-compilation
+# ──────────────────────────────────────────────────────────────────────────────
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG VERSION=dev
+
 WORKDIR /src
 COPY go.mod go.sum* ./
-RUN go mod download
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    go mod download
 
 COPY . .
-# Copy the pre-built web assets so go:embed picks them up
-COPY --from=webbuilder /web/dist ./web/dist
+# Copy pre-built web assets from /dashboard/dist (Vite's outDir: '../dashboard/dist')
+# so Go's `//go:embed all:dist` inside package dashboard embeds them
+COPY --from=webbuilder /dashboard/dist ./dashboard/dist
 
-ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${VERSION}" -o /bin/rwarden .
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /bin/rwarden .
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Stage 3: Minimal runtime image
+# ──────────────────────────────────────────────────────────────────────────────
 FROM alpine:3.20
 RUN apk --no-cache add ca-certificates tzdata docker-cli
 COPY --from=builder /bin/rwarden /usr/local/bin/rwarden
