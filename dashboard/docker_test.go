@@ -1,9 +1,13 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseSecurityEventLine(t *testing.T) {
@@ -133,6 +137,70 @@ func TestParseTCPWardenSecurityEvent(t *testing.T) {
 	}
 	if ev.EventKind != "tcp" {
 		t.Fatalf("expected event kind tcp, got %s", ev.EventKind)
+	}
+}
+
+func TestFileTailerLiveIngestion(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test-access.log")
+
+	initialLog := `[2026-09-29 20:00:00] INFO Starting gateway
+{"type":"routewarden_block","timestamp":"2026-09-29T20:00:01Z","plugin":"caddy-warden","method":"GET","path":"/admin/config","client_ip":"192.168.1.10","action":"blocked","reason":"path_blocked"}
+[2026-09-29 20:00:02] INFO Routine healthcheck ok
+`
+	if err := os.WriteFile(logPath, []byte(initialLog), 0644); err != nil {
+		t.Fatalf("failed to write initial log: %v", err)
+	}
+
+	buf := NewRingBuffer(50)
+	hub := NewHub()
+	tailer := NewFileTailer([]string{logPath}, buf, hub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go tailer.Run(ctx)
+
+	// Wait for initial file discovery and parsing
+	time.Sleep(350 * time.Millisecond)
+
+	events := buf.Recent(0)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 initial parsed event, got %d", len(events))
+	}
+	if events[0].Path != "/admin/config" {
+		t.Errorf("expected path /admin/config, got %s", events[0].Path)
+	}
+	if events[0].Plugin != "caddy-warden" {
+		t.Errorf("expected plugin caddy-warden, got %s", events[0].Plugin)
+	}
+
+	// Append a new TCP Warden security event
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("failed to open log for append: %v", err)
+	}
+	tcpEvent := `{"type":"security_event","timestamp":"2026-09-29T20:00:10Z","plugin":"tcp-warden","service":"ssh","protocol":"ssh","client_ip":"10.0.0.99","action":"blocked","reason":"crowdsec_ban"}` + "\n"
+	if _, err := f.WriteString(tcpEvent); err != nil {
+		t.Fatalf("failed to append tcp event: %v", err)
+	}
+	_ = f.Close()
+
+	// Wait for tailer polling interval (250ms) to read new line
+	time.Sleep(400 * time.Millisecond)
+
+	events = buf.Recent(0)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 total parsed events after append, got %d", len(events))
+	}
+	if events[1].Service != "ssh" || events[1].Protocol != "ssh" {
+		t.Errorf("expected ssh service/protocol, got %s/%s", events[1].Service, events[1].Protocol)
+	}
+	if events[1].EventKind != "tcp" {
+		t.Errorf("expected event kind tcp, got %s", events[1].EventKind)
+	}
+	if events[1].Reason != "crowdsec_ban" {
+		t.Errorf("expected crowdsec_ban reason, got %s", events[1].Reason)
 	}
 }
 
