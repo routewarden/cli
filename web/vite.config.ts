@@ -343,12 +343,23 @@ function detectDevContainerPlugin(c: any): string | null {
   const labels = c.Labels || {}
   const svc = (labels['com.docker.compose.service'] || labels['service'] || labels['routewarden.role'] || '').toLowerCase()
 
-  // Label opt-in
+  // 1. Explicit role label override
   for (const k of Object.keys(labels)) {
     const kl = k.toLowerCase()
-    const vl = String(labels[k] || '').toLowerCase()
+    const vl = String(labels[k] || '').trim().toLowerCase()
+    if ((kl === 'routewarden.role' || kl === 'role') && vl) {
+      return vl
+    }
+  }
+
+  // 2. Generic label opt-in
+  let hasLabelOptIn = false
+  for (const k of Object.keys(labels)) {
+    const kl = k.toLowerCase()
+    const vl = String(labels[k] || '').trim().toLowerCase()
     if ((kl === 'routewarden' || kl === 'warden.enabled') && vl === 'true') {
-      if (kl === 'routewarden.role' && vl) return vl
+      hasLabelOptIn = true
+      break
     }
   }
 
@@ -360,6 +371,9 @@ function detectDevContainerPlugin(c: any): string | null {
     if (names.some(n => n.includes('caddy'))) return 'caddy-warden'
     if (names.some(n => n.includes('nginx'))) return 'nginx-warden'
     if (names.some(n => n.includes('tcp'))) return 'tcp-warden'
+    return 'traefik-warden'
+  }
+  if (hasLabelOptIn) {
     return 'traefik-warden'
   }
   return null
