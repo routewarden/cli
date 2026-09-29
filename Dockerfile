@@ -22,8 +22,8 @@ RUN npm run build
 # Stage 2: Build the Go binary on native platform with cross-compilation
 # ──────────────────────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION=dev
 
 WORKDIR /src
@@ -38,7 +38,9 @@ COPY --from=webbuilder /dashboard/dist ./dashboard/dist
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} \
+    GOARCH=${TARGETARCH} \
     go build \
       -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \
