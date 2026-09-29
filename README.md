@@ -502,7 +502,7 @@ docker run -d \
 
 #### Docker Compose Example
 
-Deploy the dashboard alongside your existing reverse proxy infrastructure:
+Deploy the dashboard alongside your existing reverse proxy and TCP Warden infrastructure:
 
 ```yaml
 version: "3.8"
@@ -519,15 +519,31 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
 
+  tcp-warden:
+    image: ghcr.io/routewarden/tcp-warden:latest
+    container_name: tcp-warden
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+      - "2222:2222"
+    volumes:
+      - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
+      - tcp-warden-data:/var/lib/routewarden
+
   routewarden-dashboard:
     image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
     ports:
       - "9090:9090"
+    environment:
+      - TCP_WARDEN_URL=http://tcp-warden:9091
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--tcp-warden", "http://tcp-warden:9091"]
+
+volumes:
+  tcp-warden-data:
 ```
 
 #### Command Flags
@@ -539,6 +555,7 @@ services:
 | `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
 | `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
 | `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--tcp-warden` | string | `"http://127.0.0.1:9091"` | URL or socket to TCP Warden management API (or set `TCP_WARDEN_URL`) |
 | `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 

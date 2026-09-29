@@ -521,10 +521,13 @@ rwarden dashboard --history 2500 --port 9090
 
 # 7. Ingest structured logs from RouteWarden TCP Warden
 rwarden dashboard --log /var/log/routewarden/tcp-warden.jsonl
+
+# 8. Connect directly to running TCP Warden daemon via SSE API (auto-reconnects)
+rwarden dashboard --tcp-warden http://127.0.0.1:9091
 ```
 
 ```bash [Docker]
-# Auto-discover gateway containers via Docker socket
+# Auto-discover gateway containers (Traefik, Caddy, NGINX, TCP Warden) via Docker socket
 docker run -d \
   --name routewarden-dashboard \
   --restart unless-stopped \
@@ -557,15 +560,31 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
 
+  tcp-warden:
+    image: ghcr.io/routewarden/tcp-warden:latest
+    container_name: tcp-warden
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+      - "2222:2222"
+    volumes:
+      - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
+      - tcp-warden-data:/var/lib/routewarden
+
   routewarden-dashboard:
     image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
     ports:
       - "9090:9090"
+    environment:
+      - TCP_WARDEN_URL=http://tcp-warden:9091
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--tcp-warden", "http://tcp-warden:9091"]
+
+volumes:
+  tcp-warden-data:
 ```
 
 :::
@@ -579,6 +598,7 @@ services:
 | `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
 | `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
 | `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--tcp-warden` | string | `"http://127.0.0.1:9091"` | URL or socket to TCP Warden management API (or set `TCP_WARDEN_URL`) |
 | `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
@@ -648,16 +668,24 @@ rwarden version 4.0.0
 
 ## JSON Schema & IDE Setup {#json-schema}
 
-The official RouteWarden JSON Schema is hosted at:
-```text
-https://routewarden.github.io/cli/schema.json
-```
-*(Also mirrored at `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`)*
+The official RouteWarden JSON Schemas are hosted at:
 
-It provides real-time validation, syntax checking, and inline autocomplete for:
+- **HTTP Middleware (Traefik, Caddy, NGINX)**:
+  ```text
+  https://routewarden.github.io/cli/schema.json
+  ```
+  *(Also mirrored at `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`)*
+
+- **Layer 4 TCP Security Proxy (TCP Warden)**:
+  ```text
+  https://routewarden.github.io/tcp-warden/tcp-warden.schema.json
+  ```
+
+They provide real-time validation, syntax checking, and inline autocomplete for:
 - Traefik dynamic middleware YAML/JSON configurations
 - Caddy JSON API routes and handler configurations
-- Standalone RouteWarden JSON/YAML configs loaded by NGINX Lua or CI/CD pipelines
+- NGINX Lua or CI/CD pipelines
+- TCP Warden (`tcp-warden.yaml`) proxy and security daemon configurations
 
 ---
 
@@ -683,6 +711,10 @@ Add schema mappings to your workspace `.vscode/settings.json`:
       "routewarden*.yaml",
       "dynamic_conf.yml",
       "traefik-dynamic*.yml"
+    ],
+    "https://routewarden.github.io/tcp-warden/tcp-warden.schema.json": [
+      "tcp-warden*.yml",
+      "tcp-warden*.yaml"
     ]
   }
 }
@@ -696,15 +728,9 @@ Add schema mappings to your workspace `.vscode/settings.json`:
 
 1. Open **Settings / Preferences** (`⌘,` on macOS or `Ctrl+Alt+S` on Linux/Windows).
 2. Navigate to **Languages & Frameworks** → **Schemas and DTDs** → **JSON Schema Mappings**.
-3. Click **+** (Add):
-   - **Name**: `RouteWarden`
-   - **Schema file or URL**: `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`
-   - **Schema version**: `JSON Schema version 7` or `2020-12`
-4. Under **File path pattern**, add:
-   - `routewarden*.json`
-   - `routewarden*.yml`
-   - `dynamic_conf.yml`
-   - `caddy*.json`
+3. Configure mappings:
+   - **RouteWarden HTTP**: `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json` mapped to `routewarden*.json`, `routewarden*.yml`, `dynamic_conf.yml`, `caddy*.json`.
+   - **TCP Warden**: `https://routewarden.github.io/tcp-warden/tcp-warden.schema.json` mapped to `tcp-warden*.yaml`.
 
 ---
 
