@@ -54,7 +54,7 @@ func TestParseLogStreamMultiplexed(t *testing.T) {
 func TestDockerWatcherClearStopped(t *testing.T) {
 	hub := NewHub()
 	buf := NewRingBuffer(10)
-	w := NewDockerWatcher("/fake.sock", buf, hub, "1h")
+	w := NewDockerWatcher("/fake.sock", buf, hub, 1000)
 
 	// Pre-populate with a live source and two stopped sources
 	w.sources["live-1"] = &Source{ID: "live-1", Name: "traefik-live", Status: "live"}
@@ -90,4 +90,50 @@ func TestFileTailerClearStopped(t *testing.T) {
 		t.Errorf("expected live.log, got %s", remaining[0].Name)
 	}
 }
+
+func TestIsTCPWardenContainer(t *testing.T) {
+	cases := []struct {
+		image    string
+		names    []string
+		expected bool
+	}{
+		{"routewarden/tcp-warden:latest", []string{"/tcp-warden"}, true},
+		{"ghcr.io/routewarden/tcp-warden:v1", []string{"/my-service"}, true},
+		{"alpine:latest", []string{"/tcp-warden-app"}, true},
+		{"alpine:latest", []string{"/prod-tcp-warden-1"}, true},
+		{"traefik:v3.0", []string{"/traefik"}, false},
+		{"caddy:2.8", []string{"/caddy_server"}, false},
+	}
+
+	for _, tc := range cases {
+		c := dockerContainer{
+			Image: tc.image,
+			Names: tc.names,
+		}
+		if got := isTCPWardenContainer(c); got != tc.expected {
+			t.Errorf("isTCPWardenContainer(%s, %v) = %v; want %v", tc.image, tc.names, got, tc.expected)
+		}
+	}
+}
+
+func TestParseTCPWardenSecurityEvent(t *testing.T) {
+	line := `{"type":"security_event","timestamp":"2026-09-29T03:10:26.272954545Z","plugin":"tcp-warden","service":"mysql","protocol":"mysql","client_ip":"192.168.65.1","country_code":"LAN","country_name":"Local Network","flag_emoji":"🏠","action":"blocked","reason":"plugin_unavailable: DISABLED (plugin not found)"}`
+	ev, ok := parseSecurityEventLine(line, "tcp-warden", "c456", "tcp-warden")
+	if !ok {
+		t.Fatalf("expected parseSecurityEventLine to succeed")
+	}
+	if ev.Service != "mysql" || ev.Protocol != "mysql" {
+		t.Fatalf("expected mysql service and protocol, got %s / %s", ev.Service, ev.Protocol)
+	}
+	if ev.Reason != "plugin_unavailable: DISABLED (plugin not found)" {
+		t.Fatalf("unexpected reason: %s", ev.Reason)
+	}
+	if ev.CountryCode != "LAN" || ev.FlagEmoji != "🏠" {
+		t.Fatalf("unexpected country or flag: %s %s", ev.CountryCode, ev.FlagEmoji)
+	}
+	if ev.EventKind != "tcp" {
+		t.Fatalf("expected event kind tcp, got %s", ev.EventKind)
+	}
+}
+
 

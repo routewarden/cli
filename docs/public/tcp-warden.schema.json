@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://routewarden.github.io/tcp-warden/tcp-warden.schema.json",
+  "title": "RouteWarden TCP Warden Configuration Schema",
+  "description": "JSON schema for tcp-warden.yaml",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "default": "1.0"
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "max_connections": { "type": "integer", "minimum": 0 },
+        "ban_duration": { "type": "string", "default": "1h" },
+        "ban_after_failures": { "type": "integer", "minimum": 0 },
+        "tarpit_ms": { "type": "integer", "minimum": 0 },
+        "log_level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+        "log_file": { "type": "string" },
+        "geoip_db": { "type": "string" },
+        "ip_filter": {
+          "type": "object",
+          "properties": {
+            "allow": { "type": "array", "items": { "type": "string" } },
+            "deny": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "geo_block": {
+          "type": "object",
+          "properties": {
+            "deny_countries": { "type": "array", "items": { "type": "string" } },
+            "allow_countries": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "listen": { "type": "string", "default": "127.0.0.1:9091" },
+        "socket": { "type": "string", "description": "Unix domain socket path (e.g. /var/run/routewarden/tcp-warden.sock)" },
+        "socket_mode": { "type": ["string", "integer"], "default": "0666", "description": "Octal permissions for the unix socket" }
+      }
+    },
+    "crowdsec": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "lapi_url": { "type": "string", "default": "http://127.0.0.1:8080" },
+        "api_key": { "type": "string" },
+        "update_frequency": { "type": "string", "default": "10s" },
+        "fallback_action": { "type": "string", "enum": ["ban", "throttle", "bypass"], "default": "ban" }
+      }
+    },
+    "plugins": {
+      "type": ["object", "array"],
+      "description": "Modular protocol and stream filter plugins configuration",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "source": { "type": "string", "description": "Git repository URL or local path" },
+              "version": { "type": "string" },
+              "config": { "type": "object" }
+            }
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "enabled": { "type": "boolean", "default": true },
+              "source": { "type": "string" },
+              "version": { "type": "string" },
+              "config": { "type": "object" }
+            }
+          }
+        }
+      ]
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["listen", "upstream"],
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "listen": { "type": "string", "description": "Listen address and port, e.g. ':8080', '127.0.0.1:8080', or port range ':8000-8005'" },
+          "upstream": { "type": "string", "description": "Upstream target address and port, e.g. '127.0.0.1:8080', 1:1 range '10.0.0.1:8000-8005', or single port for many-to-one" },
+          "protocol": { "type": "string" },
+          "plugin_config": { "type": "object", "description": "Arbitrary options passed directly to modular plugins" },
+          "max_auth_failures": { "type": "integer", "minimum": 0 },
+          "ban_after_failures": { "type": "integer", "minimum": 0 },
+          "ban_duration": { "type": "string" },
+          "rate_limit": {
+            "type": "object",
+            "properties": {
+              "connections_per_minute": { "type": "integer", "minimum": 0 },
+              "burst": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "ip_filter": {
+            "type": "object",
+            "properties": {
+              "allow": { "type": "array", "items": { "type": "string" } },
+              "deny": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "geo_block": {
+            "type": "object",
+            "properties": {
+              "deny_countries": { "type": "array", "items": { "type": "string" } },
+              "allow_countries": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "response": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string", "enum": ["drop", "reject", "tarpit", "silent"] },
+              "tarpit_ms": { "type": "integer", "minimum": 0 },
+              "reject_message": { "type": "string" }
+            }
+          },
+          "ssh": {
+            "type": "object",
+            "properties": {
+              "banner": { "type": "string" },
+              "max_auth_tries": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "smtp": {
+            "type": "object",
+            "properties": {
+              "blocked_sender_domains": { "type": "array", "items": { "type": "string" } },
+              "require_starttls": { "type": "boolean" },
+              "max_recipients": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "pop3": {
+            "type": "object",
+            "properties": {
+              "max_auth_failures": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "imap": {
+            "type": "object",
+            "properties": {
+              "max_auth_failures": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "postgres": {
+            "type": "object",
+            "properties": {
+              "max_auth_failures": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "mysql": {
+            "type": "object",
+            "properties": {
+              "max_auth_failures": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "redis": {
+            "type": "object",
+            "properties": {
+              "blocked_commands": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "ftp": {
+            "type": "object",
+            "properties": {
+              "max_auth_failures": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "tls": {
+            "type": "object",
+            "properties": {
+              "allowed_domains": { "type": "array", "items": { "type": "string" } },
+              "blocked_domains": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+web/node_modules
+rwarden
+bin/
+/dist/
+web/dist/
+docs/
+coverage.out
+.DS_Store
+*.log
+*.test
+*.out
+.chrome-temp-data/

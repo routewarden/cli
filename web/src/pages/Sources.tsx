@@ -1,22 +1,22 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-  Container, FileText, Trash2, Radio, Search, FileCode,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  Container, FileText, Trash2, Radio, Search, RefreshCw,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Shield
 } from 'lucide-react'
 import type { Source } from '../types'
 import { pluginLabel, pluginBadgeClass } from '../utils'
 
 interface SourcesProps {
   sources: Source[]
-  onClearStopped?: () => void
+  onClearStopped?: () => Promise<void> | void
   onSelectSource?: (name: string) => void
-  onOpenConfig?: (source: Source) => void
 }
 
-export default function Sources({ sources, onClearStopped, onSelectSource, onOpenConfig }: SourcesProps) {
+export default function Sources({ sources, onClearStopped, onSelectSource }: SourcesProps) {
   const [filter, setFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [clearing, setClearing] = useState(false)
 
   const hasInactive = sources.some(s => s.status !== 'live')
 
@@ -45,13 +45,23 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
     return filtered.slice(startIndex, endIndex)
   }, [filtered, startIndex, endIndex])
 
+  const handleClear = async () => {
+    if (!onClearStopped) return
+    setClearing(true)
+    try {
+      await onClearStopped()
+    } finally {
+      setClearing(false)
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-header" style={{ flexShrink: 0 }}>
         <div>
-          <div className="page-title">Sources</div>
+          <div className="page-title">Services &amp; Sources</div>
           <div className="page-subtitle">
-            Active log sources — Docker containers &amp; log files
+            Connected wardens and log sources — Docker containers, TCP Warden &amp; log files
           </div>
         </div>
         <div className="header-actions">
@@ -61,21 +71,28 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
               <input
                 className="filter-input"
                 style={{ paddingLeft: 26, height: 30, minWidth: 160 }}
-                placeholder="Search sources…"
+                placeholder="Search services…"
                 value={filter}
                 onChange={e => setFilter(e.target.value)}
               />
             </div>
           )}
-          <span className="event-count-badge">{filtered.length} source{filtered.length !== 1 ? 's' : ''}</span>
-          {hasInactive && onClearStopped && (
+          <span className="event-count-badge">
+            {sources.filter(s => s.status === 'live').length} active / {sources.length} total
+          </span>
+          {onClearStopped && (
             <button
               className="toolbar-btn"
-              onClick={onClearStopped}
-              title="Clear stopped and inactive sources"
+              onClick={handleClear}
+              disabled={clearing}
+              title="Clear stopped, dead, and inactive containers from dashboard"
+              style={{
+                borderColor: hasInactive ? 'rgba(239, 68, 68, 0.4)' : undefined,
+                color: hasInactive ? 'var(--red)' : undefined,
+              }}
             >
-              <Trash2 size={13} />
-              Clear Inactive
+              {clearing ? <RefreshCw size={13} className="spin" /> : <Trash2 size={13} />}
+              {hasInactive ? 'Clear Stale Containers' : 'Refresh / Clear Inactive'}
             </button>
           )}
         </div>
@@ -85,7 +102,7 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
         <EmptySourceState />
       ) : filtered.length === 0 ? (
         <div className="empty-state" style={{ flex: 1 }}>
-          <p>No sources match query "{filter}"</p>
+          <p>No services match query "{filter}"</p>
         </div>
       ) : (
         <div className="source-list">
@@ -94,7 +111,6 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
               key={src.id}
               source={src}
               onSelectSource={onSelectSource}
-              onOpenConfig={onOpenConfig}
             />
           ))}
         </div>
@@ -105,7 +121,7 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
           <div className="pagination-info">
             <span>
               Showing <strong className="text-secondary">{filtered.length === 0 ? 0 : startIndex + 1}–{endIndex}</strong> of{' '}
-              <strong className="text-secondary">{filtered.length.toLocaleString()}</strong> sources
+              <strong className="text-secondary">{filtered.length.toLocaleString()}</strong> services
             </span>
             <div className="pagination-size-wrap">
               <span className="pagination-size-label">Per page:</span>
@@ -116,7 +132,7 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
                   setPageSize(Number(e.target.value))
                   setCurrentPage(1)
                 }}
-                title="Sources per page"
+                title="Services per page"
               >
                 <option value={5}>5</option>
                 <option value={10}>10</option>
@@ -189,13 +205,12 @@ export default function Sources({ sources, onClearStopped, onSelectSource, onOpe
 function SourceCard({
   source: s,
   onSelectSource,
-  onOpenConfig,
 }: {
   source: Source
   onSelectSource?: (name: string) => void
-  onOpenConfig?: (source: Source) => void
 }) {
-  const Icon = s.kind === 'docker' ? Container : FileText
+  const isTCP = (s.plugin || '').includes('tcp')
+  const Icon = isTCP ? Shield : (s.kind === 'docker' ? Container : FileText)
 
   return (
     <div className="source-card">
@@ -204,8 +219,13 @@ function SourceCard({
       </div>
 
       <div className="source-info">
-        <div className="source-name">{s.name}</div>
-        <div className="source-detail">{s.details || (s.kind === 'docker' ? 'Container' : 'Log file')}</div>
+        <div className="source-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>{s.name}</span>
+          {s.id && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>({s.id})</span>}
+        </div>
+        <div className="source-detail">
+          {s.details || (s.kind === 'docker' ? 'Docker Container' : 'Log file')}
+        </div>
       </div>
 
       <div className="source-badges">
@@ -227,22 +247,11 @@ function SourceCard({
           </span>
         </div>
 
-        {onOpenConfig && (
-          <button
-            className="source-action-btn"
-            onClick={() => onOpenConfig(s)}
-            title={`View RouteWarden configuration for ${s.name}`}
-          >
-            <FileCode size={12} />
-            Config
-          </button>
-        )}
-
         {onSelectSource && (
           <button
             className="source-action-btn"
             onClick={() => onSelectSource(s.name)}
-            title={`Filter live event logs for ${s.name}`}
+            title={`View live logs for ${s.name}`}
           >
             <Radio size={12} />
             Logs
@@ -261,10 +270,10 @@ function EmptySourceState() {
         <line x1="8" y1="21" x2="16" y2="21" />
         <line x1="12" y1="17" x2="12" y2="21" />
       </svg>
-      <p>No sources found</p>
-      <p style={{ fontSize: 11, maxWidth: 320 }}>
-        Make sure Docker is running with containers that use a RouteWarden middleware,
-        or pass <code style={{ background: 'var(--bg-elevated)', padding: '1px 5px', borderRadius: 4 }}>--log</code> to specify a log file.
+      <p>No services connected</p>
+      <p style={{ fontSize: 11, maxWidth: 360 }}>
+        Ensure Docker is running with RouteWarden containers (nginx-warden, traefik-warden, caddy-warden, tcp-warden),
+        or start the TCP Warden daemon.
       </p>
     </div>
   )

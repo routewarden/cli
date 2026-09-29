@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"slices"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -36,6 +37,7 @@ func NewRingBuffer(capacity int) *RingBuffer {
 
 // Push appends a new event to the ring buffer.
 func (r *RingBuffer) Push(e SecurityEvent) {
+	e.Plugin = normalizePlugin(e.Plugin, e.Source, e.EventKind, e.Protocol)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events[r.head] = e
@@ -43,6 +45,38 @@ func (r *RingBuffer) Push(e SecurityEvent) {
 	r.count++
 	if r.stored < r.capacity {
 		r.stored++
+	}
+}
+
+// Clear removes all stored events from the ring buffer and resets counters.
+func (r *RingBuffer) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = make([]SecurityEvent, r.capacity)
+	r.head = 0
+	r.stored = 0
+	r.count = 0
+}
+
+// normalizePlugin standardizes the plugin identifier across the 4 supported services:
+// nginx-warden, traefik-warden, caddy-warden, and tcp-warden.
+func normalizePlugin(plugin, source, eventKind, protocol string) string {
+	p := strings.ToLower(plugin)
+	s := strings.ToLower(source)
+	switch {
+	case strings.Contains(p, "traefik") || strings.Contains(s, "traefik"):
+		return "traefik-warden"
+	case strings.Contains(p, "caddy") || strings.Contains(s, "caddy"):
+		return "caddy-warden"
+	case strings.Contains(p, "nginx") || strings.Contains(s, "nginx") || strings.Contains(p, "openresty") || strings.Contains(s, "openresty"):
+		return "nginx-warden"
+	case strings.Contains(p, "tcp") || strings.Contains(s, "tcp") || eventKind == "tcp" || protocol != "":
+		return "tcp-warden"
+	default:
+		if plugin != "" {
+			return plugin
+		}
+		return "unknown"
 	}
 }
 
@@ -98,7 +132,12 @@ func (r *RingBuffer) Stats(hours int, source ...string) StatsSnapshot {
 	pathCount := make(map[string]int)
 	ipCount := make(map[string]int)
 	modeCount := make(map[string]int)
-	gwCount := make(map[string]int)
+	gwCount := map[string]int{
+		"nginx-warden":   0,
+		"traefik-warden": 0,
+		"caddy-warden":   0,
+		"tcp-warden":     0,
+	}
 
 	// minute bucket → count for rate chart (last 60 minutes)
 	rateBuckets := make(map[string]int)
@@ -118,18 +157,27 @@ func (r *RingBuffer) Stats(hours int, source ...string) StatsSnapshot {
 		ipSet[e.ClientIP] = struct{}{}
 		if e.Path != "" {
 			pathCount[e.Path]++
+		} else if e.Service != "" {
+			target := e.Service
+			if e.Protocol != "" {
+				target = e.Protocol + "://" + e.Service
+			}
+			pathCount[target]++
 		}
 		if e.ClientIP != "" {
 			ipCount[e.ClientIP]++
 		}
 		mode := e.ResponseMode
 		if mode == "" {
-			mode = "block"
+			if e.Action != "" {
+				mode = e.Action
+			} else {
+				mode = "block"
+			}
 		}
 		modeCount[mode]++
-		if e.Plugin != "" {
-			gwCount[e.Plugin]++
-		}
+		p := normalizePlugin(e.Plugin, e.Source, e.EventKind, e.Protocol)
+		gwCount[p]++
 
 		// rate chart: per-minute bucket for last 60 min
 		if !e.Timestamp.Before(rateStart) {
@@ -220,8 +268,8 @@ func (r *RingBuffer) IPDetails(ipStr string) IPDetailsResponse {
 	hasExploitProbe := false
 
 	// Iterate in reverse (newest first)
-	for i := len(allEvents) - 1; i >= 0; i-- {
-		e := allEvents[i]
+	for _, e := range slices.Backward(allEvents) {
+		
 		if cleanIPString(e.ClientIP) != clean {
 			continue
 		}
@@ -246,12 +294,22 @@ func (r *RingBuffer) IPDetails(ipStr string) IPDetailsResponse {
 
 		if e.Path != "" {
 			pathCounts[e.Path]++
+		} else if e.Service != "" {
+			target := e.Service
+			if e.Protocol != "" {
+				target = e.Protocol + "://" + e.Service
+			}
+			pathCounts[target]++
 		}
 		if e.Method != "" {
 			methodCounts[e.Method]++
+		} else if e.Protocol != "" {
+			methodCounts[strings.ToUpper(e.Protocol)]++
 		}
 		if e.Pattern != "" {
 			patternCounts[e.Pattern]++
+		} else if e.Reason != "" {
+			patternCounts[e.Reason]++
 		}
 		mode := e.ResponseMode
 		if mode == "" {

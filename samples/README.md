@@ -10,6 +10,7 @@ This directory provides working, ready-to-test gateway configuration samples for
 | **Caddy** | [`caddy/Caddyfile`](caddy/Caddyfile) | `caddy` | Standalone Caddyfile with `routewarden { ... }` directive block and response handler |
 | **NGINX / OpenResty** | [`nginx/nginx.conf`](nginx/nginx.conf) | `nginx` | OpenResty configuration with Lua `resty.routewarden` initialization |
 | **Generic JSON** | [`json/routewarden.json`](json/routewarden.json) | User choice | Universal RouteWarden JSON configuration validated against official schema |
+| **TCP Warden** | [`tcp-warden/tcp-warden.yaml`](tcp-warden/tcp-warden.yaml) | `tcp-warden` | Layer 4 proxy & firewall sample connected to `rwarden dashboard` |
 
 ---
 

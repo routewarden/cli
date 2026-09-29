@@ -4,16 +4,31 @@ export interface SecurityEvent {
   type: string
   timestamp: string
   plugin: string
-  client_ip: string
-  method: string
-  path: string
+
+  // HTTP-layer fields (absent on TCP events)
+  method?: string
+  path?: string
   target?: string
   query?: string
   pattern?: string
-  reason?: string
-  action: string
   status?: number
   response_mode?: string
+
+  // TCP-layer fields (absent on HTTP events)
+  service?: string
+  protocol?: string
+  bytes_in?: number
+  bytes_out?: number
+  duration_ms?: number
+
+  // Shared fields
+  client_ip: string
+  action: string
+  reason?: string
+
+  // Discriminator: "http" | "tcp" | "" (legacy/unknown)
+  event_kind?: string
+
   source?: string
   source_id?: string
   country_code?: string
@@ -116,8 +131,21 @@ export interface IPDetailsResponse {
   events: SecurityEvent[]
 }
 
-
 export interface WsMessage {
-  msg_type: 'event' | 'sources'
-  payload: SecurityEvent | Source[]
+  msg_type: 'event' | 'sources' | 'clear'
+  payload?: SecurityEvent | Source[] | null
+}
+
+export interface PluginCatalogEntry {
+  name: string
+  version: string
+  manifest_version: string
+  description: string
+  author: string
+  protocols: string[]
+  category: 'database' | 'cache' | 'messaging' | 'network' | 'game' | 'utility'
+  status: 'active' | 'disabled' | 'available'
+  install_command: string
+  sample_config: string
+  github_url: string
 }

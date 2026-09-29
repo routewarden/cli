@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 ---
@@ -214,6 +214,9 @@ rwarden validate -c routewarden.json
 # Auto-detects routewarden.json in current directory if omitted
 rwarden validate
 
+# Validate tcp-warden.yaml directly
+rwarden validate tcp-warden.yaml
+
 # Validate piped config via stdin
 cat routewarden.json | rwarden validate
 ```
@@ -221,6 +224,7 @@ cat routewarden.json | rwarden validate
 **Docker:**
 ```bash
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate /routewarden.json
+docker run --rm -v $(pwd)/tcp-warden.yaml:/tcp-warden.yaml ghcr.io/routewarden/cli:latest validate /tcp-warden.yaml
 ```
 
 **Example Output**:
@@ -277,6 +281,9 @@ rwarden generate caddy [routewarden.json]
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 rwarden generate nginx [routewarden.json]
+
+# TCP Warden: tcp-warden.yaml configuration
+rwarden generate tcp-warden [routewarden.json] > tcp-warden.yaml
 ```
 
 **Docker:**
@@ -295,6 +302,9 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate nginx /routewarden.json
+
+# TCP Warden: output as tcp-warden.yaml configuration
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate tcp-warden /routewarden.json > tcp-warden.yaml
 ```
 
 | Target / Alias | Output |
@@ -304,6 +314,7 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `traefik-labels`, `compose`, `labels` | Docker Compose `labels:` block |
 | `caddy`, `caddyfile` | Caddyfile `routewarden { ... }` directive block |
 | `nginx`, `openresty` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+| `tcp-warden`, `tcp`, `tcpwarden` | TCP Warden YAML configuration (`tcp-warden.yaml`) |
 
 ---
 
@@ -491,7 +502,7 @@ docker run -d \
 
 #### Docker Compose Example
 
-Deploy the dashboard alongside your existing reverse proxy infrastructure:
+Deploy the dashboard alongside your existing reverse proxy and TCP Warden infrastructure:
 
 ```yaml
 version: "3.8"
@@ -508,15 +519,31 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
 
+  tcp-warden:
+    image: ghcr.io/routewarden/tcp-warden:latest
+    container_name: tcp-warden
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+      - "2222:2222"
+    volumes:
+      - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
+      - tcp-warden-data:/var/lib/routewarden
+
   routewarden-dashboard:
     image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
     ports:
       - "9090:9090"
+    environment:
+      - TCP_WARDEN_URL=http://tcp-warden:9091
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--tcp-warden", "http://tcp-warden:9091"]
+
+volumes:
+  tcp-warden-data:
 ```
 
 #### Command Flags
@@ -528,6 +555,7 @@ services:
 | `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
 | `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
 | `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--tcp-warden` | string | `"http://127.0.0.1:9091"` | URL or socket to TCP Warden management API (or set `TCP_WARDEN_URL`) |
 | `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
@@ -582,7 +610,7 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 **Example Output:**
 ```text
-rwarden version 2.1.0
+rwarden version 4.0.0
 ```
 
 ---

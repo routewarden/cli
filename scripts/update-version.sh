@@ -12,6 +12,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_FILE="${ROOT_DIR}/version.json"
 
+# Helper for cross-platform in-place sed (macOS BSD sed vs Linux GNU sed)
+sed_inplace() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' -E "$@"
+  else
+    sed -i -E "$@"
+  fi
+}
+
 # If a version argument was provided, update version.json first
 if [ -n "${1:-}" ]; then
   RAW_VERSION="$1"
@@ -61,47 +70,54 @@ UPDATED_COUNT=0
 
 # 1. Update main.go (var version = "X.Y.Z")
 if [ -f "${ROOT_DIR}/main.go" ]; then
-  sed -i '' -E "s|(var[[:space:]]+version[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/main.go"
+  sed_inplace "s|(var[[:space:]]+version[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/main.go"
   echo "  ✓ Synchronized main.go"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
 # 2. Update package.json ("version": "X.Y.Z")
 if [ -f "${ROOT_DIR}/package.json" ]; then
-  sed -i '' -E "s|(\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/package.json"
+  sed_inplace "s|(\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/package.json"
   echo "  ✓ Synchronized package.json"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
 # 3. Update install.sh (fallback LATEST_TAG="vX.Y.Z")
 if [ -f "${ROOT_DIR}/install.sh" ]; then
-  sed -i '' -E "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/install.sh"
-  sed -i '' -E "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/install.sh"
+  sed_inplace "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/install.sh"
+  sed_inplace "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/install.sh"
   echo "  ✓ Synchronized install.sh"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
 # 4. Update docs/public/install.sh if present
 if [ -f "${ROOT_DIR}/docs/public/install.sh" ]; then
-  sed -i '' -E "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/docs/public/install.sh"
-  sed -i '' -E "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/public/install.sh"
+  sed_inplace "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/docs/public/install.sh"
+  sed_inplace "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/public/install.sh"
   echo "  ✓ Synchronized docs/public/install.sh"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
 # 5. Update README.md version comment
 if [ -f "${ROOT_DIR}/README.md" ]; then
-  sed -i '' -E "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
+  sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
   echo "  ✓ Synchronized README.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
 # 6. Update docs/index.md if present
 if [ -f "${ROOT_DIR}/docs/index.md" ]; then
-  sed -i '' -E "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/docs/index.md"
-  sed -i '' -E "s|(releases/download/)v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/index.md"
-  sed -i '' -E "s|(rwarden_)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?_|\1${SEMVER_NO_V}_|g" "${ROOT_DIR}/docs/index.md"
+  sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/docs/index.md"
+  sed_inplace "s|(releases/download/)v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/index.md"
+  sed_inplace "s|(rwarden_)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?_|\1${SEMVER_NO_V}_|g" "${ROOT_DIR}/docs/index.md"
   echo "  ✓ Synchronized docs/index.md"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+# 7. Update VERSIONING.md (canonical version block)
+if [ -f "${ROOT_DIR}/VERSIONING.md" ]; then
+  sed_inplace "s|(\"version\":[[:space:]]*\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/VERSIONING.md"
+  echo "  ✓ Synchronized VERSIONING.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 

@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/routewarden/cli/engine"
@@ -402,3 +403,24 @@ func TestEngine_GenerateSandboxConfig(t *testing.T) {
 		t.Fatalf("expected error for unsupported target")
 	}
 }
+
+func TestEngine_GenerateTCPWardenYAML(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.AllowedIPs = []string{"192.168.1.0/24", "10.0.0.1"}
+
+	out, err := cfg.Generate("tcp-warden")
+	if err != nil {
+		t.Fatalf("unexpected error generating tcp-warden config: %v", err)
+	}
+
+	if !strings.Contains(out, "services:") {
+		t.Errorf("expected generated tcp-warden config to contain 'services:'")
+	}
+	if !strings.Contains(out, "192.168.1.0/24") {
+		t.Errorf("expected generated tcp-warden config to contain allowed IP")
+	}
+	if !strings.Contains(out, "ssh:") || !strings.Contains(out, "smtp:") {
+		t.Errorf("expected starter services in tcp-warden config")
+	}
+}
+

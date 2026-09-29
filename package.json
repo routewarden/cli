@@ -1,6 +1,6 @@
 {
   "name": "@routewarden/cli-docs",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Documentation site for RouteWarden CLI (rwarden)",
   "private": true,
   "type": "module",
@@ -10,6 +10,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "dashboard:dev": "npm --prefix web run dev",
+    "dashboard:dev:sock": "TCP_WARDEN_SOCKET=/tmp/routewarden/tcp-warden.sock npm --prefix web run dev",
     "dashboard:build": "npm --prefix web run build"
   },
   "devDependencies": {
