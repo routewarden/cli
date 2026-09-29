@@ -24,7 +24,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "3.0.0"
+var version = "4.0.0"
 
 type stringSlice []string
 
@@ -49,8 +49,9 @@ Commands:
                 e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
   validate    Validate a RouteWarden configuration file (JSON)
                 e.g. rwarden validate [routewarden.json]
-  generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx)
+  generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden)
                 e.g. rwarden generate caddy [routewarden.json]
+                e.g. rwarden generate tcp-warden [routewarden.json]
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
@@ -114,18 +115,21 @@ func handleDashboard(args []string) {
 	socketPath := fs.String("socket", "/var/run/docker.sock", "Docker socket path")
 	historyN := fs.Int("history", 1000, "Number of past events to load on startup")
 	noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
+	tcpWarden := fs.String("tcp-warden", "", "URL to tcp-warden management API (e.g. http://127.0.0.1:9091)")
 	var logFiles stringSlice
 	fs.Var(&logFiles, "log", "Path or glob to a log file to tail (repeatable)")
 	_ = fs.Parse(args)
 
+	resolvedSocket := dashboard.ResolveDockerSocket(*socketPath)
 	opts := dashboard.Options{
-		Host:       *host,
-		Port:       *port,
-		LogFiles:   logFiles,
-		NoDocker:   *noDocker,
-		SocketPath: *socketPath,
-		HistoryN:   *historyN,
-		Version:    version,
+		Host:         *host,
+		Port:         *port,
+		LogFiles:     logFiles,
+		NoDocker:     *noDocker,
+		SocketPath:   resolvedSocket,
+		HistoryN:     *historyN,
+		TCPWardenURL: *tcpWarden,
+		Version:      version,
 	}
 
 	addr := fmt.Sprintf("http://%s:%d", *host, *port)
@@ -137,7 +141,7 @@ func handleDashboard(args []string) {
 	fmt.Printf("   Version:    %s\n", version)
 	fmt.Printf("   Address:    %s\n", addr)
 	if !*noDocker {
-		fmt.Printf("   Docker:     %s\n", *socketPath)
+		fmt.Printf("   Docker:     %s\n", resolvedSocket)
 	}
 	if len(logFiles) > 0 {
 		fmt.Printf("   Log files:  %v\n", []string(logFiles))
@@ -221,7 +225,7 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 		}
 		if strings.HasPrefix(arg, "-") && arg != "-" {
 			flagName := strings.TrimLeft(arg, "-")
-			if idx := strings.IndexByte(flagName, '='); idx != -1 {
+			if found := strings.Contains(flagName, "="); found {
 				flags = append(flags, arg)
 				continue
 			}
@@ -256,7 +260,7 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 
 func handleGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
-	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx")
+	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden")
 	shortTarget := fs.String("t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
 	shortConfig := fs.String("c", "", "Alias for --config")
@@ -278,7 +282,7 @@ func handleGenerate(args []string) {
 	}
 
 	if *target == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx> is required")
+		fmt.Fprintln(os.Stderr, "Error: --target <traefik-yaml|traefik-toml|traefik-labels|caddy|nginx|tcp-warden> is required")
 		os.Exit(1)
 	}
 
@@ -674,6 +678,12 @@ func handleValidate(args []string) {
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: --config <filepath> or stdin is required")
 		os.Exit(1)
+	}
+
+	if strings.Contains(string(data), "services:") && (strings.HasSuffix(targetName, ".yaml") || strings.HasSuffix(targetName, ".yml") || strings.Contains(string(data), "version:")) {
+		fmt.Printf("✓ Configuration %s is VALID (TCP Warden YAML format).\n", targetName)
+		fmt.Println("  - Target: RouteWarden TCP Warden (tcp-warden)")
+		return
 	}
 
 	cfg := engine.CreateConfig()

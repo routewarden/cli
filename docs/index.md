@@ -28,11 +28,11 @@ Download standalone, statically compiled binaries for **Linux**, **macOS**, and 
 
 | Platform | Architecture | Archive |
 |:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | [rwarden_3.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_arm64.tar.gz) |
-| **macOS** | Intel (`amd64`) | [rwarden_3.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_darwin_amd64.tar.gz) |
-| **Linux** | 64-bit (`amd64`) | [rwarden_3.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_amd64.tar.gz) |
-| **Linux** | ARM64 (`arm64`) | [rwarden_3.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_linux_arm64.tar.gz) |
-| **Windows**| 64-bit (`amd64`) | [rwarden_3.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v3.0.0/rwarden_3.0.0_windows_amd64.zip) |
+| **macOS** | Apple Silicon (`arm64`) | [rwarden_4.0.0_darwin_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_darwin_arm64.tar.gz) |
+| **macOS** | Intel (`amd64`) | [rwarden_4.0.0_darwin_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_darwin_amd64.tar.gz) |
+| **Linux** | 64-bit (`amd64`) | [rwarden_4.0.0_linux_amd64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_linux_amd64.tar.gz) |
+| **Linux** | ARM64 (`arm64`) | [rwarden_4.0.0_linux_arm64.tar.gz](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_linux_arm64.tar.gz) |
+| **Windows**| 64-bit (`amd64`) | [rwarden_4.0.0_windows_amd64.zip](https://github.com/routewarden/cli/releases/download/v4.0.0/rwarden_4.0.0_windows_amd64.zip) |
 
 ::: tip macOS Gatekeeper Notice
 If macOS displays *"Apple could not verify “rwarden” is free of malware..."* when running a downloaded binary, macOS Gatekeeper has placed it in quarantine. You can remove the quarantine flag using:
@@ -78,12 +78,12 @@ Verify installation:
 
 ```bash [CLI]
 rwarden version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 ```bash [Docker]
 docker run --rm ghcr.io/routewarden/cli:latest version
-# rwarden version 3.0.0
+# rwarden version 4.0.0
 ```
 
 :::
@@ -194,6 +194,9 @@ rwarden validate -c routewarden.json
 # Auto-detects routewarden.json in current directory if omitted
 rwarden validate
 
+# Validate tcp-warden.yaml configuration
+rwarden validate tcp-warden.yaml
+
 # Validate piped config via stdin
 cat routewarden.json | rwarden validate
 ```
@@ -201,6 +204,9 @@ cat routewarden.json | rwarden validate
 ```bash [Docker]
 # Validate mounted config file
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest validate /routewarden.json
+
+# Validate mounted tcp-warden.yaml file
+docker run --rm -v $(pwd)/tcp-warden.yaml:/tcp-warden.yaml ghcr.io/routewarden/cli:latest validate /tcp-warden.yaml
 ```
 
 :::
@@ -266,6 +272,9 @@ rwarden generate caddy [routewarden.json]
 
 # NGINX / OpenResty: Lua init table for nginx.conf
 rwarden generate nginx [routewarden.json]
+
+# TCP Warden: tcp-warden.yaml configuration
+rwarden generate tcp-warden [routewarden.json] > tcp-warden.yaml
 ```
 
 ```bash [Docker]
@@ -283,13 +292,16 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 
 # NGINX / OpenResty: output as Lua init table for nginx.conf
 docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate nginx /routewarden.json
+
+# TCP Warden: output as tcp-warden.yaml configuration
+docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden/cli:latest generate tcp-warden /routewarden.json > tcp-warden.yaml
 ```
 
 :::
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `<target>`, `-t`, `--target` | string | `""` | Target gateway format (e.g. `traefik-yaml`, `caddy`, `nginx`) |
+| `<target>`, `-t`, `--target` | string | `""` | Target gateway format (e.g. `traefik-yaml`, `caddy`, `nginx`, `tcp-warden`) |
 | `[config]`, `-c`, `--config` | string | `"routewarden.json"` | Path to RouteWarden JSON config file (or `-` for stdin) |
 
 **Available Targets & Aliases:**
@@ -301,6 +313,7 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `traefik-labels`, `compose`, `docker-compose`, `labels` | Docker Compose `labels:` block |
 | `caddy`, `caddyfile` | Caddyfile `routewarden { ... }` directive block |
 | `nginx`, `openresty` | OpenResty Lua table for `init_by_lua_block` in `nginx.conf` |
+| `tcp-warden`, `tcp`, `tcpwarden` | TCP Warden YAML configuration (`tcp-warden.yaml`) |
 
 ---
 
@@ -505,10 +518,16 @@ rwarden dashboard --no-docker --log /var/log/routewarden.log
 
 # 6. Customize memory retention (number of past events loaded)
 rwarden dashboard --history 2500 --port 9090
+
+# 7. Ingest structured logs from RouteWarden TCP Warden
+rwarden dashboard --log /var/log/routewarden/tcp-warden.jsonl
+
+# 8. Connect directly to running TCP Warden daemon via SSE API (auto-reconnects)
+rwarden dashboard --tcp-warden http://127.0.0.1:9091
 ```
 
 ```bash [Docker]
-# Auto-discover gateway containers via Docker socket
+# Auto-discover gateway containers (Traefik, Caddy, NGINX, TCP Warden) via Docker socket
 docker run -d \
   --name routewarden-dashboard \
   --restart unless-stopped \
@@ -541,15 +560,31 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
 
+  tcp-warden:
+    image: ghcr.io/routewarden/tcp-warden:latest
+    container_name: tcp-warden
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+      - "2222:2222"
+    volumes:
+      - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
+      - tcp-warden-data:/var/lib/routewarden
+
   routewarden-dashboard:
     image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
     ports:
       - "9090:9090"
+    environment:
+      - TCP_WARDEN_URL=http://tcp-warden:9091
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--tcp-warden", "http://tcp-warden:9091"]
+
+volumes:
+  tcp-warden-data:
 ```
 
 :::
@@ -563,6 +598,7 @@ services:
 | `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
 | `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
 | `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
+| `--tcp-warden` | string | `"http://127.0.0.1:9091"` | URL or socket to TCP Warden management API (or set `TCP_WARDEN_URL`) |
 | `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
@@ -625,23 +661,31 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 **Example Output**:
 ```text
-rwarden version 2.1.0
+rwarden version 4.0.0
 ```
 
 ---
 
 ## JSON Schema & IDE Setup {#json-schema}
 
-The official RouteWarden JSON Schema is hosted at:
-```text
-https://routewarden.github.io/cli/schema.json
-```
-*(Also mirrored at `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`)*
+The official RouteWarden JSON Schemas are hosted at:
 
-It provides real-time validation, syntax checking, and inline autocomplete for:
+- **HTTP Middleware (Traefik, Caddy, NGINX)**:
+  ```text
+  https://routewarden.github.io/cli/schema.json
+  ```
+  *(Also mirrored at `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`)*
+
+- **Layer 4 TCP Security Proxy (TCP Warden)**:
+  ```text
+  https://routewarden.github.io/tcp-warden/tcp-warden.schema.json
+  ```
+
+They provide real-time validation, syntax checking, and inline autocomplete for:
 - Traefik dynamic middleware YAML/JSON configurations
 - Caddy JSON API routes and handler configurations
-- Standalone RouteWarden JSON/YAML configs loaded by NGINX Lua or CI/CD pipelines
+- NGINX Lua or CI/CD pipelines
+- TCP Warden (`tcp-warden.yaml`) proxy and security daemon configurations
 
 ---
 
@@ -667,6 +711,10 @@ Add schema mappings to your workspace `.vscode/settings.json`:
       "routewarden*.yaml",
       "dynamic_conf.yml",
       "traefik-dynamic*.yml"
+    ],
+    "https://routewarden.github.io/tcp-warden/tcp-warden.schema.json": [
+      "tcp-warden*.yml",
+      "tcp-warden*.yaml"
     ]
   }
 }
@@ -680,15 +728,9 @@ Add schema mappings to your workspace `.vscode/settings.json`:
 
 1. Open **Settings / Preferences** (`⌘,` on macOS or `Ctrl+Alt+S` on Linux/Windows).
 2. Navigate to **Languages & Frameworks** → **Schemas and DTDs** → **JSON Schema Mappings**.
-3. Click **+** (Add):
-   - **Name**: `RouteWarden`
-   - **Schema file or URL**: `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json`
-   - **Schema version**: `JSON Schema version 7` or `2020-12`
-4. Under **File path pattern**, add:
-   - `routewarden*.json`
-   - `routewarden*.yml`
-   - `dynamic_conf.yml`
-   - `caddy*.json`
+3. Configure mappings:
+   - **RouteWarden HTTP**: `https://raw.githubusercontent.com/routewarden/cli/main/config.schema.json` mapped to `routewarden*.json`, `routewarden*.yml`, `dynamic_conf.yml`, `caddy*.json`.
+   - **TCP Warden**: `https://routewarden.github.io/tcp-warden/tcp-warden.schema.json` mapped to `tcp-warden*.yaml`.
 
 ---
 
@@ -980,7 +1022,22 @@ caddy adapt --config Caddyfile --pretty
 
 ## Changelog {#changelog}
 
-All notable changes to the RouteWarden CLI (`rwarden`) are documented below. The CLI adheres to [Semantic Versioning](https://semver.org/).
+### [v4.0.0] - 2026-09-25
+
+#### Added
+- **RouteWarden TCP Warden Integration (`rwarden generate tcp-warden` & `rwarden validate`)**:
+  - Declarative generation of `tcp-warden.yaml` configurations directly from centralized RouteWarden JSON policies.
+  - Strict syntax, schema, and CIDR validation for `tcp-warden.yaml` via CLI arguments or stdin pipelines.
+- **Real-Time TCP Monitoring in RouteWarden Dashboard**:
+  - Direct ingestion and real-time visualization of structured `tcp-warden.jsonl` event streams.
+  - GeoIP mapping, protocol breakdowns, connection velocity metrics, and dynamic ban tracking.
+- **RouteWarden TCP Warden Standalone Application** ([`github.com/routewarden/tcp-warden`](https://github.com/routewarden/tcp-warden)):
+  - Dedicated, zero-allocation Layer 4 TCP security proxy daemon for SSH, SMTP, POP3, IMAP, and generic TCP tunnels.
+  - Bidirectional CrowdSec integration (LAPI bouncer decision ingestion and scenario log export).
+  - Built-in management REST and SSE API (`:9091`) with hot-reload support (`SIGHUP`).
+  - Official JSON Schema `tcp-warden.schema.json` and Docker Compose recipes.
+
+---
 
 ### [v3.0.0] - 2026-09-25
 

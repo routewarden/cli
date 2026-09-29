@@ -50,6 +50,11 @@ func (h *Hub) BroadcastSources(sources []Source) {
 	h.broadcast(wsMessage{MsgType: "sources", Payload: sources})
 }
 
+// BroadcastClear sends a clear event notification to every connected client.
+func (h *Hub) BroadcastClear() {
+	h.broadcast(wsMessage{MsgType: "clear", Payload: []SecurityEvent{}})
+}
+
 func (h *Hub) broadcast(msg wsMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {

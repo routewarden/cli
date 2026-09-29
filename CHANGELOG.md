@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v4.0.0] - 2026-09-25
+
+### Added
+
+- **RouteWarden TCP Warden Integration (`rwarden generate tcp-warden` & `rwarden validate`)**:
+  - Declarative generation of `tcp-warden.yaml` configurations directly from centralized RouteWarden JSON policies (`rwarden generate tcp-warden`).
+  - Strict syntax, schema, and CIDR validation for `tcp-warden.yaml` via CLI arguments or standard input pipelines (`rwarden validate`).
+- **Real-Time TCP Monitoring in RouteWarden Dashboard**:
+  - Direct ingestion and real-time visualization of structured `tcp-warden.jsonl` event streams (`rwarden dashboard --log /var/log/routewarden/tcp-warden.jsonl`).
+  - Real-time traffic velocity, protocol breakdown, GeoIP origins, and active ban countdowns.
+- **RouteWarden TCP Warden Standalone Application** ([`github.com/routewarden/tcp-warden`](https://github.com/routewarden/tcp-warden)):
+  - Dedicated Layer 4 TCP proxy daemon with zero-allocation architecture protecting SSH, SMTP, POP3, IMAP, and generic TCP streams.
+  - Native YAML syntax (`tcp-warden.yaml`), published JSON schema, CrowdSec LAPI bouncer integration, and management REST/SSE API.
+
+---
+
 ## [v3.0.0] - 2026-09-25
 
 ### Added

@@ -5,6 +5,7 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts'
 import type { StatsSnapshot, Source } from '../types'
+import { pluginLabel } from '../utils'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 
 const HOURS_OPTIONS = [
@@ -18,6 +19,15 @@ const PIE_COLORS = [
   '#10b981', '#8b5cf6', '#ec4899', '#f59e0b',
   '#06b6d4', '#14b8a6', '#84cc16', '#a855f7',
 ]
+
+function getGatewayColor(label: string): string {
+  const l = (label || '').toLowerCase()
+  if (l.includes('traefik')) return '#00a3e0'
+  if (l.includes('caddy')) return '#22c55e'
+  if (l.includes('nginx')) return '#10b981'
+  if (l.includes('tcp')) return '#6366f1'
+  return '#8b5cf6'
+}
 
 interface StatsProps {
   sources?: Source[]
@@ -63,7 +73,7 @@ export default function Stats({
       <div className="page-header" style={{ flexShrink: 0 }}>
         <div>
           <div className="page-title">
-            Statistics
+            Consolidated Statistics
             {selectedContainer !== 'all' && (
               <span className="badge badge-plugin-traefik" style={{ fontSize: 11, marginLeft: 8 }}>
                 {selectedContainer}
@@ -73,7 +83,7 @@ export default function Stats({
           <div className="page-subtitle">
             {selectedContainer !== 'all'
               ? `Aggregated metrics for container: ${selectedContainer}`
-              : 'Aggregated metrics from the in-memory event buffer'
+              : 'Consolidated security analytics across NGINX, Traefik, Caddy & TCP Warden'
             }
           </div>
         </div>
@@ -88,7 +98,7 @@ export default function Stats({
                 title="Filter statistics by container"
               >
                 <option value="all">All Containers</option>
-                {sources.map(s => (
+                {sources.filter(s => s.status === 'live').map(s => (
                   <option key={s.id} value={s.name}>
                     {s.name}
                   </option>
@@ -353,32 +363,41 @@ export default function Stats({
             </ResponsiveContainer>
           </div>
 
-          {/* By gateway */}
+          {/* By service / gateway */}
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Events by Gateway</span>
-              <span className="text-muted text-sm">traffic origin</span>
+              <span className="card-title">Events by Service</span>
+              <span className="text-muted text-sm">NGINX, Traefik, Caddy &amp; TCP Warden</span>
             </div>
             <ResponsiveContainer width="100%" height={isMobile ? 220 : 280}>
               <BarChart
-                data={stats.by_gateway ?? []}
+                data={(stats.by_gateway ?? []).map(g => ({
+                  ...g,
+                  displayName: pluginLabel(g.label),
+                }))}
                 margin={{ top: 20, right: isMobile ? 16 : 24, left: isMobile ? -16 : -6, bottom: 8 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
+                <XAxis dataKey="displayName" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
                 <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} width={isMobile ? 32 : 38} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
                 <Tooltip
                   contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}
                   itemStyle={{ color: 'var(--accent-hover)' }}
-                  formatter={(val: any) => [`${val} events`, 'Gateway Total']}
+                  formatter={(val: any, _name: any, item: any) => [
+                    `${val} events`,
+                    item?.payload?.displayName || 'Service Total',
+                  ]}
                 />
                 <Bar
                   dataKey="count"
-                  fill="var(--accent)"
                   radius={[4, 4, 0, 0]}
-                  barSize={32}
+                  barSize={36}
                   label={{ position: 'top', fill: 'var(--text-muted)', fontSize: 10, offset: 6 }}
-                />
+                >
+                  {(stats.by_gateway ?? []).map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={getGatewayColor(entry.label)} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
