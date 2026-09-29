@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -191,7 +192,17 @@ func BuildDockerRunCommand(opts SandboxOptions, configFilePath string, container
 	if opts.Detach {
 		args = append(args, "-d")
 	}
-	args = append(args, "-p", portStr+":8080")
+	args = append(args,
+		"-p", portStr+":8080",
+		"--label", "routewarden=true",
+		"--label", "warden.enabled=true",
+		"--label", fmt.Sprintf("routewarden.role=%s-warden", target),
+	)
+	if opts.Config != nil {
+		if jsonBytes, err := json.Marshal(opts.Config); err == nil {
+			args = append(args, "--label", fmt.Sprintf("routewarden.json=%s", string(jsonBytes)))
+		}
+	}
 
 	switch target {
 	case "traefik":

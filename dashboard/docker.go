@@ -2,13 +2,17 @@ package dashboard
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,8 +20,8 @@ import (
 )
 
 // dockerClient talks to the Docker daemon via the Unix socket using plain
-// net/http — no external Docker SDK needed. All calls use the HTTP/1.1
-// chunked-encoding API that Docker exposes on /var/run/docker.sock.
+// net/http — no external Docker SDK needed. If socket queries fail, it
+// falls back to invoking the docker CLI.
 type dockerClient struct {
 	socket string // path to docker.sock, e.g. "/var/run/docker.sock"
 	cli    *http.Client
@@ -48,25 +52,91 @@ func (d *dockerClient) get(path string) (*http.Response, error) {
 
 // dockerContainer is the subset of /containers/json we care about.
 type dockerContainer struct {
-	ID    string            `json:"Id"`
-	Names []string          `json:"Names"`
-	Image string            `json:"Image"`
-	State string            `json:"State"`
+	ID     string            `json:"Id"`
+	Names  []string          `json:"Names"`
+	Image  string            `json:"Image"`
+	State  string            `json:"State"`
 	Labels map[string]string `json:"Labels"`
 }
 
-// listContainers returns all running containers.
+// listContainersFromCLI queries running containers using the docker CLI as a resilient fallback.
+func listContainersFromCLI() ([]dockerContainer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--format", "{{json .}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps cli: %w", err)
+	}
+
+	var list []dockerContainer
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var raw struct {
+			ID     string `json:"ID"`
+			Names  string `json:"Names"`
+			Image  string `json:"Image"`
+			State  string `json:"State"`
+			Labels string `json:"Labels"`
+		}
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+		c := dockerContainer{
+			ID:     raw.ID,
+			Image:  raw.Image,
+			State:  raw.State,
+			Labels: make(map[string]string),
+		}
+		if raw.Names != "" {
+			for _, n := range strings.Split(raw.Names, ",") {
+				clean := strings.TrimPrefix(strings.TrimSpace(n), "/")
+				if clean != "" {
+					c.Names = append(c.Names, clean)
+				}
+			}
+		}
+		if raw.Labels != "" {
+			for _, pair := range strings.Split(raw.Labels, ",") {
+				parts := strings.SplitN(pair, "=", 2)
+				if len(parts) == 2 {
+					c.Labels[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+				}
+			}
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+// listContainers returns all running containers, attempting Unix socket first then CLI.
 func (d *dockerClient) listContainers() ([]dockerContainer, error) {
 	resp, err := d.get("/containers/json?all=false")
+	if err == nil && resp.StatusCode == http.StatusOK {
+		defer resp.Body.Close()
+		var containers []dockerContainer
+		if decodeErr := json.NewDecoder(resp.Body).Decode(&containers); decodeErr == nil && len(containers) > 0 {
+			return containers, nil
+		}
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	// Resilient fallback to docker CLI
+	if cliContainers, cliErr := listContainersFromCLI(); cliErr == nil && len(cliContainers) > 0 {
+		return cliContainers, nil
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("docker list containers: %w", err)
 	}
-	defer resp.Body.Close()
-	var containers []dockerContainer
-	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
-		return nil, fmt.Errorf("docker decode containers: %w", err)
-	}
-	return containers, nil
+	return []dockerContainer{}, nil
 }
 
 // inspectContainer returns the inspected details of a container by ID or name.
@@ -115,7 +185,9 @@ func (d *dockerClient) inspectContainer(idOrName string) (id string, name string
 // isRouteWardenContainer returns true when the container is likely to emit
 // RouteWarden security_event log lines. It checks:
 //  1. The label "routewarden=true" or "warden.enabled=true" (explicit opt-in).
-//  2. The image name contains a known gateway keyword.
+//  2. Any label starting with "routewarden" (e.g. routewarden.role, routewarden.json).
+//  3. The image name or container name contains a known gateway keyword (traefik, caddy, nginx, openresty, tcp-warden).
+//  4. Container name or image has routewarden or rwarden prefix/substring (e.g. rwarden-sandbox-*).
 func isRouteWardenContainer(c dockerContainer) bool {
 	// Explicit label opt-in
 	for k, v := range c.Labels {
@@ -123,11 +195,50 @@ func isRouteWardenContainer(c dockerContainer) bool {
 		if (kl == "routewarden" || kl == "warden.enabled") && strings.ToLower(v) == "true" {
 			return true
 		}
+		if strings.HasPrefix(kl, "routewarden") || strings.HasPrefix(kl, "warden.") {
+			return true
+		}
 	}
-	// Image-name heuristic
+	if isTCPWardenContainer(c) {
+		return true
+	}
+	// Image-name and container-name heuristics
+	targets := []string{strings.ToLower(c.Image)}
+	for _, n := range c.Names {
+		targets = append(targets, strings.ToLower(n))
+	}
+	for _, target := range targets {
+		for _, kw := range []string{"traefik", "caddy", "nginx", "openresty", "tcp-warden"} {
+			if strings.Contains(target, kw) {
+				return true
+			}
+		}
+		if strings.Contains(target, "routewarden") || strings.Contains(target, "rwarden") || strings.HasPrefix(target, "rwarden-") {
+			return true
+		}
+	}
+	return false
+}
+
+// isTCPWardenContainer returns true when the container is running tcp-warden.
+func isTCPWardenContainer(c dockerContainer) bool {
+	for k, v := range c.Labels {
+		kl := strings.ToLower(k)
+		vl := strings.ToLower(v)
+		if (kl == "routewarden.role" || kl == "role") && vl == "tcp-warden" {
+			return true
+		}
+		if (kl == "com.docker.compose.service" || kl == "service") && vl == "tcp-warden" {
+			return true
+		}
+	}
 	img := strings.ToLower(c.Image)
-	for _, kw := range []string{"traefik", "caddy", "nginx", "openresty"} {
-		if strings.Contains(img, kw) {
+	if strings.Contains(img, "tcp-warden") {
+		return true
+	}
+	for _, n := range c.Names {
+		nl := strings.ToLower(n)
+		if strings.Contains(nl, "tcp-warden") {
 			return true
 		}
 	}
@@ -137,93 +248,125 @@ func isRouteWardenContainer(c dockerContainer) bool {
 // containerName returns the human-readable name (strips leading slash).
 func containerName(c dockerContainer) string {
 	if len(c.Names) == 0 {
-		return c.ID[:12]
+		if len(c.ID) > 12 {
+			return c.ID[:12]
+		}
+		return c.ID
 	}
 	return strings.TrimPrefix(c.Names[0], "/")
 }
 
-// detectPlugin guesses the plugin type from image name.
+// detectPlugin guesses the plugin type from image, labels, or container name.
 func detectPlugin(c dockerContainer) string {
-	img := strings.ToLower(c.Image)
-	switch {
-	case strings.Contains(img, "traefik"):
-		return "traefik-warden"
-	case strings.Contains(img, "caddy"):
-		return "caddy-warden"
-	case strings.Contains(img, "nginx"), strings.Contains(img, "openresty"):
-		return "nginx-warden"
+	for k, v := range c.Labels {
+		kl := strings.ToLower(k)
+		if kl == "routewarden.role" && v != "" {
+			return v
+		}
+	}
+	targets := []string{strings.ToLower(c.Image)}
+	for _, n := range c.Names {
+		targets = append(targets, strings.ToLower(n))
+	}
+	for _, target := range targets {
+		switch {
+		case strings.Contains(target, "traefik"):
+			return "traefik-warden"
+		case strings.Contains(target, "caddy"):
+			return "caddy-warden"
+		case strings.Contains(target, "nginx"), strings.Contains(target, "openresty"):
+			return "nginx-warden"
+		case strings.Contains(target, "tcp"):
+			return "tcp-warden"
+		}
+	}
+	for _, target := range targets {
+		if strings.Contains(target, "routewarden") || strings.Contains(target, "rwarden") {
+			if strings.Contains(target, "caddy") {
+				return "caddy-warden"
+			}
+			if strings.Contains(target, "nginx") {
+				return "nginx-warden"
+			}
+			if strings.Contains(target, "tcp") {
+				return "tcp-warden"
+			}
+			return "traefik-warden"
+		}
 	}
 	return "unknown"
 }
 
-// tailLogs streams the container's stdout/stderr log from `since` (e.g. "1h")
+// tailLogs streams the container's stdout/stderr log using tailLines (e.g. 1000)
 // and calls onEvent for every parsed SecurityEvent.
+// If Docker socket streaming is unavailable, it falls back to the docker CLI.
 // It blocks until the context is cancelled.
-func (d *dockerClient) tailLogs(ctx context.Context, containerID, containerName, plugin string, since string, onEvent func(SecurityEvent)) error {
-	// Build a streaming log request — no timeout on the client for this one.
+func (d *dockerClient) tailLogs(ctx context.Context, containerID, containerName, plugin string, tailLines int, onEvent func(SecurityEvent)) error {
+	if tailLines <= 0 {
+		tailLines = 1000
+	}
+
+	// Try Docker HTTP streaming on Unix socket first
 	streamCli := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, "unix", d.socket)
 			},
 		},
-		// No timeout: this is a long-lived streaming connection.
 	}
 
-	var sinceParam string
-	if since != "" {
-		if dur, err := time.ParseDuration(since); err == nil {
-			sinceParam = fmt.Sprintf("&since=%d", time.Now().Add(-dur).Unix())
-		} else if ts, err := strconv.ParseInt(since, 10, 64); err == nil && ts > 0 {
-			sinceParam = fmt.Sprintf("&since=%d", ts)
+	url := fmt.Sprintf("http://docker/containers/%s/logs?follow=1&stdout=1&stderr=1&tail=%d&timestamps=0", containerID, tailLines)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err == nil {
+		resp, reqErr := streamCli.Do(req)
+		if reqErr == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			return parseLogStream(resp.Body, containerName, containerID, plugin, onEvent)
+		}
+		if resp != nil {
+			resp.Body.Close()
 		}
 	}
 
-	url := fmt.Sprintf("http://docker/containers/%s/logs?follow=1&stdout=1&stderr=1&timestamps=0%s", containerID, sinceParam)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
+	// Fallback to docker logs CLI
+	cmd := exec.CommandContext(ctx, "docker", "logs", "--tail", strconv.Itoa(tailLines), "-f", containerID)
+	stdout, pErr := cmd.StdoutPipe()
+	if pErr != nil {
+		return fmt.Errorf("docker logs pipe: %w", pErr)
+	}
+	stderr, sErr := cmd.StderrPipe()
+	if sErr != nil {
+		return fmt.Errorf("docker logs stderr pipe: %w", sErr)
 	}
 
-	resp, err := streamCli.Do(req)
-	if err != nil {
-		return fmt.Errorf("docker logs stream: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("docker logs returned status %d: %s", resp.StatusCode, string(body))
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("docker logs start: %w", err)
 	}
 
-	return parseLogStream(resp.Body, containerName, containerID, plugin, onEvent)
+	go func() {
+		_ = parseLogStream(stderr, containerName, containerID, plugin, onEvent)
+	}()
+
+	streamErr := parseLogStream(stdout, containerName, containerID, plugin, onEvent)
+	_ = cmd.Wait()
+	return streamErr
 }
 
-// parseLogStream reads from a Docker multiplexed log stream and extracts
+// parseLogStream reads from a Docker log stream (multiplexed or plain) and extracts
 // RouteWarden security_event JSON lines.
-//
-// Docker log stream format (when TTY is disabled):
-//   [8-byte header: stream_type(1) + 0x00 0x00 0x00 + size(4)] + <payload bytes>
-//
-// We detect the framing by checking if the first byte is 0x01 or 0x02
-// (stdout/stderr multiplexed). If the container uses a TTY the header is
-// absent and we fall back to reading plain lines.
 func parseLogStream(r io.Reader, sourceName, sourceID, plugin string, onEvent func(SecurityEvent)) error {
-	// Peek at first byte to detect framing.
-	peekBuf := make([]byte, 1)
+	peekBuf := make([]byte, 4)
 	n, err := io.ReadFull(r, peekBuf)
 	if n == 0 || err != nil {
 		return nil
 	}
 
 	var reader io.Reader
-	if peekBuf[0] == 0x01 || peekBuf[0] == 0x02 {
-		// Multiplexed stream — prepend the consumed byte and use the Docker
-		// frame-stripping reader.
-		reader = newDockerFrameReader(io.MultiReader(strings.NewReader(string(peekBuf)), r))
+	// Docker multiplexing header has stream_type (0x01 or 0x02) followed by 3 zero bytes
+	if n == 4 && (peekBuf[0] == 0x01 || peekBuf[0] == 0x02) && peekBuf[1] == 0x00 && peekBuf[2] == 0x00 && peekBuf[3] == 0x00 {
+		reader = newDockerFrameReader(io.MultiReader(bytes.NewReader(peekBuf[:n]), r))
 	} else {
-		// Plain TTY stream — prepend the consumed byte and read lines directly.
-		reader = io.MultiReader(strings.NewReader(string(peekBuf)), r)
+		reader = io.MultiReader(bytes.NewReader(peekBuf[:n]), r)
 	}
 
 	scanner := bufio.NewScanner(reader)
@@ -242,7 +385,13 @@ func parseLogStream(r io.Reader, sourceName, sourceID, plugin string, onEvent fu
 func parseSecurityEventLine(line, sourceName, sourceID, plugin string) (SecurityEvent, bool) {
 	if !strings.Contains(line, `"routewarden_block"`) &&
 		!strings.Contains(line, `"security_event"`) &&
-		!strings.Contains(line, `"path_blocked"`) {
+		!strings.Contains(line, `"path_blocked"`) &&
+		!strings.Contains(line, `"plugin_unavailable"`) &&
+		!strings.Contains(line, `"upstream_connect_failed"`) &&
+		!strings.Contains(line, `"blocked"`) &&
+		!strings.Contains(line, `"tarpit"`) &&
+		!strings.Contains(line, `"silentDrop"`) &&
+		!strings.Contains(line, `"fakeSuccess"`) {
 		return SecurityEvent{}, false
 	}
 
@@ -255,10 +404,86 @@ func parseSecurityEventLine(line, sourceName, sourceID, plugin string) (Security
 
 	var e SecurityEvent
 	if err := json.Unmarshal([]byte(line), &e); err != nil {
+		// Fallback: decode raw map to handle type discrepancies like string status or nano timestamps
+		var raw map[string]any
+		if err2 := json.Unmarshal([]byte(line), &raw); err2 != nil {
+			return SecurityEvent{}, false
+		}
+		if t, ok := raw["type"].(string); ok {
+			e.Type = t
+		}
+		if p, ok := raw["plugin"].(string); ok {
+			e.Plugin = p
+		}
+		if ip, ok := raw["client_ip"].(string); ok {
+			e.ClientIP = ip
+		}
+		if s, ok := raw["service"].(string); ok {
+			e.Service = s
+		}
+		if pr, ok := raw["protocol"].(string); ok {
+			e.Protocol = pr
+		}
+		if m, ok := raw["method"].(string); ok {
+			e.Method = m
+		}
+		if pt, ok := raw["path"].(string); ok {
+			e.Path = pt
+		}
+		if pat, ok := raw["pattern"].(string); ok {
+			e.Pattern = pat
+		}
+		if act, ok := raw["action"].(string); ok {
+			e.Action = act
+		}
+		if r, ok := raw["reason"].(string); ok {
+			e.Reason = r
+		}
+		if cc, ok := raw["country_code"].(string); ok {
+			e.CountryCode = cc
+		}
+		if cn, ok := raw["country_name"].(string); ok {
+			e.CountryName = cn
+		}
+		if fl, ok := raw["flag_emoji"].(string); ok {
+			e.FlagEmoji = fl
+		}
+		if tsStr, ok := raw["timestamp"].(string); ok {
+			if parsedT, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+				e.Timestamp = parsedT
+			} else if parsedT, err := time.Parse(time.RFC3339, tsStr); err == nil {
+				e.Timestamp = parsedT
+			}
+		}
+		if st, ok := raw["status"]; ok {
+			switch v := st.(type) {
+			case float64:
+				e.Status = int(v)
+			case string:
+				if intV, err := strconv.Atoi(v); err == nil {
+					e.Status = intV
+				}
+			}
+		}
+		if dur, ok := raw["duration_ms"].(float64); ok {
+			e.DurationMs = int64(dur)
+		}
+		if bi, ok := raw["bytes_in"].(float64); ok {
+			e.BytesIn = int64(bi)
+		}
+		if bo, ok := raw["bytes_out"].(float64); ok {
+			e.BytesOut = int64(bo)
+		}
+	}
+
+	if e.Type != "routewarden_block" && e.Type != "security_event" && e.Reason != "path_blocked" && e.Action != "blocked" && e.Action != "tarpit" && e.Action != "silentDrop" && e.Action != "fakeSuccess" && !strings.Contains(e.Reason, "plugin_unavailable") && !strings.Contains(e.Reason, "upstream_connect_failed") {
 		return SecurityEvent{}, false
 	}
-	if e.Type != "routewarden_block" && e.Type != "security_event" && e.Reason != "path_blocked" {
-		return SecurityEvent{}, false
+	if e.Type == "" {
+		e.Type = "security_event"
+	}
+	if e.Action == "" && e.Reason != "" {
+		e.Action = "blocked"
 	}
 
 	// Ensure timestamp is set (some versions may omit it)
@@ -284,35 +509,53 @@ func parseSecurityEventLine(line, sourceName, sourceID, plugin string) (Security
 		e.Plugin = plugin
 	}
 
+	if e.EventKind == "" {
+		if e.Protocol != "" || e.Service != "" || plugin == "tcp-warden" {
+			e.EventKind = "tcp"
+		} else {
+			e.EventKind = "http"
+		}
+	}
+
 	return e, true
 }
 
 // DockerWatcher discovers RouteWarden containers and tails their logs,
 // pushing events into a RingBuffer and broadcasting them to the hub.
 type DockerWatcher struct {
-	client *dockerClient
-	buf    *RingBuffer
-	hub    *Hub
-	since  string // e.g. "1h"
+	client  *dockerClient
+	buf     *RingBuffer
+	hub     *Hub
+	tail    int
 
 	mu      sync.Mutex
-	sources map[string]*Source // containerID → Source
+	sources map[string]*Source                 // containerID → Source
+	tailing map[string]context.CancelFunc      // containerID -> cancel function
+	ctx     context.Context
 }
 
-func NewDockerWatcher(socketPath string, buf *RingBuffer, hub *Hub, since string) *DockerWatcher {
+func NewDockerWatcher(socketPath string, buf *RingBuffer, hub *Hub, tail int) *DockerWatcher {
+	if tail <= 0 {
+		tail = 1000
+	}
 	return &DockerWatcher{
 		client:  newDockerClient(socketPath),
 		buf:     buf,
 		hub:     hub,
-		since:   since,
+		tail:    tail,
 		sources: make(map[string]*Source),
+		tailing: make(map[string]context.CancelFunc),
 	}
 }
 
-// Run starts the watcher. It polls for new containers every 10 s and tails
+// Run starts the watcher. It polls for new containers every 3 s and tails
 // logs from all discovered RouteWarden containers. Blocks until ctx is done.
 func (w *DockerWatcher) Run(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	w.mu.Lock()
+	w.ctx = ctx
+	w.mu.Unlock()
+
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	w.discoverAndTail(ctx)
@@ -320,6 +563,12 @@ func (w *DockerWatcher) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			w.mu.Lock()
+			for _, cancel := range w.tailing {
+				cancel()
+			}
+			w.tailing = make(map[string]context.CancelFunc)
+			w.mu.Unlock()
 			return
 		case <-ticker.C:
 			w.discoverAndTail(ctx)
@@ -330,6 +579,7 @@ func (w *DockerWatcher) Run(ctx context.Context) {
 func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 	containers, err := w.client.listContainers()
 	if err != nil {
+		log.Printf("Docker watcher: unable to list containers on %s: %v", w.client.socket, err)
 		return
 	}
 
@@ -337,6 +587,25 @@ func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 	defer w.mu.Unlock()
 
 	changed := false
+
+	// Prune stale / stopped containers that are no longer running in Docker
+	runningIDs := make(map[string]bool)
+	for _, c := range containers {
+		runningIDs[c.ID] = true
+		if len(c.ID) > 12 {
+			runningIDs[c.ID[:12]] = true
+		}
+	}
+	for id, s := range w.sources {
+		if s.Kind == "docker" && !runningIDs[id] {
+			if cancel, isTailing := w.tailing[id]; isTailing {
+				cancel()
+				delete(w.tailing, id)
+			}
+			delete(w.sources, id)
+			changed = true
+		}
+	}
 
 	for _, c := range containers {
 		if !isRouteWardenContainer(c) {
@@ -348,17 +617,22 @@ func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 		// Remove any older/stale source with the same container name (e.g. from previous run or recreated container)
 		for oldID, existing := range w.sources {
 			if existing.Name == name && oldID != c.ID {
+				if cancel, isTailing := w.tailing[oldID]; isTailing {
+					cancel()
+					delete(w.tailing, oldID)
+				}
 				delete(w.sources, oldID)
 				changed = true
 			}
 		}
 
 		// If this exact container is already actively tailing, skip
-		if s, exists := w.sources[c.ID]; exists && s.Status == "live" {
+		if _, isTailing := w.tailing[c.ID]; isTailing {
 			continue
 		}
 
 		plugin := detectPlugin(c)
+		log.Printf("Docker watcher: monitoring container %s (id: %s, plugin: %s)", name, c.ID[:12], plugin)
 		src := &Source{
 			ID:     c.ID[:12],
 			Name:   name,
@@ -369,24 +643,10 @@ func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 		w.sources[c.ID] = src
 		changed = true
 
-		go func(id, name, plugin string) {
-			err := w.client.tailLogs(ctx, id, name, plugin, w.since, func(e SecurityEvent) {
-				e = EnrichGeoIP(e)
-				w.buf.Push(e)
-				w.hub.Broadcast(e)
-			})
-			w.mu.Lock()
-			if s, ok := w.sources[id]; ok {
-				if err != nil && ctx.Err() == nil {
-					s.Status = "error"
-					s.Details = err.Error()
-				} else {
-					s.Status = "stopped"
-				}
-				w.hub.BroadcastSources(w.Sources())
-			}
-			w.mu.Unlock()
-		}(c.ID, name, plugin)
+		tailCtx, cancel := context.WithCancel(ctx)
+		w.tailing[c.ID] = cancel
+
+		go w.startTailGoroutine(c.ID, name, plugin, tailCtx)
 	}
 
 	if changed {
@@ -394,13 +654,25 @@ func (w *DockerWatcher) discoverAndTail(ctx context.Context) {
 	}
 }
 
-// ClearStopped removes all sources that are in "stopped" or "error" state.
+// ClearStopped removes all sources that are in "stopped" or "error" state,
+// or whose container is no longer actively running in Docker.
 func (w *DockerWatcher) ClearStopped() []Source {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	aliveIDs := make(map[string]bool)
+	if running, err := w.client.listContainers(); err == nil {
+		for _, c := range running {
+			aliveIDs[c.ID] = true
+			if len(c.ID) > 12 {
+				aliveIDs[c.ID[:12]] = true
+			}
+		}
+	}
+
 	for id, s := range w.sources {
-		if s.Status == "stopped" || s.Status == "error" {
+		isDead := s.Kind == "docker" && len(aliveIDs) > 0 && !aliveIDs[id]
+		if s.Status == "stopped" || s.Status == "error" || isDead {
 			delete(w.sources, id)
 		}
 	}
@@ -495,11 +767,80 @@ func (w *DockerWatcher) GetContainerConfig(idOrName string) ConfigResponse {
 	}
 }
 
-// SourceList returns a thread-safe copy of all sources.
+// SourceList returns a thread-safe copy of all sources after synchronizing with running containers.
 func (w *DockerWatcher) SourceList() []Source {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Synchronize with currently running Docker containers
+	if running, err := w.client.listContainers(); err == nil {
+		aliveIDs := make(map[string]bool)
+		for _, c := range running {
+			aliveIDs[c.ID] = true
+			if len(c.ID) > 12 {
+				aliveIDs[c.ID[:12]] = true
+			}
+			// If an active RouteWarden container (including tcp-warden) is running, update or register it
+			if isRouteWardenContainer(c) {
+				cName := containerName(c)
+				plugin := detectPlugin(c)
+				if existing, exists := w.sources[c.ID]; exists {
+					if existing.Status != "live" {
+						existing.Status = "live"
+						existing.Details = ""
+					}
+				} else {
+					w.sources[c.ID] = &Source{
+						ID:     c.ID[:12],
+						Name:   cName,
+						Kind:   "docker",
+						Plugin: plugin,
+						Status: "live",
+					}
+				}
+
+				if w.ctx != nil {
+					if _, isTailing := w.tailing[c.ID]; !isTailing {
+						tailCtx, cancel := context.WithCancel(w.ctx)
+						w.tailing[c.ID] = cancel
+						go w.startTailGoroutine(c.ID, cName, plugin, tailCtx)
+					}
+				}
+			}
+		}
+		// Prune containers no longer running
+		for id, s := range w.sources {
+			if s.Kind == "docker" && !aliveIDs[id] {
+				if cancel, isTailing := w.tailing[id]; isTailing {
+					cancel()
+					delete(w.tailing, id)
+				}
+				delete(w.sources, id)
+			}
+		}
+	}
+
 	return w.Sources()
+}
+
+func (w *DockerWatcher) startTailGoroutine(id, name, plugin string, tCtx context.Context) {
+	err := w.client.tailLogs(tCtx, id, name, plugin, w.tail, func(e SecurityEvent) {
+		e = EnrichGeoIP(e)
+		w.buf.Push(e)
+		w.hub.Broadcast(e)
+	})
+	w.mu.Lock()
+	delete(w.tailing, id)
+	if s, ok := w.sources[id]; ok {
+		if err != nil && tCtx.Err() == nil {
+			s.Status = "error"
+			s.Details = err.Error()
+		} else {
+			s.Status = "stopped"
+		}
+		w.hub.BroadcastSources(w.Sources())
+	}
+	w.mu.Unlock()
 }
 
 // --- Docker multiplexed-frame reader ---
@@ -517,13 +858,13 @@ func newDockerFrameReader(r io.Reader) *dockerFrameReader {
 }
 
 func (f *dockerFrameReader) Read(p []byte) (int, error) {
-	for f.rem == 0 {
+	for f.rem <= 0 {
 		// Read 8-byte frame header
 		if _, err := io.ReadFull(f.r, f.buf); err != nil {
 			return 0, err
 		}
 		// Bytes 4-7 are the big-endian payload size
-		f.rem = int(f.buf[4])<<24 | int(f.buf[5])<<16 | int(f.buf[6])<<8 | int(f.buf[7])
+		f.rem = int(binary.BigEndian.Uint32(f.buf[4:8]))
 	}
 	if len(p) > f.rem {
 		p = p[:f.rem]

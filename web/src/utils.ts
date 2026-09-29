@@ -24,7 +24,7 @@ export function timeStr(iso: string): string {
 
 // ── Badge CSS class helpers ──────────────────────────────────────────────────
 
-export function methodBadgeClass(method: string): string {
+export function methodBadgeClass(method?: string): string {
   switch (method?.toUpperCase()) {
     case 'GET':    return 'badge badge-method-get'
     case 'POST':   return 'badge badge-method-post'
@@ -35,8 +35,9 @@ export function methodBadgeClass(method: string): string {
   }
 }
 
-export function modeBadgeClass(mode: string): string {
+export function modeBadgeClass(mode?: string): string {
   const m = (mode || 'block').toLowerCase()
+  if (m === 'allow' || m === 'allowed') return 'badge badge-mode-allow'
   if (m.includes('tarpit'))     return 'badge badge-mode-tarpit'
   if (m.includes('gzip'))       return 'badge badge-mode-gzip'
   if (m.includes('silent') || m.includes('drop')) return 'badge badge-mode-silent'
@@ -46,19 +47,21 @@ export function modeBadgeClass(mode: string): string {
   return 'badge badge-mode-other'
 }
 
-export function pluginBadgeClass(plugin: string): string {
+export function pluginBadgeClass(plugin?: string): string {
   const p = (plugin || '').toLowerCase()
   if (p.includes('traefik')) return 'badge badge-plugin-traefik'
   if (p.includes('caddy'))   return 'badge badge-plugin-caddy'
   if (p.includes('nginx'))   return 'badge badge-plugin-nginx'
+  if (p.includes('tcp'))     return 'badge badge-plugin-tcp'
   return 'badge badge-plugin-unknown'
 }
 
-export function pluginLabel(plugin: string): string {
+export function pluginLabel(plugin?: string): string {
   const p = (plugin || '').toLowerCase()
-  if (p.includes('traefik')) return 'Traefik'
-  if (p.includes('caddy'))   return 'Caddy'
-  if (p.includes('nginx'))   return 'NGINX'
+  if (p.includes('traefik')) return 'Traefik Warden'
+  if (p.includes('caddy'))   return 'Caddy Warden'
+  if (p.includes('nginx'))   return 'NGINX Warden'
+  if (p.includes('tcp'))     return 'TCP Warden'
   return plugin || 'Unknown'
 }
 
@@ -69,12 +72,21 @@ export function modeLabel(mode: string | undefined, status: number | undefined):
     if (mode === 'fakeSuccess') return 'Fake 200'
     if (mode === 'rateLimitChallenge') return 'RateLimit'
     if (mode === 'infiniteStream') return '∞ Stream'
+    if (mode === 'allow' || mode === 'allowed') return 'Allow'
     return mode.charAt(0).toUpperCase() + mode.slice(1)
   }
   return status ? `HTTP ${status}` : 'Block'
 }
 
 // ── Event filtering ──────────────────────────────────────────────────────────
+
+export function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
 
 export function filterEvents(events: SecurityEvent[], query: string): SecurityEvent[] {
   if (!query.trim()) return events
@@ -88,6 +100,10 @@ export function filterEvents(events: SecurityEvent[], query: string): SecurityEv
     e.method?.toLowerCase().includes(q) ||
     e.response_mode?.toLowerCase().includes(q) ||
     e.source?.toLowerCase().includes(q) ||
-    e.pattern?.toLowerCase().includes(q)
+    e.pattern?.toLowerCase().includes(q) ||
+    e.service?.toLowerCase().includes(q) ||
+    e.protocol?.toLowerCase().includes(q) ||
+    e.action?.toLowerCase().includes(q) ||
+    e.reason?.toLowerCase().includes(q)
   )
 }

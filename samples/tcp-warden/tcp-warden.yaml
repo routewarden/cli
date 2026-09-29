@@ -1,0 +1,76 @@
+# ==============================================================================
+# RouteWarden Dashboard + TCP Warden Testing Sample
+# ==============================================================================
+# Use this configuration to test TCP Warden metrics, service inspection, and
+# banlist management inside the RouteWarden CLI dashboard:
+#
+# 1. Start tcp-warden:
+#      tcp-warden run --config tcp-warden.yaml
+#
+# 2. Start RouteWarden CLI dashboard pointing to tcp-warden:
+#      rwarden dashboard --tcp-warden http://127.0.0.1:9091
+# ==============================================================================
+
+version: "1.0"
+
+global:
+  max_connections: 10000
+  ban_duration: "1h"
+  ban_after_failures: 3
+  tarpit_ms: 1000
+  log_level: "info"
+  log_file: "./tcp-warden.jsonl"
+  data_dir: "./.tcp-warden-data"
+
+api:
+  enabled: true
+  listen: "127.0.0.1:9091"     # Dashboard queries this endpoint
+
+crowdsec:
+  enabled: false
+
+plugins: {}
+# When plugins are installed, activate them here:
+# plugins:
+#   postgres:
+#     enabled: true
+
+services:
+  # SSH Security Bastion
+  ssh_bastion:
+    listen: "127.0.0.1:2222"
+    upstream: "127.0.0.1:22"
+    protocol: "ssh"
+    rate_limit:
+      connections_per_minute: 20
+      burst: 5
+    max_auth_failures: 3
+    ban_after_failures: 3
+    ban_duration: "2h"
+
+  # PostgreSQL Protection (Uncomment after running: tcp-warden plugins install postgres)
+  # postgres_bastion:
+  #   listen: "127.0.0.1:5432"
+  #   upstream: "127.0.0.1:5433"
+  #   protocol: "postgres"
+  #   max_auth_failures: 3
+  #   ban_duration: "1h"
+
+  # SMTP Mail Guard
+  smtp_guard:
+    listen: "127.0.0.1:2525"
+    upstream: "127.0.0.1:25"
+    protocol: "smtp"
+    rate_limit:
+      connections_per_minute: 30
+      burst: 10
+
+  # Generic TCP Proxy
+  tcp_echo:
+    listen: "127.0.0.1:7000"
+    upstream: "127.0.0.1:9091"
+    protocol: "tcp"
+    ip_filter:
+      allow:
+        - "127.0.0.1/32"
+        - "10.0.0.0/8"

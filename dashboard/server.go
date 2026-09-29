@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,12 +21,16 @@ import (
 //   - REST API endpoints (GET /api/*)
 //   - WebSocket event stream (GET /ws/events)
 type Server struct {
-	opts    Options
-	buf     *RingBuffer
-	hub     *Hub
-	docker  *DockerWatcher  // nil when Docker mode is disabled
-	tailer  *FileTailer     // nil when no log files are configured
-	version string
+	opts       Options
+	buf        *RingBuffer
+	hub        *Hub
+	docker          *DockerWatcher // nil when Docker mode is disabled
+	tailer          *FileTailer    // nil when no log files are configured
+	tcpWardenSource *Source
+	version         string
+
+	mu         sync.Mutex
+	runningCtx context.Context
 }
 
 // Options configures the dashboard server.
@@ -32,9 +39,10 @@ type Options struct {
 	Port       int      // bind port, default 9090
 	LogFiles   []string // glob patterns for log files
 	NoDocker   bool     // skip Docker socket discovery
-	SocketPath string   // Docker socket path
-	HistoryN   int      // number of past events to replay on page load
-	Version    string   // rwarden binary version string
+	SocketPath   string   // Docker socket path
+	HistoryN     int      // number of past events to replay on page load
+	TCPWardenURL string   // URL to tcp-warden management API, default "http://127.0.0.1:9091"
+	Version      string   // rwarden binary version string
 }
 
 // NewServer creates and wires up all dashboard components.
@@ -45,12 +53,18 @@ func NewServer(opts Options) *Server {
 	if opts.Host == "" {
 		opts.Host = "127.0.0.1"
 	}
-	if opts.SocketPath == "" {
-		opts.SocketPath = "/var/run/docker.sock"
-	}
+	opts.SocketPath = ResolveDockerSocket(opts.SocketPath)
 	if opts.HistoryN <= 0 {
 		opts.HistoryN = 1000
 	}
+	if opts.TCPWardenURL == "" {
+		if env := os.Getenv("TCP_WARDEN_URL"); env != "" {
+			opts.TCPWardenURL = env
+		} else {
+			opts.TCPWardenURL = "http://127.0.0.1:9091"
+		}
+	}
+	opts.TCPWardenURL = strings.TrimRight(opts.TCPWardenURL, "/")
 
 	buf := NewRingBuffer(defaultRingSize)
 	hub := NewHub()
@@ -63,7 +77,7 @@ func NewServer(opts Options) *Server {
 	}
 
 	if !opts.NoDocker {
-		s.docker = NewDockerWatcher(opts.SocketPath, buf, hub, "1h")
+		s.docker = NewDockerWatcher(opts.SocketPath, buf, hub, opts.HistoryN)
 	}
 
 	if len(opts.LogFiles) > 0 {
@@ -81,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 
 	// API routes
 	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/events/clear", s.handleClearEvents)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/sources", s.handleSources)
 	mux.HandleFunc("/api/sources/clear", s.handleClearSources)
@@ -99,6 +114,10 @@ func (s *Server) Handler() http.Handler {
 // Run starts all background watchers and serves HTTP until the context is
 // cancelled or the process receives SIGTERM.
 func (s *Server) Run(ctx context.Context) error {
+	s.mu.Lock()
+	s.runningCtx = ctx
+	s.mu.Unlock()
+
 	// Start watchers
 	if s.docker != nil {
 		go s.docker.Run(ctx)
@@ -106,6 +125,8 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.tailer != nil {
 		go s.tailer.Run(ctx)
 	}
+	// Also subscribe to local TCP Warden daemon management API if running on 9091
+	go s.subscribeTCPWarden(ctx)
 
 	addr := net.JoinHostPort(s.opts.Host, strconv.Itoa(s.opts.Port))
 	srv := &http.Server{
@@ -134,16 +155,23 @@ func (s *Server) Run(ctx context.Context) error {
 // --- API handlers ---
 
 // GET /api/events?n=1000&source=containerName
-// Returns the last n events as JSON (initial page load).
+// DELETE /api/events — clear all events from memory
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		s.handleClearEvents(w, r)
+		return
+	}
 	n := s.opts.HistoryN
 	if raw := r.URL.Query().Get("n"); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 			n = v
 		}
 	}
-src := r.URL.Query().Get("source")
+	src := r.URL.Query().Get("source")
 	events := s.buf.RecentFiltered(n, src)
+	if events == nil {
+		events = []SecurityEvent{}
+	}
 	for i := range events {
 		if events[i].CountryCode == "" && events[i].ClientIP != "" {
 			events[i] = EnrichGeoIP(events[i])
@@ -153,8 +181,21 @@ src := r.URL.Query().Get("source")
 	_ = json.NewEncoder(w).Encode(events)
 }
 
+// POST /api/events/clear or DELETE /api/events — clears stored security events
+func (s *Server) handleClearEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.buf.Clear()
+	s.hub.BroadcastClear()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "cleared", "count": 0})
+}
+
 // GET /api/stats?hours=24&source=containerName
-// Returns aggregated statistics from the ring buffer.
+// Returns aggregated statistics from the ring buffer, enriched with live
+// TCP Warden service counters when a tcp-warden connection is configured.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if raw := r.URL.Query().Get("hours"); raw != "" {
@@ -164,6 +205,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	src := r.URL.Query().Get("source")
 	snap := s.buf.Stats(hours, src)
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snap)
 }
@@ -391,16 +433,139 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// allSources merges sources from the Docker watcher and file tailer.
+// allSources merges sources from the Docker watcher, file tailer, and TCP Warden daemon API.
 func (s *Server) allSources() []Source {
-	var out []Source
+	out := []Source{}
 	if s.docker != nil {
 		out = append(out, s.docker.SourceList()...)
 	}
 	if s.tailer != nil {
 		out = append(out, s.tailer.SourceList()...)
 	}
+	s.mu.Lock()
+	if s.tcpWardenSource != nil {
+		// Avoid duplicate if Docker watcher already has tcp-warden live
+		hasLiveTCP := false
+		for _, existing := range out {
+			if strings.Contains(strings.ToLower(existing.Name), "tcp-warden") && existing.Status == "live" {
+				hasLiveTCP = true
+				break
+			}
+		}
+		if !hasLiveTCP {
+			out = append(out, *s.tcpWardenSource)
+		}
+	}
+	s.mu.Unlock()
 	return out
+}
+
+// subscribeTCPWarden periodically checks and maintains an SSE stream to tcp-warden on port 9091.
+func (s *Server) subscribeTCPWarden(ctx context.Context) {
+	ticker := time.NewTicker(4 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.streamTCPWardenEvents(ctx)
+		}
+	}
+}
+
+func (s *Server) streamTCPWardenEvents(ctx context.Context) {
+	apiURL := s.opts.TCPWardenURL + "/api/events"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
+	if err != nil {
+		s.mu.Lock()
+		if s.tcpWardenSource != nil {
+			s.tcpWardenSource = nil
+			s.hub.BroadcastSources(s.allSources())
+		}
+		s.mu.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	s.mu.Lock()
+	s.tcpWardenSource = &Source{
+		ID:     "tcp-warden-api",
+		Name:   "tcp-warden",
+		Kind:   "api",
+		Plugin: "tcp-warden",
+		Status: "live",
+	}
+	s.hub.BroadcastSources(s.allSources())
+	s.mu.Unlock()
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "data:") {
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if e, ok := parseSecurityEventLine(payload, "tcp-warden", "tcp-warden-api", "tcp-warden"); ok {
+				e = EnrichGeoIP(e)
+				s.buf.Push(e)
+				s.hub.Broadcast(e)
+			}
+		}
+	}
+
+	s.mu.Lock()
+	if s.tcpWardenSource != nil {
+		s.tcpWardenSource = nil
+		s.hub.BroadcastSources(s.allSources())
+	}
+	s.mu.Unlock()
+}
+
+// ResolveDockerSocket finds the active Docker socket path by probing candidates.
+func ResolveDockerSocket(socketPath string) string {
+	if socketPath != "" && socketPath != "/var/run/docker.sock" {
+		return socketPath
+	}
+	var candidates []string
+	if env := os.Getenv("DOCKER_HOST"); env != "" {
+		clean := strings.TrimPrefix(env, "unix://")
+		candidates = append(candidates, clean)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".docker", "run", "docker.sock"),
+			filepath.Join(home, ".colima", "default", "docker.sock"),
+			filepath.Join(home, ".orbstack", "run", "docker.sock"),
+		)
+	}
+	candidates = append(candidates, "/var/run/docker.sock")
+
+	// First pass: find candidate that responds to dial
+	for _, p := range candidates {
+		if conn, err := net.DialTimeout("unix", p, 250*time.Millisecond); err == nil {
+			_ = conn.Close()
+			return p
+		}
+	}
+
+	// Second pass: fallback to existing socket/file
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && (fi.Mode()&os.ModeSocket != 0 || fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0) {
+			return p
+		}
+	}
+	return "/var/run/docker.sock"
 }
 
 // corsMiddleware adds permissive CORS headers so the Vite dev server can
@@ -408,8 +573,8 @@ func (s *Server) allSources() []Source {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -417,5 +582,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+
 
 

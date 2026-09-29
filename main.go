@@ -115,18 +115,21 @@ func handleDashboard(args []string) {
 	socketPath := fs.String("socket", "/var/run/docker.sock", "Docker socket path")
 	historyN := fs.Int("history", 1000, "Number of past events to load on startup")
 	noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
+	tcpWarden := fs.String("tcp-warden", "", "URL to tcp-warden management API (e.g. http://127.0.0.1:9091)")
 	var logFiles stringSlice
 	fs.Var(&logFiles, "log", "Path or glob to a log file to tail (repeatable)")
 	_ = fs.Parse(args)
 
+	resolvedSocket := dashboard.ResolveDockerSocket(*socketPath)
 	opts := dashboard.Options{
-		Host:       *host,
-		Port:       *port,
-		LogFiles:   logFiles,
-		NoDocker:   *noDocker,
-		SocketPath: *socketPath,
-		HistoryN:   *historyN,
-		Version:    version,
+		Host:         *host,
+		Port:         *port,
+		LogFiles:     logFiles,
+		NoDocker:     *noDocker,
+		SocketPath:   resolvedSocket,
+		HistoryN:     *historyN,
+		TCPWardenURL: *tcpWarden,
+		Version:      version,
 	}
 
 	addr := fmt.Sprintf("http://%s:%d", *host, *port)
@@ -138,7 +141,7 @@ func handleDashboard(args []string) {
 	fmt.Printf("   Version:    %s\n", version)
 	fmt.Printf("   Address:    %s\n", addr)
 	if !*noDocker {
-		fmt.Printf("   Docker:     %s\n", *socketPath)
+		fmt.Printf("   Docker:     %s\n", resolvedSocket)
 	}
 	if len(logFiles) > 0 {
 		fmt.Printf("   Log files:  %v\n", []string(logFiles))
@@ -222,7 +225,7 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 		}
 		if strings.HasPrefix(arg, "-") && arg != "-" {
 			flagName := strings.TrimLeft(arg, "-")
-			if idx := strings.IndexByte(flagName, '='); idx != -1 {
+			if found := strings.Contains(flagName, "="); found {
 				flags = append(flags, arg)
 				continue
 			}

@@ -35,14 +35,20 @@ export function useEventStream(): UseEventStreamReturn {
       })
       .catch(() => {/* ignore if server not ready yet */})
 
-    fetch('/api/sources')
-      .then(r => r.json())
-      .then((data: Source[]) => {
-        if (Array.isArray(data)) {
-          setSources(data)
-        }
-      })
-      .catch(() => {})
+    const fetchSources = () => {
+      fetch('/api/sources')
+        .then(r => r.json())
+        .then((data: Source[]) => {
+          if (Array.isArray(data)) {
+            setSources(data)
+          }
+        })
+        .catch(() => {})
+    }
+
+    fetchSources()
+    const sourceInterval = setInterval(fetchSources, 4000)
+    return () => clearInterval(sourceInterval)
   }, [])
 
   // SSE connection
@@ -63,7 +69,9 @@ export function useEventStream(): UseEventStreamReturn {
         try {
           const msg: WsMessage = JSON.parse(e.data)
           if (msg.msg_type === 'sources') {
-            setSources(msg.payload as Source[])
+            setSources(Array.isArray(msg.payload) ? (msg.payload as Source[]) : [])
+          } else if (msg.msg_type === 'clear') {
+            setEvents([])
           } else if (msg.msg_type === 'event' && !pausedRef.current) {
             const event = msg.payload as SecurityEvent
             setEvents(prev => {
@@ -84,7 +92,14 @@ export function useEventStream(): UseEventStreamReturn {
     }
   }, [])
 
-  const clear = useCallback(() => setEvents([]), [])
+  const clear = useCallback(async () => {
+    setEvents([])
+    try {
+      await fetch('/api/events/clear', { method: 'POST' })
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const clearStoppedSources = useCallback(async () => {
     try {
@@ -92,6 +107,8 @@ export function useEventStream(): UseEventStreamReturn {
       const data = await res.json()
       if (Array.isArray(data)) {
         setSources(data)
+      } else {
+        setSources([])
       }
     } catch {
       // ignore
