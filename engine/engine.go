@@ -77,6 +77,7 @@ type Config struct {
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
+	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
 	Methods                    []string        `json:"methods,omitempty"`
 	StatusCode                 int             `json:"statusCode,omitempty"`
 	CustomResponseText         string          `json:"customResponseText,omitempty"`
@@ -99,6 +100,7 @@ func CreateConfig() *Config {
 		BlockPatterns:              []string{},
 		AllowPatterns:              []string{},
 		AllowedIPs:                 []string{},
+		TrustedProxies:             []string{},
 		Methods:                    []string{"GET"},
 		StatusCode:                 403,
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
@@ -199,12 +201,14 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 
 // Engine represents a compiled inspection engine.
 type Engine struct {
-	Config       *Config
-	Methods      map[string]struct{}
-	BlockRegexes []*regexp.Regexp
-	AllowRegexes []*regexp.Regexp
-	AllowedIPs   []net.IP
-	AllowedNets  []*net.IPNet
+	Config           *Config
+	Methods          map[string]struct{}
+	BlockRegexes     []*regexp.Regexp
+	AllowRegexes     []*regexp.Regexp
+	AllowedIPs       []net.IP
+	AllowedNets      []*net.IPNet
+	TrustedProxyIPs  []net.IP
+	TrustedProxyNets []*net.IPNet
 }
 
 // NewEngine validates and compiles a RouteWarden configuration.
@@ -287,6 +291,28 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 	}
 
+	var proxyIPs []net.IP
+	var proxyNets []*net.IPNet
+	for _, ipStr := range cfg.TrustedProxies {
+		ipStr = strings.TrimSpace(ipStr)
+		if ipStr == "" {
+			continue
+		}
+		if strings.Contains(ipStr, "/") {
+			_, ipNet, err := net.ParseCIDR(ipStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid trustedProxies CIDR %q: %w", ipStr, err)
+			}
+			proxyNets = append(proxyNets, ipNet)
+		} else {
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid trustedProxies IP address %q", ipStr)
+			}
+			proxyIPs = append(proxyIPs, ip)
+		}
+	}
+
 	// Validate status code range if configured
 	if cfg.StatusCode != 0 && (cfg.StatusCode < 100 || cfg.StatusCode > 599) {
 		return nil, fmt.Errorf("invalid statusCode %d: must be between 100 and 599", cfg.StatusCode)
@@ -323,16 +349,33 @@ func NewEngine(cfg *Config) (*Engine, error) {
 				return nil, fmt.Errorf("unsupported response.mode %q", cfg.Response.Mode)
 			}
 
-			if strings.EqualFold(cfg.Response.Mode, "redirect") && strings.TrimSpace(cfg.Response.RedirectURL) == "" {
-				return nil, fmt.Errorf("redirectUrl is required when response.mode is 'redirect'")
+			if strings.EqualFold(cfg.Response.Mode, "redirect") {
+				trimmedRedirect := strings.TrimSpace(cfg.Response.RedirectURL)
+				if trimmedRedirect == "" {
+					return nil, fmt.Errorf("redirectUrl is required when response.mode is 'redirect'")
+				}
+				if strings.HasPrefix(trimmedRedirect, "//") {
+					return nil, fmt.Errorf("unsafe redirectUrl %q: protocol-relative URLs (starting with //) are not allowed", cfg.Response.RedirectURL)
+				}
+				parsedRedirect, err := url.ParseRequestURI(trimmedRedirect)
+				if err != nil {
+					return nil, fmt.Errorf("invalid redirectUrl %q: %w", cfg.Response.RedirectURL, err)
+				}
+				if parsedRedirect.Scheme != "" && parsedRedirect.Scheme != "https" && parsedRedirect.Scheme != "http" {
+					return nil, fmt.Errorf("unsafe redirectUrl %q: only http/https or relative paths are permitted", cfg.Response.RedirectURL)
+				}
 			}
 
 			if strings.EqualFold(cfg.Response.Mode, "proxy") {
 				if strings.TrimSpace(cfg.Response.ProxyURL) == "" {
 					return nil, fmt.Errorf("proxyUrl is required when response.mode is 'proxy'")
 				}
-				if _, err := url.ParseRequestURI(cfg.Response.ProxyURL); err != nil {
+				parsedProxy, err := url.ParseRequestURI(cfg.Response.ProxyURL)
+				if err != nil {
 					return nil, fmt.Errorf("invalid proxyUrl %q: %w", cfg.Response.ProxyURL, err)
+				}
+				if parsedProxy.Scheme != "http" && parsedProxy.Scheme != "https" {
+					return nil, fmt.Errorf("unsafe proxyUrl %q: scheme must be http or https", cfg.Response.ProxyURL)
 				}
 			}
 
@@ -350,12 +393,14 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	}
 
 	return &Engine{
-		Config:       cfg,
-		Methods:      methodsMap,
-		BlockRegexes: compiledBlock,
-		AllowRegexes: compiledAllow,
-		AllowedIPs:   ips,
-		AllowedNets:  nets,
+		Config:           cfg,
+		Methods:          methodsMap,
+		BlockRegexes:     compiledBlock,
+		AllowRegexes:     compiledAllow,
+		AllowedIPs:       ips,
+		AllowedNets:      nets,
+		TrustedProxyIPs:  proxyIPs,
+		TrustedProxyNets: proxyNets,
 	}, nil
 }
 
@@ -373,6 +418,68 @@ type EvaluationResult struct {
 // Evaluate inspects a simulated request against compiled rules without client IP.
 func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[string]string) *EvaluationResult {
 	return e.EvaluateWithClientIP(method, requestPath, queryString, headers, "")
+}
+
+// isTrustedProxy returns true if remoteIP matches any declared trusted proxy IP or CIDR.
+// When no trusted proxies are declared, legacy mode applies (returns true).
+func (e *Engine) isTrustedProxy(ip net.IP) bool {
+	if len(e.TrustedProxyIPs) == 0 && len(e.TrustedProxyNets) == 0 {
+		return true
+	}
+	for _, p := range e.TrustedProxyIPs {
+		if p.Equal(ip) {
+			return true
+		}
+	}
+	for _, n := range e.TrustedProxyNets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExtractClientIP resolves the real client IP respecting trusted proxy configuration.
+func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) string {
+	remoteIPStr := strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteIPStr); err == nil {
+		remoteIPStr = host
+	}
+	remoteIP := net.ParseIP(remoteIPStr)
+
+	// If remoteAddr is provided, verify whether it is a declared trusted proxy
+	isTrusted := true
+	if remoteIP != nil && (len(e.TrustedProxyIPs) > 0 || len(e.TrustedProxyNets) > 0) {
+		isTrusted = e.isTrustedProxy(remoteIP)
+	}
+
+	if isTrusted && headers != nil {
+		for k, v := range headers {
+			if strings.EqualFold(k, "X-Forwarded-For") {
+				parts := strings.Split(v, ",")
+				first := strings.TrimSpace(parts[0])
+				if host, _, err := net.SplitHostPort(first); err == nil {
+					first = host
+				}
+				if net.ParseIP(first) != nil {
+					return first
+				}
+			}
+		}
+		for k, v := range headers {
+			if strings.EqualFold(k, "X-Real-IP") {
+				ip := strings.TrimSpace(v)
+				if host, _, err := net.SplitHostPort(ip); err == nil {
+					ip = host
+				}
+				if net.ParseIP(ip) != nil {
+					return ip
+				}
+			}
+		}
+	}
+
+	return remoteIPStr
 }
 
 // EvaluateWithClientIP inspects a simulated request against compiled rules including client IP check.
@@ -401,8 +508,9 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 	}
 
 	// Check client IP whitelist
-	if clientIPStr != "" {
-		if ip := net.ParseIP(strings.TrimSpace(clientIPStr)); ip != nil {
+	effectiveIPStr := e.ExtractClientIP(headers, clientIPStr)
+	if effectiveIPStr != "" {
+		if ip := net.ParseIP(effectiveIPStr); ip != nil {
 			for _, allowedIP := range e.AllowedIPs {
 				if allowedIP.Equal(ip) {
 					result.Allowed = true
@@ -484,7 +592,7 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 		for _, hdrName := range e.Config.CheckHeaders {
 			for k, v := range headers {
 				if strings.EqualFold(k, hdrName) && strings.TrimSpace(v) != "" {
-					hdrCandidates := ExtractCandidatePaths("", v, v)
+					hdrCandidates := append([]string{v}, ExtractCandidatePaths("", v, v)...)
 					for _, hc := range hdrCandidates {
 						for _, re := range e.BlockRegexes {
 							if re.MatchString(hc) {
@@ -599,6 +707,12 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		b.WriteString("          allowedIps:\n")
 		for _, ip := range cfg.AllowedIPs {
 			fmt.Fprintf(&b, "            - '%s'\n", ip)
+		}
+	}
+	if len(cfg.TrustedProxies) > 0 {
+		b.WriteString("          trustedProxies:\n")
+		for _, proxy := range cfg.TrustedProxies {
+			fmt.Fprintf(&b, "            - '%s'\n", proxy)
 		}
 	}
 	if len(cfg.Methods) > 0 {
@@ -727,6 +841,16 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		}
 		b.WriteString("]\n")
 	}
+	if len(cfg.TrustedProxies) > 0 {
+		b.WriteString("  trustedProxies = [")
+		for i, proxy := range cfg.TrustedProxies {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", proxy)
+		}
+		b.WriteString("]\n")
+	}
 	if len(cfg.Methods) > 0 {
 		b.WriteString("  methods = [")
 		for i, m := range cfg.Methods {
@@ -840,6 +964,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
 	}
+	if len(cfg.TrustedProxies) > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.trustedProxies=%s\"\n", strings.Join(cfg.TrustedProxies, ","))
+	}
 	if len(cfg.Methods) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.methods=%s\"\n", strings.Join(cfg.Methods, ","))
 	}
@@ -932,6 +1059,9 @@ func (cfg *Config) GenerateCaddyfile() string {
 	}
 	for _, ip := range cfg.AllowedIPs {
 		fmt.Fprintf(&b, "    allowed_ip %s\n", ip)
+	}
+	for _, proxy := range cfg.TrustedProxies {
+		fmt.Fprintf(&b, "    trusted_proxies %s\n", proxy)
 	}
 	if len(cfg.Methods) > 0 {
 		fmt.Fprintf(&b, "    methods %s\n", strings.Join(cfg.Methods, " "))
@@ -1037,6 +1167,13 @@ func (cfg *Config) GenerateNginxLua() string {
 		b.WriteString("    allowed_ips = {\n")
 		for _, ip := range cfg.AllowedIPs {
 			fmt.Fprintf(&b, "        %q,\n", ip)
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.TrustedProxies) > 0 {
+		b.WriteString("    trusted_proxies = {\n")
+		for _, proxy := range cfg.TrustedProxies {
+			fmt.Fprintf(&b, "        %q,\n", proxy)
 		}
 		b.WriteString("    },\n")
 	}

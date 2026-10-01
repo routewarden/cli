@@ -1,5 +1,5 @@
 {
-  "$schema": "https://routewarden.github.io/schema/v2/config.schema.json",
+  "$schema": "https://routewarden.github.io/schema.json",
   "enabled": true,
   "enableDefaultPatterns": true,
   "enableDefaultAllowPatterns": true,

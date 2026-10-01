@@ -40,6 +40,11 @@
       "items": { "type": "string" },
       "description": "List of client IP addresses or CIDR blocks exempted from all security rules."
     },
+    "trustedProxies": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of trusted upstream reverse proxies or CIDRs whose X-Forwarded-For headers are honoured."
+    },
     "methods": {
       "type": "array",
       "items": { "type": "string" },

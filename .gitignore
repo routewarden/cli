@@ -7,14 +7,7 @@ rwarden
 coverage.out
 .DS_Store
 
-# Node & VitePress
-node_modules/
-web/node_modules/
-docs/.vitepress/dist/
-docs/.vitepress/cache/
-
-# Dashboard: keep dashboard/dist committed (needed for go:embed)
-# To rebuild: cd web && npm run build
-# dashboard/dist/ is intentionally NOT ignored here — required for //go:embed
+# Logs and scratch
 *.log
+*.out
 .chrome-temp-data/

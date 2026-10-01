@@ -82,39 +82,16 @@ if [ -f "${ROOT_DIR}/package.json" ]; then
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
-# 3. Update install.sh (fallback LATEST_TAG="vX.Y.Z")
-if [ -f "${ROOT_DIR}/install.sh" ]; then
-  sed_inplace "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/install.sh"
-  sed_inplace "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/install.sh"
-  echo "  ✓ Synchronized install.sh"
-  UPDATED_COUNT=$((UPDATED_COUNT + 1))
-fi
 
-# 4. Update docs/public/install.sh if present
-if [ -f "${ROOT_DIR}/docs/public/install.sh" ]; then
-  sed_inplace "s|(LATEST_TAG=\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/docs/public/install.sh"
-  sed_inplace "s|(Fallback to )v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/public/install.sh"
-  echo "  ✓ Synchronized docs/public/install.sh"
-  UPDATED_COUNT=$((UPDATED_COUNT + 1))
-fi
 
-# 5. Update README.md version comment
+# 4. Update README.md version comment
 if [ -f "${ROOT_DIR}/README.md" ]; then
   sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
   echo "  ✓ Synchronized README.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
-# 6. Update docs/index.md if present
-if [ -f "${ROOT_DIR}/docs/index.md" ]; then
-  sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/docs/index.md"
-  sed_inplace "s|(releases/download/)v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${TARGET_VERSION}|g" "${ROOT_DIR}/docs/index.md"
-  sed_inplace "s|(rwarden_)[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?_|\1${SEMVER_NO_V}_|g" "${ROOT_DIR}/docs/index.md"
-  echo "  ✓ Synchronized docs/index.md"
-  UPDATED_COUNT=$((UPDATED_COUNT + 1))
-fi
-
-# 7. Update VERSIONING.md (canonical version block)
+# 5. Update VERSIONING.md (canonical version block)
 if [ -f "${ROOT_DIR}/VERSIONING.md" ]; then
   sed_inplace "s|(\"version\":[[:space:]]*\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/VERSIONING.md"
   echo "  ✓ Synchronized VERSIONING.md"

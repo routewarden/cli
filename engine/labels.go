@@ -153,6 +153,8 @@ func normalizePropKey(prop string) string {
 		return "allowPatterns"
 	case "allowedips":
 		return "allowedIps"
+	case "trustedproxies", "trusted_proxies":
+		return "trustedProxies"
 	case "methods":
 		return "methods"
 	case "checkquery":
@@ -295,6 +297,7 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		writeListProp(&b, "blockPatterns", props["blockPatterns"])
 		writeListProp(&b, "allowPatterns", props["allowPatterns"])
 		writeListProp(&b, "allowedIps", props["allowedIps"])
+		writeListProp(&b, "trustedProxies", props["trustedProxies"])
 		writeListProp(&b, "methods", props["methods"])
 		writeListProp(&b, "checkHeaders", props["checkHeaders"])
 
