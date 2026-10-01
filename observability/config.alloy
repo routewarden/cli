@@ -11,11 +11,14 @@ discovery.docker "containers" {
 discovery.relabel "routewarden_containers" {
   targets = discovery.docker.containers.targets
 
-  // Match RouteWarden gateways: Traefik, Caddy, NGINX, and TCP Warden
+  // Pure Opt-In: ONLY scrape containers explicitly labeled for RouteWarden logging
   rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = ".*(routewarden|traefik|caddy|nginx|tcp-warden).*"
-    action        = "keep"
+    source_labels = [
+      "__meta_docker_container_label_routewarden_logs",
+      "__meta_docker_container_label_routewarden",
+    ]
+    regex  = "true|1|yes"
+    action = "keep"
   }
 
   rule {
@@ -66,13 +69,6 @@ loki.source.syslog "syslog_udp" {
 loki.process "routewarden" {
   forward_to = [loki.write.local_loki.receiver]
 
-  // Default app label
-  stage.static_labels {
-    values = {
-      app = "routewarden",
-    }
-  }
-
   // Parse structured JSON emitted by RouteWarden security loggers (Layer 7 & Layer 4 UDP/TCP)
   stage.json {
     expressions = {
@@ -103,6 +99,20 @@ loki.process "routewarden" {
   stage.template {
     source   = "verdict"
     template = "{{ if .verdict }}{{ .verdict }}{{ else if eq .action \"blocked\" }}BLOCK{{ else if eq .action \"allowed\" }}ALLOW{{ else if eq .action \"throttled\" }}THROTTLED{{ else }}{{ .action }}{{ end }}"
+  }
+
+  // Drop any log lines that do not have a RouteWarden verdict or action
+  // This discards container startup logs, health check probes, and plain-text noise
+  stage.drop {
+    source     = "verdict"
+    expression = "^$"
+  }
+
+  // Default app label (only applied to retained RouteWarden events)
+  stage.static_labels {
+    values = {
+      app = "routewarden",
+    }
   }
 
   // Normalize gateway (fallback to plugin if gateway is empty)
