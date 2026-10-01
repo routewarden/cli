@@ -24,7 +24,7 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "4.1.0"
+var version = "4.1.1"
 
 type stringSlice []string
 
