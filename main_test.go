@@ -1481,3 +1481,45 @@ func TestCLI_PositionalAndFlagAliases(t *testing.T) {
 	})
 }
 
+func TestCLI_DashboardCommands(t *testing.T) {
+	t.Run("dashboard export with positional argument", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "exported-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "export", exportDir)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+			t.Errorf("expected success message, got: %s", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+			t.Errorf("docker-compose.yml was not exported: %v", err)
+		}
+	})
+
+	t.Run("dashboard export with --dir flag", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "flag-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "export", "--dir", exportDir)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+			t.Errorf("expected success message, got: %s", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+			t.Errorf("docker-compose.yml was not exported: %v", err)
+		}
+	})
+
+	t.Run("dashboard unknown subcommand rejected", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "dashboard", "foobar")
+		if code != 1 {
+			t.Fatalf("expected code 1 for unknown subcommand, got %d", code)
+		}
+		if !strings.Contains(stderr, "Unknown dashboard subcommand: \"foobar\"") {
+			t.Errorf("expected unknown subcommand error, got: %s", stderr)
+		}
+	})
+}
+

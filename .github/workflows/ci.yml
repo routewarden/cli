@@ -7,7 +7,6 @@ on:
       - main
     paths-ignore:
       - 'README.md'
-      - 'CHANGELOG.md'
       - 'VERSIONING.md'
       - 'LICENSE'
   workflow_dispatch:
@@ -48,6 +47,8 @@ jobs:
           ./rwarden schema > /dev/null
           ./rwarden test --path "/.env"
           ./rwarden test --path "/public/index.html"
+          ./rwarden dashboard export ./obs-smoke-test
+          rm -rf ./obs-smoke-test
 
   docker-build-test:
     name: Docker Build Validation

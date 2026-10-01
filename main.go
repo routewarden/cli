@@ -125,9 +125,15 @@ func handleDashboard(args []string) {
 
 	switch subcmd {
 	case "export":
+		fs := flag.NewFlagSet("dashboard export", flag.ExitOnError)
+		dirFlag := fs.String("dir", "", "Directory to export observability stack files")
+		_ = fs.Parse(remainingArgs)
+
 		targetDir := "./observability"
-		if len(remainingArgs) > 0 {
-			targetDir = remainingArgs[0]
+		if *dirFlag != "" {
+			targetDir = *dirFlag
+		} else if fs.NArg() > 0 {
+			targetDir = fs.Arg(0)
 		}
 		if err := observability.Export(targetDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error exporting observability stack: %v\n", err)
