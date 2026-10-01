@@ -10,7 +10,7 @@ The canonical release version of `rwarden` is stored in [`version.json`](version
 
 ```json
 {
-  "version": "v4.0.1"
+  "version": "v4.1.0"
 }
 ```
 
@@ -22,13 +22,12 @@ Whenever you prepare a release, update this file or use the automated synchroniz
 
 When publishing a new release, version numbers must stay in sync across:
 1. **`version.json`**: Canonical version tracking.
-2. **`main.go`**: Runtime CLI version string (`var version = "4.0.0"`).
-3. **`package.json`**: Node / VitePress documentation package version.
-4. **`install.sh`**: Fallback release tag (`LATEST_TAG="v4.0.0"`).
-5. **`docs/public/install.sh`**: Hosted installer script fallback.
-6. **`README.md`**: CLI output examples (`# rwarden version 4.0.0`).
-7. **`docs/index.md`**: CLI portal documentation examples.
-8. **`VERSIONING.md`**: Canonical version tracking documentation.
+2. **`main.go`**: Runtime CLI version string (`var version = "4.0.1"`).
+3. **`package.json`**: CLI package version.
+4. **`README.md`**: CLI output examples (`# rwarden version 4.0.1`).
+5. **`VERSIONING.md`**: Canonical version tracking documentation.
+
+> **Note**: The universal installer is maintained centrally and served directly at `https://routewarden.github.io/install.sh`.
 
 To automate this across all files, run [`scripts/update-version.sh`](scripts/update-version.sh):
 

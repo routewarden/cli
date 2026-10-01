@@ -424,3 +424,140 @@ func TestEngine_GenerateTCPWardenYAML(t *testing.T) {
 	}
 }
 
+func TestEngine_TrustedProxies(t *testing.T) {
+	// 1. Invalid CIDR in TrustedProxies
+	cfgBadCIDR := engine.CreateConfig()
+	cfgBadCIDR.TrustedProxies = []string{"999.999.999.999/24"}
+	if _, err := engine.NewEngine(cfgBadCIDR); err == nil {
+		t.Errorf("expected error for invalid trustedProxies CIDR")
+	}
+
+	// 2. Invalid IP in TrustedProxies
+	cfgBadIP := engine.CreateConfig()
+	cfgBadIP.TrustedProxies = []string{"not-an-ip"}
+	if _, err := engine.NewEngine(cfgBadIP); err == nil {
+		t.Errorf("expected error for invalid trustedProxies IP")
+	}
+
+	// 3. Evaluation with TrustedProxies
+	cfg := engine.CreateConfig()
+	cfg.AllowedIPs = []string{"192.168.1.50"}
+	cfg.TrustedProxies = []string{"10.0.0.0/8", "172.16.1.1"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Untrusted peer with spoofed XFF: must be blocked
+	resUntrusted := eng.EvaluateWithClientIP("GET", "/.env", "", map[string]string{
+		"X-Forwarded-For": "192.168.1.50",
+	}, "198.51.100.20")
+	if !resUntrusted.Blocked {
+		t.Errorf("untrusted peer with spoofed XFF should be blocked, got: %+v", resUntrusted)
+	}
+
+	// Trusted proxy peer with valid forwarded IP: must be allowed
+	resTrusted := eng.EvaluateWithClientIP("GET", "/.env", "", map[string]string{
+		"X-Forwarded-For": "192.168.1.50",
+	}, "10.0.1.1")
+	if !resTrusted.Allowed || resTrusted.Reason != "ip_whitelisted" {
+		t.Errorf("trusted proxy with forwarded whitelisted IP should be allowed, got: %+v", resTrusted)
+	}
+
+	// Trusted proxy peer with non-whitelisted forwarded IP: must be blocked
+	resTrustedBlocked := eng.EvaluateWithClientIP("GET", "/.env", "", map[string]string{
+		"X-Forwarded-For": "203.0.113.5",
+	}, "10.0.1.1")
+	if !resTrustedBlocked.Blocked {
+		t.Errorf("trusted proxy with forwarded non-whitelisted IP should be blocked, got: %+v", resTrustedBlocked)
+	}
+}
+
+func TestEngine_UnsafeRedirectAndProxyURLs(t *testing.T) {
+	unsafeRedirects := []string{
+		"//attacker.com/phish",
+		"javascript:alert(1)",
+		"ftp://example.com/evil",
+		"data:text/html,<html>",
+	}
+	for _, u := range unsafeRedirects {
+		cfg := engine.CreateConfig()
+		cfg.Response = &engine.ResponseConfig{
+			Mode:        "redirect",
+			RedirectURL: u,
+		}
+		if _, err := engine.NewEngine(cfg); err == nil {
+			t.Errorf("expected error for unsafe redirectUrl %q, got nil", u)
+		}
+	}
+
+	unsafeProxies := []string{
+		"javascript:alert(1)",
+		"ftp://internal.repo",
+		"data:text/plain,hello",
+	}
+	for _, p := range unsafeProxies {
+		cfg := engine.CreateConfig()
+		cfg.Response = &engine.ResponseConfig{
+			Mode:     "proxy",
+			ProxyURL: p,
+		}
+		if _, err := engine.NewEngine(cfg); err == nil {
+			t.Errorf("expected error for unsafe proxyUrl %q, got nil", p)
+		}
+	}
+}
+
+func TestEngine_GenerateWithTrustedProxies(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.AllowedIPs = []string{"192.168.1.50"}
+	cfg.TrustedProxies = []string{"10.0.0.0/8", "172.16.0.1"}
+
+	// Traefik YAML
+	yamlOut, err := cfg.Generate("traefik-yaml")
+	if err != nil {
+		t.Fatalf("traefik-yaml generate failed: %v", err)
+	}
+	if !strings.Contains(yamlOut, "trustedProxies:") || !strings.Contains(yamlOut, "10.0.0.0/8") {
+		t.Errorf("traefik-yaml missing trustedProxies: %s", yamlOut)
+	}
+
+	// Traefik TOML
+	tomlOut, err := cfg.Generate("traefik-toml")
+	if err != nil {
+		t.Fatalf("traefik-toml generate failed: %v", err)
+	}
+	if !strings.Contains(tomlOut, "trustedProxies = [") || !strings.Contains(tomlOut, "10.0.0.0/8") {
+		t.Errorf("traefik-toml missing trustedProxies: %s", tomlOut)
+	}
+
+	// Traefik Labels
+	labelsOut, err := cfg.Generate("traefik-labels")
+	if err != nil {
+		t.Fatalf("traefik-labels generate failed: %v", err)
+	}
+	if !strings.Contains(labelsOut, "trustedProxies=") || !strings.Contains(labelsOut, "10.0.0.0/8") {
+		t.Errorf("traefik-labels missing trustedProxies: %s", labelsOut)
+	}
+
+	// Caddyfile
+	caddyOut, err := cfg.Generate("caddy")
+	if err != nil {
+		t.Fatalf("caddy generate failed: %v", err)
+	}
+	if !strings.Contains(caddyOut, "trusted_proxies 10.0.0.0/8") {
+		t.Errorf("caddy missing trusted_proxies: %s", caddyOut)
+	}
+
+	// NGINX
+	nginxOut, err := cfg.Generate("nginx")
+	if err != nil {
+		t.Fatalf("nginx generate failed: %v", err)
+	}
+	if !strings.Contains(nginxOut, "trusted_proxies = {") || !strings.Contains(nginxOut, "10.0.0.0/8") {
+		t.Errorf("nginx missing trusted_proxies: %s", nginxOut)
+	}
+}
+
+

@@ -1,0 +1,149 @@
+// Grafana Alloy Configuration for RouteWarden Security Observability
+// Ingests, parses, enriches, and ships RouteWarden security logs to Loki
+
+// -----------------------------------------------------------------------------
+// 1. Docker Container Discovery & Log Ingestion
+// -----------------------------------------------------------------------------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "routewarden_containers" {
+  targets = discovery.docker.containers.targets
+
+  // Match RouteWarden gateways: Traefik, Caddy, NGINX, and TCP Warden
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = ".*(routewarden|traefik|caddy|nginx|tcp-warden).*"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "docker_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.routewarden_containers.output
+  forward_to = [loki.process.routewarden.receiver]
+}
+
+// -----------------------------------------------------------------------------
+// 2. File Tailing for Host Log Files
+// -----------------------------------------------------------------------------
+local.file_match "routewarden_files" {
+  path_targets = [
+    { "__path__" = "/var/log/routewarden/*.log" },
+    { "__path__" = "/var/log/routewarden/*.json" },
+    { "__path__" = "/var/log/routewarden/*.jsonl" },
+  ]
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.routewarden_files.targets
+  forward_to = [loki.process.routewarden.receiver]
+}
+
+// -----------------------------------------------------------------------------
+// 3. UDP Syslog Receiver (for streaming logs over network UDP)
+// -----------------------------------------------------------------------------
+loki.source.syslog "syslog_udp" {
+  listener {
+    address               = "0.0.0.0:1514"
+    protocol              = "udp"
+    use_rfc5424_message   = false
+    labels                = { app = "routewarden", transport = "udp", source = "syslog_udp" }
+  }
+  forward_to = [loki.process.routewarden.receiver]
+}
+
+// -----------------------------------------------------------------------------
+// 4. Log Processing & JSON Field Parsing (HTTP & UDP/TCP L4)
+// -----------------------------------------------------------------------------
+loki.process "routewarden" {
+  forward_to = [loki.write.local_loki.receiver]
+
+  // Default app label
+  stage.static_labels {
+    values = {
+      app = "routewarden",
+    }
+  }
+
+  // Parse structured JSON emitted by RouteWarden security loggers (Layer 7 & Layer 4 UDP/TCP)
+  stage.json {
+    expressions = {
+      timestamp       = "timestamp",
+      verdict         = "verdict",
+      action          = "action",
+      client_ip       = "client_ip",
+      effective_ip    = "effective_ip",
+      method          = "method",
+      protocol        = "protocol",
+      service         = "service",
+      transport       = "transport",
+      path            = "path",
+      status_code     = "status_code",
+      matched_pattern = "matched_pattern",
+      rule_id         = "rule_id",
+      gateway         = "gateway",
+      plugin          = "plugin",
+      response_mode   = "response_mode",
+      latency_ms      = "latency_ms",
+      duration_ms     = "duration_ms",
+      user_agent      = "user_agent",
+      reason          = "reason",
+    }
+  }
+
+  // Normalize action (e.g. "blocked" in tcp-warden UDP/TCP) into standard verdict ("BLOCK")
+  stage.template {
+    source   = "verdict"
+    template = "{{ if .verdict }}{{ .verdict }}{{ else if eq .action \"blocked\" }}BLOCK{{ else if eq .action \"allowed\" }}ALLOW{{ else if eq .action \"throttled\" }}THROTTLED{{ else }}{{ .action }}{{ end }}"
+  }
+
+  // Normalize gateway (fallback to plugin if gateway is empty)
+  stage.template {
+    source   = "gateway"
+    template = "{{ if .gateway }}{{ .gateway }}{{ else if .plugin }}{{ .plugin }}{{ else }}gateway{{ end }}"
+  }
+
+  // Promote low-cardinality keys to fast Loki labels
+  stage.labels {
+    values = {
+      verdict       = "verdict",
+      gateway       = "gateway",
+      protocol      = "protocol",
+      transport     = "transport",
+      status_code   = "status_code",
+      method        = "method",
+      response_mode = "response_mode",
+    }
+  }
+
+  // Promote high-cardinality query fields to Loki 3.0 structured metadata
+  stage.structured_metadata {
+    values = {
+      client_ip       = "client_ip",
+      effective_ip    = "effective_ip",
+      service         = "service",
+      path            = "path",
+      matched_pattern = "matched_pattern",
+      rule_id         = "rule_id",
+      user_agent      = "user_agent",
+      reason          = "reason",
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 5. Output: Ship to Loki
+// -----------------------------------------------------------------------------
+loki.write "local_loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

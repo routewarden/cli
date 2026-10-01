@@ -832,6 +832,43 @@ func TestCLI_ValidateCommandEdgeCases(t *testing.T) {
 			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
 		}
 	})
+
+	t.Run("Valid config with trustedProxies shows trusted proxies in breakdown", func(t *testing.T) {
+		cfgJSON := `{
+			"enabled": true,
+			"allowedIps": ["192.168.1.100"],
+			"trustedProxies": ["10.0.0.0/8"]
+		}`
+		stdout, stderr, code := runCLIWithStdin(t, cfgJSON, "validate")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Trusted Proxies: [10.0.0.0/8]") {
+			t.Fatalf("expected 'Trusted Proxies: [10.0.0.0/8]', got:\n%s", stdout)
+		}
+	})
+
+	t.Run("Invalid trustedProxies CIDR fails validation", func(t *testing.T) {
+		invalidJSON := `{"trustedProxies": ["999.999.999.999/24"]}`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate")
+		if code == 0 {
+			t.Fatalf("expected non-zero exit on invalid trustedProxies, got 0")
+		}
+		if !strings.Contains(stderr, "Validation FAILED") {
+			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
+		}
+	})
+
+	t.Run("Unsafe redirect URL fails validation", func(t *testing.T) {
+		invalidJSON := `{"response": {"mode": "redirect", "redirectUrl": "//attacker.com/phish"}}`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate")
+		if code == 0 {
+			t.Fatalf("expected non-zero exit on unsafe redirect URL, got 0")
+		}
+		if !strings.Contains(stderr, "Validation FAILED") {
+			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
+		}
+	})
 }
 
 func TestCLI_SandboxCommand(t *testing.T) {
@@ -1440,6 +1477,48 @@ func TestCLI_PositionalAndFlagAliases(t *testing.T) {
 		}
 		if !strings.Contains(stdout, "docker run --rm") {
 			t.Errorf("missing docker run in dry run output:\n%s", stdout)
+		}
+	})
+}
+
+func TestCLI_DashboardCommands(t *testing.T) {
+	t.Run("dashboard export with positional argument", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "exported-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "export", exportDir)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+			t.Errorf("expected success message, got: %s", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+			t.Errorf("docker-compose.yml was not exported: %v", err)
+		}
+	})
+
+	t.Run("dashboard export with --dir flag", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "flag-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "export", "--dir", exportDir)
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+			t.Errorf("expected success message, got: %s", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+			t.Errorf("docker-compose.yml was not exported: %v", err)
+		}
+	})
+
+	t.Run("dashboard unknown subcommand rejected", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "dashboard", "foobar")
+		if code != 1 {
+			t.Fatalf("expected code 1 for unknown subcommand, got %d", code)
+		}
+		if !strings.Contains(stderr, "Unknown dashboard subcommand: \"foobar\"") {
+			t.Errorf("expected unknown subcommand error, got: %s", stderr)
 		}
 	})
 }
