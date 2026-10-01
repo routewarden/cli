@@ -5,6 +5,11 @@ on:
     branches:
       - develop
       - main
+    paths-ignore:
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'VERSIONING.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 # Prevents redundant builds: cancel previous runs on the same branch or PR
@@ -14,7 +19,7 @@ concurrency:
 
 jobs:
   test-go:
-    name: Go 1.25.1 Test
+    name: Go 1.25.1 Test & Smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -44,9 +49,27 @@ jobs:
           ./rwarden test --path "/.env"
           ./rwarden test --path "/public/index.html"
 
+  docker-build-test:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (Dry Run)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: ghcr.io/routewarden/cli:test
+
   ci-success:
     name: CI Status Check
-    needs: [test-go]
+    needs: [test-go, docker-build-test]
     runs-on: ubuntu-latest
     steps:
       - name: Publish CI Results Summary
@@ -55,7 +78,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Go Tests & Race Detector** | ✅ Passed | Ran with \`-race\` on Go 1.25.1 |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Tests & Race Detector** | ✅ Passed | Ran with `-race` on Go 1.25.1 |" >> $GITHUB_STEP_SUMMARY
           echo "| **CLI Build & Smoke Tests** | ✅ Passed | Built and verified commands |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Docker Build** | ✅ Passed | Verified Go container |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🎉 **Ready for merge! All checks passed.**" >> $GITHUB_STEP_SUMMARY

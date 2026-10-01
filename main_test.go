@@ -832,6 +832,43 @@ func TestCLI_ValidateCommandEdgeCases(t *testing.T) {
 			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
 		}
 	})
+
+	t.Run("Valid config with trustedProxies shows trusted proxies in breakdown", func(t *testing.T) {
+		cfgJSON := `{
+			"enabled": true,
+			"allowedIps": ["192.168.1.100"],
+			"trustedProxies": ["10.0.0.0/8"]
+		}`
+		stdout, stderr, code := runCLIWithStdin(t, cfgJSON, "validate")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Trusted Proxies: [10.0.0.0/8]") {
+			t.Fatalf("expected 'Trusted Proxies: [10.0.0.0/8]', got:\n%s", stdout)
+		}
+	})
+
+	t.Run("Invalid trustedProxies CIDR fails validation", func(t *testing.T) {
+		invalidJSON := `{"trustedProxies": ["999.999.999.999/24"]}`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate")
+		if code == 0 {
+			t.Fatalf("expected non-zero exit on invalid trustedProxies, got 0")
+		}
+		if !strings.Contains(stderr, "Validation FAILED") {
+			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
+		}
+	})
+
+	t.Run("Unsafe redirect URL fails validation", func(t *testing.T) {
+		invalidJSON := `{"response": {"mode": "redirect", "redirectUrl": "//attacker.com/phish"}}`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate")
+		if code == 0 {
+			t.Fatalf("expected non-zero exit on unsafe redirect URL, got 0")
+		}
+		if !strings.Contains(stderr, "Validation FAILED") {
+			t.Fatalf("expected 'Validation FAILED', got: %s", stderr)
+		}
+	})
 }
 
 func TestCLI_SandboxCommand(t *testing.T) {

@@ -17,14 +17,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/routewarden/cli/dashboard"
 	"github.com/routewarden/cli/engine"
+	"github.com/routewarden/cli/observability"
 )
 
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "4.0.1"
+var version = "4.1.0"
 
 type stringSlice []string
 
@@ -55,9 +55,12 @@ Commands:
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
-  dashboard   Start the self-hosted security dashboard web UI
+  dashboard   Launch or manage the Grafana + Loki + Alloy security dashboard
                 e.g. rwarden dashboard
-                e.g. rwarden dashboard --port 9090 --log /var/log/routewarden.log
+                e.g. rwarden dashboard up --port 3000
+                e.g. rwarden dashboard down
+                e.g. rwarden dashboard status
+                e.g. rwarden dashboard export ./observability
   cleanup     Stop and remove any running RouteWarden sandbox containers
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
@@ -108,70 +111,90 @@ func main() {
 }
 
 func handleDashboard(args []string) {
-	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-	port := fs.Int("port", 9090, "Port to serve the dashboard (default: 9090)")
-	host := fs.String("host", "127.0.0.1", "Host to bind (default: 127.0.0.1; use 0.0.0.0 in Docker)")
-	noDocker := fs.Bool("no-docker", false, "Disable Docker socket log discovery")
-	socketPath := fs.String("socket", "/var/run/docker.sock", "Docker socket path")
-	historyN := fs.Int("history", 1000, "Number of past events to load on startup")
-	noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
-	tcpWarden := fs.String("tcp-warden", "", "URL to tcp-warden management API (e.g. http://127.0.0.1:9091)")
-	var logFiles stringSlice
-	fs.Var(&logFiles, "log", "Path or glob to a log file to tail (repeatable)")
-	_ = fs.Parse(args)
+	subcmd := "up"
+	var remainingArgs []string
 
-	resolvedSocket := dashboard.ResolveDockerSocket(*socketPath)
-	opts := dashboard.Options{
-		Host:         *host,
-		Port:         *port,
-		LogFiles:     logFiles,
-		NoDocker:     *noDocker,
-		SocketPath:   resolvedSocket,
-		HistoryN:     *historyN,
-		TCPWardenURL: *tcpWarden,
-		Version:      version,
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		subcmd = args[0]
+		remainingArgs = args[1:]
+	} else {
+		remainingArgs = args
 	}
 
-	addr := fmt.Sprintf("http://%s:%d", *host, *port)
-	if *host == "0.0.0.0" {
-		addr = fmt.Sprintf("http://localhost:%d", *port)
-	}
+	ctx := context.Background()
 
-	fmt.Printf("🛡️  RouteWarden Dashboard\n")
-	fmt.Printf("   Version:    %s\n", version)
-	fmt.Printf("   Address:    %s\n", addr)
-	if !*noDocker {
-		fmt.Printf("   Docker:     %s\n", resolvedSocket)
-	}
-	if len(logFiles) > 0 {
-		fmt.Printf("   Log files:  %v\n", []string(logFiles))
-	}
-	fmt.Printf("\n   Press Ctrl+C to stop.\n\n")
+	switch subcmd {
+	case "export":
+		targetDir := "./observability"
+		if len(remainingArgs) > 0 {
+			targetDir = remainingArgs[0]
+		}
+		if err := observability.Export(targetDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error exporting observability stack: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ Exported RouteWarden Observability Stack to %q\n", targetDir)
+		fmt.Println("   Includes: docker-compose.yml, config.alloy, loki-config.yaml, and grafana dashboards")
+		fmt.Printf("   Run: cd %s && docker compose up -d\n", targetDir)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	case "down", "stop":
+		fs := flag.NewFlagSet("dashboard down", flag.ExitOnError)
+		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
+		_ = fs.Parse(remainingArgs)
 
-	// Graceful shutdown on SIGINT / SIGTERM
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Println("\n🛑 Shutting down dashboard...")
-		cancel()
-	}()
+		if err := observability.Down(ctx, *dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error stopping observability stack: %v\n", err)
+			os.Exit(1)
+		}
 
-	srv := dashboard.NewServer(opts)
+	case "status", "ps":
+		fs := flag.NewFlagSet("dashboard status", flag.ExitOnError)
+		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
+		_ = fs.Parse(remainingArgs)
 
-	// Open browser after a short delay to let the server start
-	if !*noOpen {
-		go func() {
-			time.Sleep(600 * time.Millisecond)
-			openBrowser(addr)
-		}()
-	}
+		if err := observability.Status(ctx, *dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error checking status: %v\n", err)
+			os.Exit(1)
+		}
 
-	if err := srv.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
+	case "up", "start":
+		fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
+		port := fs.Int("port", 3000, "Port for Grafana dashboard UI (default: 3000)")
+		lokiPort := fs.Int("loki-port", 3100, "Port for Loki log engine (default: 3100)")
+		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
+		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
+		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
+		_ = fs.Parse(remainingArgs)
+
+		if *exportOnly {
+			target := *dir
+			if target == "" {
+				target = "./observability"
+			}
+			if err := observability.Export(target); err != nil {
+				fmt.Fprintf(os.Stderr, "Error exporting observability assets: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("✅ Exported observability configuration to %s\n", target)
+			return
+		}
+
+		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen); err != nil {
+			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
+			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
+			os.Exit(1)
+		}
+
+	default:
+		// Unknown subcommand — if it looks like a flag, try running 'up' with all args;
+		// otherwise error clearly to avoid silently launching the stack.
+		if strings.HasPrefix(subcmd, "-") {
+			// subcmd was actually a flag, not a subcommand — re-parse as 'up' with all original args
+			handleDashboard(append([]string{"up"}, args...))
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Unknown dashboard subcommand: %q\n\n", subcmd)
+		fmt.Fprintln(os.Stderr, "Usage: rwarden dashboard [up|down|status|export] [flags]")
 		os.Exit(1)
 	}
 }
@@ -680,7 +703,13 @@ func handleValidate(args []string) {
 		os.Exit(1)
 	}
 
-	if strings.Contains(string(data), "services:") && (strings.HasSuffix(targetName, ".yaml") || strings.HasSuffix(targetName, ".yml") || strings.Contains(string(data), "version:")) {
+	// Detect TCP Warden YAML format: must have both `services:` and a yaml/yml extension.
+	// We deliberately avoid the broad `version:` heuristic which can falsely match any JSON
+	// config that happens to contain a version field in nested data.
+	isTCPWardenYAML := strings.Contains(string(data), "services:") &&
+		(strings.HasSuffix(targetName, ".yaml") || strings.HasSuffix(targetName, ".yml") ||
+			strings.HasPrefix(strings.TrimSpace(string(data)), "version:"))
+	if isTCPWardenYAML {
 		fmt.Printf("✓ Configuration %s is VALID (TCP Warden YAML format).\n", targetName)
 		fmt.Println("  - Target: RouteWarden TCP Warden (tcp-warden)")
 		return
@@ -712,6 +741,9 @@ func handleValidate(args []string) {
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Printf("  - Allowed IPs/CIDRs: %v\n", cfg.AllowedIPs)
+	}
+	if len(cfg.TrustedProxies) > 0 {
+		fmt.Printf("  - Trusted Proxies: %v\n", cfg.TrustedProxies)
 	}
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Printf("  - Monitored headers: %v\n", cfg.CheckHeaders)

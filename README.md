@@ -2,6 +2,8 @@
 
 `rwarden` is a developer CLI for testing path security rules, verifying RouteWarden configuration files offline, and emitting the official JSON Schema.
 
+> 📖 **Official Documentation**: See the [RouteWarden CLI Documentation](https://routewarden.github.io/cli/) for the complete command reference, security dashboard guide, and CI/CD tutorials.
+
 ---
 
 ## Installation
@@ -11,16 +13,14 @@
 Download and install the latest pre-compiled release binary automatically:
 
 ```bash
-curl -fsSL https://routewarden.github.io/cli/install.sh | bash
+curl -fsSL https://routewarden.github.io/install.sh | bash
 ```
 
 Custom installation directory (e.g. `~/.local/bin`):
 
 ```bash
-curl -fsSL https://routewarden.github.io/cli/install.sh | INSTALL_DIR=$HOME/.local/bin bash
+curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/bin bash
 ```
-
-*(Or via raw GitHub fallback: `curl -fsSL https://raw.githubusercontent.com/routewarden/cli/main/install.sh | bash`)*
 
 ---
 
@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 4.0.1
+# rwarden version 4.1.0
 ```
 
 ---
@@ -70,10 +70,10 @@ Re-running the universal installer automatically queries GitHub Releases for the
 
 ```bash
 # Default system-wide (/usr/local/bin):
-curl -fsSL https://routewarden.github.io/cli/install.sh | bash
+curl -fsSL https://routewarden.github.io/install.sh | bash
 
 # Or custom user directory (~/.local/bin):
-curl -fsSL https://routewarden.github.io/cli/install.sh | INSTALL_DIR=$HOME/.local/bin bash
+curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/bin bash
 ```
 
 ### 2. Upgrading Docker Container Image
@@ -443,133 +443,111 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ---
 
-### 6. Self-Hosted Security Dashboard (`dashboard`)
+### 6. Security Observability Stack (`dashboard`)
 
-Launch a lightweight, self-hosted web dashboard to visualize real-time security events, blocked probes, honeypot tarpit engagements, and attack analytics across your Traefik, Caddy, and NGINX instances.
+RouteWarden provides a turnkey, production-grade observability stack built on **Grafana**, **Grafana Alloy**, and **Grafana Loki**.
 
-The dashboard features:
-- **Zero-Config Docker Discovery**: Reads container logs directly via the local Docker socket (`/var/run/docker.sock`) to auto-detect and stream logs from running Traefik, Caddy, and NGINX gateways.
-- **Log File Tailing**: Tail local log files or wildcard patterns (e.g. `/var/log/routewarden/*.log`) with automatic log rotation handling.
-- **Real-Time Live Feed**: Live WebSocket stream of blocked requests, client IPs, matched patterns, HTTP methods, and triggered response modes.
-- **Rich Visual Analytics**: 24-hour attack trends, blocks per minute, top attacked endpoints, top offender IPs, response mode breakdown (block, tarpit, gzipBomb, silentDrop, fakeSuccess), and gateway distribution.
-- **Zero-Dependency Single Binary**: The modern React SPA frontend is pre-compiled and embedded directly inside the `rwarden` Go binary (`go:embed`). No Node.js runtime, no external databases, and no background services required.
-- **Docker Ready**: Runs as a lightweight standalone container or alongside your reverse proxies in `docker-compose.yml`.
+The stack auto-discovers and ingests structured JSON security logs from all your RouteWarden gateways (Traefik, Caddy, NGINX, and TCP Warden) and presents pre-provisioned dashboards with zero manual configuration.
 
-#### CLI Usage Examples
+#### Architecture
+
+- **Grafana Alloy**: Log collector (OpenTelemetry successor to Promtail) that tails Docker container logs via `/var/run/docker.sock` and host logs, parses RouteWarden JSON fields, and extracts labels (`verdict`, `status_code`, `gateway`, `method`).
+- **Grafana Loki**: High-efficiency log aggregation engine indexing security events with full LogQL query capabilities.
+- **Grafana**: Pre-configured with the **"RouteWarden — Threat & Security Intelligence"** dashboard, pre-wired data sources, attack timelines, top attacked endpoints, offender IPs, and live security event feed.
+
+#### Quickstart with CLI
 
 ```bash
-# 1. Start dashboard with Docker auto-discovery and open browser automatically
+# 1. Launch the observability stack via Docker Compose (opens Grafana at http://localhost:3000)
 rwarden dashboard
 
-# 2. Bind to a custom port without auto-opening the browser
-rwarden dashboard --port 8080 --no-open
+# 2. Launch on a custom port without auto-opening browser
+rwarden dashboard up --port 8080 --no-open
 
-# 3. Tail one or more local RouteWarden log files
-rwarden dashboard --log /var/log/routewarden.log
+# 3. Check status of running observability containers
+rwarden dashboard status
 
-# 4. Tail wildcard patterns and multiple log sources simultaneously
-rwarden dashboard --log "/var/log/routewarden/*.log" --log /var/log/nginx/access.log
+# 4. Stop the observability stack
+rwarden dashboard down
 
-# 5. Standalone file-only mode (disable Docker socket discovery)
-rwarden dashboard --no-docker --log /var/log/routewarden.log
-
-# 6. Customize memory retention (number of past events loaded)
-rwarden dashboard --history 2500 --port 9090
+# 5. Export docker-compose.yml, config.alloy, and Grafana dashboard files to a custom directory
+rwarden dashboard export ./my-observability
 ```
 
-#### Running via Docker (`ghcr.io/routewarden/cli`)
+#### Standalone Docker Compose Deployment
 
-The official `ghcr.io/routewarden/cli` container image starts the dashboard by default, bound to `0.0.0.0:9090`:
+If you prefer running without the CLI binary, export or run the embedded `docker-compose.yml` directly:
 
 ```bash
-# Auto-discover gateway containers via Docker socket
-docker run -d \
-  --name routewarden-dashboard \
-  --restart unless-stopped \
-  -p 9090:9090 \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  ghcr.io/routewarden/cli:latest
+# Export configuration files
+rwarden dashboard export ./deploy/observability
 
-# Or tail log files from a host volume
-docker run -d \
-  --name routewarden-dashboard \
-  --restart unless-stopped \
-  -p 9090:9090 \
-  -v /var/log/routewarden:/logs:ro \
-  ghcr.io/routewarden/cli:latest \
-  dashboard --host 0.0.0.0 --no-docker --log "/logs/*.log"
+# Run with standard Docker Compose
+cd ./deploy/observability
+docker compose up -d
 ```
-
-#### Docker Compose Example
-
-Deploy the dashboard alongside your existing reverse proxy and TCP Warden infrastructure:
 
 ```yaml
-version: "3.8"
-
+# deploy/observability/docker-compose.yml
 services:
-  traefik:
-    image: traefik:v3.3
-    container_name: traefik
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: routewarden-loki
     restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yaml
     ports:
-      - "80:80"
-      - "443:443"
+      - "3100:3100"
     volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.1.0
+    container_name: routewarden-alloy
+    restart: unless-stopped
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/log:/var/log:ro
+    depends_on:
+      - loki
 
-  tcp-warden:
-    image: ghcr.io/routewarden/tcp-warden:latest
-    container_name: tcp-warden
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: routewarden-grafana
     restart: unless-stopped
     ports:
-      - "9091:9091"
-      - "2222:2222"
-    volumes:
-      - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
-      - tcp-warden-data:/var/lib/routewarden
-
-  routewarden-dashboard:
-    image: ghcr.io/routewarden/cli:latest
-    container_name: routewarden-dashboard
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
+      - "3000:3000"
     environment:
-      - TCP_WARDEN_URL=http://tcp-warden:9091
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open", "--tcp-warden", "http://tcp-warden:9091"]
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
 
 volumes:
-  tcp-warden-data:
+  loki-data:
+  grafana-data:
 ```
 
-#### Command Flags
+#### Command Flags & Subcommands
 
-| Flag | Type | Default | Description |
+| Command / Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `--port` | int | `9090` | Port to serve the dashboard web interface |
-| `--host` | string | `127.0.0.1` | Host address to bind (`0.0.0.0` for Docker / remote access) |
-| `--log` | string | `""` | Path or glob pattern to log file(s) to tail (repeatable) |
-| `--no-docker` | bool | `false` | Disable Docker daemon socket discovery |
-| `--socket` | string | `/var/run/docker.sock` | Path to Docker daemon Unix socket |
-| `--tcp-warden` | string | `"http://127.0.0.1:9091"` | URL or socket to TCP Warden management API (or set `TCP_WARDEN_URL`) |
-| `--history` | int | `1000` | Number of events retained in memory and loaded on startup |
+| `up` | subcommand | — | Launch Grafana, Loki, and Alloy stack (default subcommand) |
+| `down` | subcommand | — | Stop running observability stack containers |
+| `status` | subcommand | — | Check status of running observability containers |
+| `export [dir]` | subcommand | `./observability` | Export compose, Alloy, and Grafana configs to disk |
+| `--port` | int | `3000` | Port for Grafana dashboard UI |
+| `--loki-port` | int | `3100` | Port for Loki log engine |
+| `--dir` | string | `~/.routewarden/observability` | Directory storing compose configuration |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
-
-#### Built-in REST & WebSocket Endpoints
-
-The dashboard server exposes an HTTP API for external integrations, status checks, and alerting scripts:
-
-| Endpoint | Method | Description |
-|:---|:---|:---|
-| `/api/health` | `GET` | Health check returning status, version, and active client count |
-| `/api/events?n=500` | `GET` | Fetch the last `n` recorded security events as JSON |
-| `/api/stats?hours=24` | `GET` | Aggregated analytics snapshot (rates, top IPs, top paths, response modes, gateway distribution) |
-| `/api/sources` | `GET` | List of active log sources (Docker containers & tailed files) and their statuses |
-| `/ws/events` | `GET` | Real-time WebSocket connection for live event streaming |
 
 ---
 

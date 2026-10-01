@@ -149,3 +149,22 @@ func TestLabels_UnquotedBooleanDictionary(t *testing.T) {
 		}
 	}
 }
+
+func TestLabels_TrustedProxies(t *testing.T) {
+	labelContent := `
+traefik.http.middlewares.proxy-shield.plugin.routewarden.enabled=true
+traefik.http.middlewares.proxy-shield.plugin.routewarden.trustedProxies=10.0.0.0/8,172.16.0.0/12
+`
+	labels := engine.ParseTraefikLabels(labelContent)
+	yamlOut, err := engine.ConvertLabelsToTraefikDynamicYAML(labels)
+	if err != nil {
+		t.Fatalf("failed to convert labels: %v", err)
+	}
+
+	if !strings.Contains(yamlOut, "trustedProxies:") ||
+		!strings.Contains(yamlOut, "- '10.0.0.0/8'") ||
+		!strings.Contains(yamlOut, "- '172.16.0.0/12'") {
+		t.Errorf("expected trustedProxies in converted dynamic YAML:\n%s", yamlOut)
+	}
+}
+
