@@ -536,6 +536,23 @@ volumes:
   grafana-data:
 ```
 
+#### Reusing an Existing Grafana & Loki Stack
+
+If you already have a Grafana and Loki stack configured on your server, you do **not** need to run RouteWarden's local containers:
+
+1. **Export Dashboard**: Run `rwarden dashboard export ./observability` and import `observability/grafana/dashboards/routewarden-overview.json` directly into your existing Grafana via UI or API.
+2. **Ship Logs to Existing Loki**:
+   - **Using Grafana Alloy**: Add RouteWarden's `loki.process` stage from `config.alloy` to your existing Alloy config and set `loki.write` endpoint to your Loki cluster.
+   - **Using Promtail**: Add a scrape job with `__meta_docker_container_label_routewarden_logs` relabeling and json parsing stages.
+   - **Standalone Shipper Container**: Run an Alloy container on the gateway host pointing directly to your remote Loki:
+     ```bash
+     docker run -d --name routewarden-alloy --restart unless-stopped \
+       -v "$(pwd)/observability/config.alloy:/etc/alloy/config.alloy:ro" \
+       -v "/var/run/docker.sock:/var/run/docker.sock:ro" \
+       grafana/alloy:v1.1.0 run /etc/alloy/config.alloy
+     ```
+3. **Label Containers**: Tag your gateway containers with `routewarden.logs=true`.
+
 #### Command Flags & Subcommands
 
 | Command / Flag | Type | Default | Description |

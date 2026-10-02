@@ -46,7 +46,7 @@ func EnsureStackPrepared(dir string) error {
 }
 
 // Up starts the Grafana, Loki, and Alloy stack.
-func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool) error {
+func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool, extraEnv ...string) error {
 	composeCmd, err := FindDockerCompose()
 	if err != nil {
 		return err
@@ -72,6 +72,7 @@ func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool)
 		"GRAFANA_PORT="+strconv.Itoa(grafanaPort),
 		"LOKI_PORT="+strconv.Itoa(lokiPort),
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

@@ -170,6 +170,9 @@ func handleDashboard(args []string) {
 		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
+		var envList stringSlice
+		fs.Var(&envList, "env", "Environment variable to pass to dashboard stack (repeatable, e.g. --env GF_SECURITY_ADMIN_PASSWORD=secret)")
+		fs.Var(&envList, "e", "Alias for --env (repeatable)")
 		_ = fs.Parse(remainingArgs)
 
 		if *exportOnly {
@@ -185,7 +188,7 @@ func handleDashboard(args []string) {
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, envList...); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
 			os.Exit(1)
