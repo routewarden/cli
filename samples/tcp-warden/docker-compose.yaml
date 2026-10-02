@@ -1,20 +1,24 @@
 # ==============================================================================
-# Docker Compose: RouteWarden Dashboard + TCP Warden L4 Firewall
+# Docker Compose: TCP Warden L4 Firewall with RouteWarden Logging
 # ==============================================================================
-# Run both the RouteWarden web dashboard and TCP Warden daemon in Docker:
+# Run TCP Warden with RouteWarden security logging enabled:
 #
 #   docker compose up -d
 #
-# Access dashboard at:
-#   http://localhost:9090
+# Launch the RouteWarden Security Observability Stack (Grafana + Loki + Alloy):
+#
+#   rwarden dashboard
+#
+# Access Grafana dashboard at:
+#   http://localhost:3000
 # ==============================================================================
-
-version: '3.8'
 
 services:
   tcp-warden:
     image: ghcr.io/routewarden/tcp-warden:latest
     container_name: rwarden-tcp-warden
+    labels:
+      - "routewarden.logs=true"
     ports:
       - "2222:2222"   # SSH Bastion
       - "5432:5432"   # PostgreSQL Bastion
@@ -22,22 +26,6 @@ services:
     volumes:
       - ./tcp-warden.yaml:/etc/routewarden/tcp-warden.yaml:ro
       - tcp-warden-data:/var/lib/routewarden
-    restart: unless-stopped
-
-  dashboard:
-    image: ghcr.io/routewarden/cli:latest
-    container_name: rwarden-dashboard
-    command: [
-      "dashboard",
-      "--host", "0.0.0.0",
-      "--port", "9090",
-      "--tcp-warden", "http://tcp-warden:9091",
-      "--no-docker"
-    ]
-    ports:
-      - "9090:9090"
-    depends_on:
-      - tcp-warden
     restart: unless-stopped
 
 volumes:
