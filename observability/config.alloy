@@ -17,8 +17,9 @@ discovery.relabel "routewarden_containers" {
       "__meta_docker_container_label_routewarden_logs",
       "__meta_docker_container_label_routewarden",
     ]
-    regex  = "true|1|yes"
-    action = "keep"
+    separator     = ";"
+    regex         = ".*(true|1|yes).*"
+    action        = "keep"
   }
 
   rule {
@@ -73,9 +74,12 @@ loki.process "routewarden" {
   stage.json {
     expressions = {
       timestamp       = "timestamp",
+      type            = "type",
+      level           = "level",
       verdict         = "verdict",
       action          = "action",
       client_ip       = "client_ip",
+      ip              = "ip",
       effective_ip    = "effective_ip",
       method          = "method",
       protocol        = "protocol",
@@ -88,20 +92,58 @@ loki.process "routewarden" {
       gateway         = "gateway",
       plugin          = "plugin",
       response_mode   = "response_mode",
+      country_code    = "country_code",
+      country_name    = "country_name",
+      flag_emoji      = "flag_emoji",
+      reason          = "reason",
+      bytes_in        = "bytes_in",
+      bytes_out       = "bytes_out",
       latency_ms      = "latency_ms",
       duration_ms     = "duration_ms",
       user_agent      = "user_agent",
-      reason          = "reason",
     }
   }
 
-  // Normalize action (e.g. "blocked" in tcp-warden UDP/TCP) into standard verdict ("BLOCK")
+  // Normalize client_ip and ip
   stage.template {
-    source   = "verdict"
-    template = "{{ if .verdict }}{{ .verdict }}{{ else if eq .action \"blocked\" }}BLOCK{{ else if eq .action \"allowed\" }}ALLOW{{ else if eq .action \"throttled\" }}THROTTLED{{ else }}{{ .action }}{{ end }}"
+    source   = "client_ip"
+    template = "{{ if .client_ip }}{{ .client_ip }}{{ else if .ip }}{{ .ip }}{{ else if .effective_ip }}{{ .effective_ip }}{{ end }}"
   }
 
-  // Drop any log lines that do not have a RouteWarden verdict or action
+  // Infer or normalize log level (warn / info / error)
+  stage.template {
+    source   = "level"
+    template = "{{ if .level }}{{ .level }}{{ else if or (eq .verdict \"BLOCK\") (eq .action \"blocked\") (eq .action \"banned\") }}warn{{ else if eq .action \"throttled\" }}warn{{ else if or (eq .verdict \"ALLOW\") (eq .action \"allowed\") (eq .action \"bypassed\") }}info{{ else }}info{{ end }}"
+  }
+
+  // Normalize transport (fallback to protocol default if missing)
+  stage.template {
+    source   = "transport"
+    template = "{{ if .transport }}{{ .transport }}{{ else if or (eq .protocol \"dns\") (eq .protocol \"dht\") (eq .protocol \"udp\") }}udp{{ else }}tcp{{ end }}"
+  }
+
+  // Normalize gateway (fallback to plugin if gateway is empty)
+  stage.template {
+    source   = "gateway"
+    template = "{{ if .gateway }}{{ .gateway }}{{ else if .plugin }}{{ .plugin }}{{ else }}gateway{{ end }}"
+  }
+
+  // Normalize verdict across all gateways:
+  // - HTTP gateways (Traefik, Caddy, NGINX): type="routewarden_block" -> verdict="BLOCK"
+  // - TCP Warden: action="blocked" -> verdict="BLOCK", action="allowed" -> verdict="ALLOW", action="throttled" -> verdict="THROTTLED"
+  // - Direct verdict field (verdict="BLOCK" / "ALLOW" / "BYPASS")
+  stage.template {
+    source   = "verdict"
+    template = "{{ if .verdict }}{{ .verdict }}{{ else if eq .type \"routewarden_block\" }}BLOCK{{ else if eq .type \"routewarden_allow\" }}ALLOW{{ else if eq .action \"blocked\" }}BLOCK{{ else if eq .action \"allowed\" }}ALLOW{{ else if eq .action \"throttled\" }}THROTTLED{{ else if eq .action \"banned\" }}BLOCK{{ else if .action }}{{ .action }}{{ end }}"
+  }
+
+  // Infer response_mode for HTTP gateways when action represents the mode (e.g. text, json, silentDrop)
+  stage.template {
+    source   = "response_mode"
+    template = "{{ if .response_mode }}{{ .response_mode }}{{ else if eq .type \"routewarden_block\" }}{{ .action }}{{ else }}default{{ end }}"
+  }
+
+  // Drop any log lines that do not have a RouteWarden verdict
   // This discards container startup logs, health check probes, and plain-text noise
   stage.drop {
     source     = "verdict"
@@ -115,36 +157,43 @@ loki.process "routewarden" {
     }
   }
 
-  // Normalize gateway (fallback to plugin if gateway is empty)
-  stage.template {
-    source   = "gateway"
-    template = "{{ if .gateway }}{{ .gateway }}{{ else if .plugin }}{{ .plugin }}{{ else }}gateway{{ end }}"
-  }
-
-  // Promote low-cardinality keys to fast Loki labels
+  // Promote key low-to-medium cardinality keys to fast Loki labels for instant filtering
   stage.labels {
     values = {
+      level         = "level",
       verdict       = "verdict",
+      action        = "action",
       gateway       = "gateway",
+      service       = "service",
       protocol      = "protocol",
       transport     = "transport",
+      client_ip     = "client_ip",
+      country_code  = "country_code",
       status_code   = "status_code",
       method        = "method",
       response_mode = "response_mode",
+      reason        = "reason",
     }
   }
 
-  // Promote high-cardinality query fields to Loki 3.0 structured metadata
+  // Promote high-cardinality query fields to Loki structured metadata and log inspector
   stage.structured_metadata {
     values = {
       client_ip       = "client_ip",
+      ip              = "client_ip",
       effective_ip    = "effective_ip",
       service         = "service",
+      country_name    = "country_name",
+      flag_emoji      = "flag_emoji",
       path            = "path",
       matched_pattern = "matched_pattern",
       rule_id         = "rule_id",
       user_agent      = "user_agent",
       reason          = "reason",
+      bytes_in        = "bytes_in",
+      bytes_out       = "bytes_out",
+      duration_ms     = "duration_ms",
+      latency_ms      = "latency_ms",
     }
   }
 }
