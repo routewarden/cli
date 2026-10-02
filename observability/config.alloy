@@ -88,6 +88,7 @@ loki.process "routewarden" {
       path            = "path",
       status_code     = "status_code",
       matched_pattern = "matched_pattern",
+      pattern         = "pattern",
       rule_id         = "rule_id",
       gateway         = "gateway",
       plugin          = "plugin",
@@ -108,6 +109,12 @@ loki.process "routewarden" {
   stage.template {
     source   = "client_ip"
     template = "{{ if .client_ip }}{{ .client_ip }}{{ else if .ip }}{{ .ip }}{{ else if .effective_ip }}{{ .effective_ip }}{{ end }}"
+  }
+
+  // Normalize matched_pattern (fall back to pattern if matched_pattern is empty)
+  stage.template {
+    source   = "matched_pattern"
+    template = "{{ if .matched_pattern }}{{ .matched_pattern }}{{ else if .pattern }}{{ .pattern }}{{ end }}"
   }
 
   // Infer or normalize log level (warn / info / error)
