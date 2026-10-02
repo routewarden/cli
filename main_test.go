@@ -1512,6 +1512,21 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("dashboard up with --env flags and export", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "env-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir, "--env", "GF_SECURITY_ADMIN_PASSWORD=secret", "-e", "GF_SMTP_ENABLED=true")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported observability configuration") {
+			t.Errorf("expected export message, got: %s", stdout)
+		}
+		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+			t.Errorf("docker-compose.yml was not exported: %v", err)
+		}
+	})
+
 	t.Run("dashboard unknown subcommand rejected", func(t *testing.T) {
 		_, stderr, code := runCLI(t, "dashboard", "foobar")
 		if code != 1 {

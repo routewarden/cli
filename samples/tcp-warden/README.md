@@ -1,43 +1,42 @@
-# TCP Warden CLI Dashboard Integration Sample
+# TCP Warden Dashboard & Observability Integration Sample
 
-This sample demonstrates how to connect the **RouteWarden CLI Dashboard** to a running **TCP Warden** L4 proxy & firewall daemon.
-
----
-
-## Quick Start (Local)
-
-### 1. Start TCP Warden
-In a terminal, run TCP Warden with the sample configuration:
-```bash
-tcp-warden run --config tcp-warden.yaml
-```
-
-TCP Warden begins listening on:
-- `:9091` — Management & Metrics REST/SSE API
-- `:2222` — SSH Guard
-- `:5432` — PostgreSQL Bastion
-- `:2525` — SMTP Guard
-- `:7000` — Generic TCP Proxy
-
-### 2. Launch the RouteWarden Dashboard
-In another terminal, run `rwarden dashboard` with the `--tcp-warden` flag:
-```bash
-rwarden dashboard --tcp-warden http://127.0.0.1:9091
-```
-
-Open `http://localhost:9090` in your browser. The dashboard automatically displays:
-- **Services Explorer**: View active listeners, live concurrency, allowed vs blocked connections, and throughput.
-- **Ban Manager**: Inspect Layer 4 IP bans, add temporary or permanent manual bans, and unban IPs in real-time.
-- **Plugins Catalog**: Browse all 14 official RouteWarden protocol plugins, check compatibility, and copy CLI install commands.
-- **Live Feed**: Stream L4 security events alongside container HTTP events.
+This sample demonstrates how to run **TCP Warden** (Layer 4 proxy & firewall daemon) and visualize security events, blocked connections, and threat metrics in the **RouteWarden Observability Stack** (Grafana, Loki, and Alloy).
 
 ---
 
 ## Quick Start (Docker Compose)
 
-To run both services in Docker:
+### 1. Start TCP Warden Container
+Run TCP Warden with RouteWarden logging enabled:
 ```bash
 docker compose up -d
 ```
 
-Navigate to `http://localhost:9090`.
+The container automatically carries the label `routewarden.logs=true`, allowing Grafana Alloy to discover and ingest its structured JSON logs.
+
+### 2. Launch RouteWarden Observability Stack
+In your terminal, launch the dashboard:
+```bash
+rwarden dashboard
+```
+
+Open `http://localhost:3000` in your browser. The pre-configured **"RouteWarden — Threat & Security Intelligence"** dashboard displays:
+- **L4 Security Events**: Blocked connections, brute force attempts, port sweeps, and rate limit triggers.
+- **Service Breakdown**: Multi-protocol correlation for SSH, PostgreSQL, SMTP, DNS, and generic TCP/UDP.
+- **Top Offender IPs**: Top hostile client IPs attempting to breach your Layer 4 bastions, enriched with GeoIP flags.
+- **Live Event Feed**: Real-time log stream with severity badges and detailed connection metadata.
+
+---
+
+## Quick Start (Local Binary)
+
+If running TCP Warden locally as a host service:
+```bash
+# Start TCP Warden daemon
+tcp-warden run --config tcp-warden.yaml
+
+# In another terminal, launch the observability dashboard
+rwarden dashboard
+```
+
+Logs written to `/var/log/routewarden/*.log` or streamed over network UDP syslog (`127.0.0.1:1514`) are automatically collected by Alloy and displayed in Grafana.

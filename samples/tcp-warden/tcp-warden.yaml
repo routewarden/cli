@@ -2,13 +2,16 @@
 # RouteWarden Dashboard + TCP Warden Testing Sample
 # ==============================================================================
 # Use this configuration to test TCP Warden metrics, service inspection, and
-# banlist management inside the RouteWarden CLI dashboard:
+# banlist management inside the RouteWarden Security Dashboard:
 #
 # 1. Start tcp-warden:
 #      tcp-warden run --config tcp-warden.yaml
 #
-# 2. Start RouteWarden CLI dashboard pointing to tcp-warden:
-#      rwarden dashboard --tcp-warden http://127.0.0.1:9091
+# 2. Start RouteWarden Observability Dashboard:
+#      rwarden dashboard
+#
+# 3. View live security events and metrics at:
+#      http://localhost:3000
 # ==============================================================================
 
 version: "1.0"
