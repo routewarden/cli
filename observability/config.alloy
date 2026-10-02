@@ -122,6 +122,20 @@ loki.process "routewarden" {
     template = "{{ if .transport }}{{ .transport }}{{ else if or (eq .protocol \"dns\") (eq .protocol \"dht\") (eq .protocol \"udp\") }}udp{{ else }}tcp{{ end }}"
   }
 
+  // Drop any log lines that do not have a RouteWarden verdict or action
+  // This discards container startup logs, health check probes, and plain-text noise
+  stage.drop {
+    source     = "verdict"
+    expression = "^$"
+  }
+
+  // Default app label (only applied to retained RouteWarden events)
+  stage.static_labels {
+    values = {
+      app = "routewarden",
+    }
+  }
+
   // Normalize gateway (fallback to plugin if gateway is empty)
   stage.template {
     source   = "gateway"
