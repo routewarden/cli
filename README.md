@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 4.1.1
+# rwarden version 4.2.0
 ```
 
 ---
@@ -453,7 +453,7 @@ The stack auto-discovers and ingests structured JSON security logs from all your
 
 - **Grafana Alloy**: Log collector (OpenTelemetry successor to Promtail) that tails Docker container logs via `/var/run/docker.sock` and host logs, parses RouteWarden JSON fields, and extracts labels (`verdict`, `status_code`, `gateway`, `method`).
 - **Grafana Loki**: High-efficiency log aggregation engine indexing security events with full LogQL query capabilities.
-- **Grafana**: Pre-configured with the **"RouteWarden — Threat & Security Intelligence"** dashboard, pre-wired data sources, attack timelines, top attacked endpoints, offender IPs, and live security event feed.
+- **Grafana**: Pre-configured with the **"RouteWarden — Threat & Security Intelligence"** dashboard, pre-wired data sources, Geomap threat geography, malicious scanner profiling, L4 vs L7 multi-protocol convergence, automated alerting rules, and interactive SOC incident triage table with direct pivots to AbuseIPDB, VirusTotal, and Shodan.
 
 #### Quickstart with CLI
 
@@ -524,6 +524,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+      - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro

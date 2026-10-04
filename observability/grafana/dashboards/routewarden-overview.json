@@ -18,7 +18,44 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "\ud83d\udd0e Threat Hunter (Explore)",
+      "tooltip": "Open Grafana Explore pre-filtered for forensic investigation on blocked attacks",
+      "type": "link",
+      "url": "/explore?left=%7B%22datasource%22:%22Loki%22,%22queries%22:%5B%7B%22expr%22:%22%7Bapp=%5C%22routewarden%5C%22,%20verdict=%5C%22BLOCK%5C%22%7D%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "\ud83d\udee1\ufe0f AbuseIPDB Intelligence",
+      "tooltip": "External threat intelligence database for IP reputation check",
+      "type": "link",
+      "url": "https://www.abuseipdb.com"
+    },
+    {
+      "asDropdown": false,
+      "icon": "doc",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "\ud83d\udcd6 RouteWarden Docs",
+      "tooltip": "Official RouteWarden security and observability documentation",
+      "type": "link",
+      "url": "https://routewarden.github.io/cli/dashboard"
+    }
+  ],
   "liveNow": true,
   "panels": [
     {
@@ -30,7 +67,7 @@
         "y": 0
       },
       "id": 100,
-      "title": "🛡️ Key Security Metrics",
+      "title": "\ud83d\udee1\ufe0f Key Security Metrics",
       "type": "row"
     },
     {
@@ -91,7 +128,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} [$__range]))",
+          "expr": "sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} [$__range]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -153,7 +190,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({app=\"routewarden\"} [$__range]))",
+          "expr": "sum(count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__range]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -215,7 +252,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({app=\"routewarden\", verdict=~\"ALLOW|BYPASS\"} [$__range]))",
+          "expr": "sum(count_over_time({app=\"routewarden\", verdict=~\"ALLOW|BYPASS\", gateway=~\"$gateway\"} [$__range]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -251,7 +288,8 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percent",
+          "noValue": "0%"
         },
         "overrides": []
       },
@@ -284,7 +322,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "100 * sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} [$__range])) / sum(count_over_time({app=\"routewarden\"} [$__range]))",
+          "expr": "100 * sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} [$__range])) / sum(count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__range]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -301,7 +339,7 @@
         "y": 5
       },
       "id": 101,
-      "title": "📈 Attack Trends & Distributions",
+      "title": "\ud83d\udcc8 Attack Trends & Distributions",
       "type": "row"
     },
     {
@@ -424,7 +462,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "sum by (verdict) (count_over_time({app=\"routewarden\"} [$__interval]))",
+          "expr": "sum by (verdict) (count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__interval]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -481,7 +519,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "sum by (verdict) (count_over_time({app=\"routewarden\"} [$__range]))",
+          "expr": "sum by (verdict) (count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__range]))",
           "queryType": "range",
           "refId": "A"
         }
@@ -497,8 +535,567 @@
         "x": 0,
         "y": 14
       },
+      "id": 104,
+      "title": "\ud83c\udf0d Threat Geography & GeoIP Intelligence",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FADE2A",
+                "value": 10
+              },
+              {
+                "color": "#F2495C",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 15
+      },
+      "id": 20,
+      "options": {
+        "basemap": {
+          "config": {
+            "theme": "dark"
+          },
+          "name": "Layer 0",
+          "type": "carto"
+        },
+        "controls": {
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showDebug": false,
+          "showMeasure": false,
+          "showScale": false,
+          "showZoom": true
+        },
+        "layers": [
+          {
+            "config": {
+              "showLegend": true,
+              "style": {
+                "color": {
+                  "field": "Value",
+                  "fixed": "dark-red"
+                },
+                "opacity": 0.8,
+                "rotation": {
+                  "fixed": 0
+                },
+                "size": {
+                  "field": "Value",
+                  "fixed": 5,
+                  "max": 30,
+                  "min": 4
+                },
+                "symbol": {
+                  "fixed": "circle"
+                }
+              }
+            },
+            "location": {
+              "gazetteer": "public/gazetteer/countries.json",
+              "lookup": "country_code",
+              "mode": "lookup"
+            },
+            "name": "Attacks by Country",
+            "tooltip": true,
+            "type": "markers"
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        },
+        "view": {
+          "allLayers": true,
+          "id": "zero",
+          "lat": 20,
+          "lon": 0,
+          "zoom": 1.2
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (country_code) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", country_code!=\"\", country_code=~\"$country_code\", gateway=~\"$gateway\"} [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Global Attack Origins Map",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "type": "geomap"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 14,
+        "y": 15
+      },
+      "id": 21,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (country_code) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", country_code!=\"\", country_code=~\"$country_code\", gateway=~\"$gateway\"} [$__range])))",
+          "legendFormat": "{{country_code}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Attacking Countries",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 19,
+        "y": 15
+      },
+      "id": 22,
+      "options": {
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(8, sum by (country_code) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", country_code!=\"\", country_code=~\"$country_code\", gateway=~\"$gateway\"} [$__range])))",
+          "legendFormat": "{{country_code}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Country Threat Share",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 105,
+      "title": "\ud83d\udd00 Layer 4 & Layer 7 Multi-Protocol Convergence",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Blocked Events / Interval",
+            "axisPlacement": "auto",
+            "fillOpacity": 25,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Layer 7 HTTP (Web Gateways)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Layer 4 TCP (SSH / TCP Warden)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Layer 4 UDP (DNS / UDP Warden)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 25
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({app=\"routewarden\", gateway=~\"traefik|caddy|nginx\", verdict=\"BLOCK\"} [$__interval]))",
+          "legendFormat": "Layer 7 HTTP (Web Gateways)",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({app=\"routewarden\", gateway=\"tcp-warden\", transport=\"tcp\", verdict=\"BLOCK\"} [$__interval]))",
+          "legendFormat": "Layer 4 TCP (SSH / TCP Warden)",
+          "queryType": "range",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({app=\"routewarden\", transport=\"udp\", verdict=\"BLOCK\"} [$__interval]))",
+          "legendFormat": "Layer 4 UDP (DNS / UDP Warden)",
+          "queryType": "range",
+          "refId": "C"
+        }
+      ],
+      "title": "L4 vs L7 Threat Convergence Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 14,
+        "y": 25
+      },
+      "id": 41,
+      "options": {
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (protocol) (count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__range]))",
+          "legendFormat": "{{protocol}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Protocol Breakdown",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "purple",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 19,
+        "y": 25
+      },
+      "id": 42,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (transport) (count_over_time({app=\"routewarden\", gateway=~\"$gateway\"} [$__range]))",
+          "legendFormat": "{{transport}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Transport Split (TCP vs UDP)",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
       "id": 102,
-      "title": "🎯 Threat Analysis & Top Attack Targets",
+      "title": "\ud83c\udfaf Threat Analysis & Attack Vector Profiling",
       "type": "row"
     },
     {
@@ -520,7 +1117,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 15
+        "y": 34
       },
       "id": 7,
       "options": {
@@ -542,7 +1139,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (path) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} | json [$__range])))",
+          "expr": "topk(10, sum by (path) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} | json [$__range])))",
           "queryType": "range",
           "refId": "A"
         }
@@ -561,7 +1158,29 @@
             "fixedColor": "red",
             "mode": "fixed"
           },
-          "unit": "short"
+          "unit": "short",
+          "links": [
+            {
+              "targetBlank": true,
+              "title": "\ud83d\udd0d Lookup IP in AbuseIPDB",
+              "url": "https://www.abuseipdb.com/check/${__field.labels.client_ip}"
+            },
+            {
+              "targetBlank": true,
+              "title": "\ud83d\udee1\ufe0f Inspect IP on VirusTotal",
+              "url": "https://www.virustotal.com/gui/ip-address/${__field.labels.client_ip}"
+            },
+            {
+              "targetBlank": true,
+              "title": "\ud83c\udf10 Shodan Host Intelligence",
+              "url": "https://www.shodan.io/host/${__field.labels.client_ip}"
+            },
+            {
+              "targetBlank": true,
+              "title": "\ud83d\udd0e Forensic Threat Hunter (Loki)",
+              "url": "/explore?left=%7B%22datasource%22:%22Loki%22,%22queries%22:%5B%7B%22expr%22:%22%7Bapp=%5C%22routewarden%5C%22%7D%20%7C%20json%20%7C%20client_ip=%5C%22${__field.labels.client_ip}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D"
+            }
+          ]
         },
         "overrides": []
       },
@@ -569,7 +1188,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 15
+        "y": 34
       },
       "id": 8,
       "options": {
@@ -591,12 +1210,13 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (client_ip) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} | json [$__range])))",
+          "expr": "topk(10, sum by (client_ip, country_code) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\", country_code=~\"$country_code\"} | json [$__range])))",
           "queryType": "range",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{client_ip}} [{{country_code}}]"
         }
       ],
-      "title": "Top Offender IP Addresses",
+      "title": "Top Offender IP Addresses & GeoIP",
       "type": "bargauge"
     },
     {
@@ -618,7 +1238,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 15
+        "y": 34
       },
       "id": 9,
       "options": {
@@ -640,7 +1260,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (matched_pattern) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} | json [$__range])))",
+          "expr": "topk(10, sum by (matched_pattern) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} | json [$__range])))",
           "queryType": "range",
           "refId": "A"
         }
@@ -649,15 +1269,143 @@
       "type": "bargauge"
     },
     {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 42
+      },
+      "id": 30,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (user_agent) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} | json | user_agent != \"\" [$__range])))",
+          "legendFormat": "{{user_agent}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "\ud83e\udd16 Malicious User-Agents & Attack Scanners",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "id": 31,
+      "options": {
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (method) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", method!=\"\", gateway=~\"$gateway\"} [$__range]))",
+          "legendFormat": "{{method}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Attacked HTTP Methods & Verbs",
+      "type": "piechart"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 50
       },
       "id": 103,
-      "title": "📜 Live Security Event Feed",
+      "title": "\ud83d\udcdc Live Security Event Feed & Incident Triage",
       "type": "row"
     },
     {
@@ -665,11 +1413,278 @@
         "type": "loki",
         "uid": "Loki"
       },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "client_ip"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Offender IP (Click to Investigate)"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "\ud83d\udd0d Lookup in AbuseIPDB",
+                    "url": "https://www.abuseipdb.com/check/${__value.raw}"
+                  },
+                  {
+                    "targetBlank": true,
+                    "title": "\ud83d\udee1\ufe0f Inspect on VirusTotal",
+                    "url": "https://www.virustotal.com/gui/ip-address/${__value.raw}"
+                  },
+                  {
+                    "targetBlank": true,
+                    "title": "\ud83c\udf10 Shodan Host Intelligence",
+                    "url": "https://www.shodan.io/host/${__value.raw}"
+                  },
+                  {
+                    "targetBlank": true,
+                    "title": "\ud83d\udd0e Forensic Threat Hunter (Loki)",
+                    "url": "/explore?left=%7B%22datasource%22:%22Loki%22,%22queries%22:%5B%7B%22expr%22:%22%7Bapp=%5C%22routewarden%5C%22%7D%20%7C%20json%20%7C%20client_ip=%5C%22${__value.raw}%5C%22%22%7D%5D,%22range%22:%7B%22from%22:%22${__from}%22,%22to%22:%22${__to}%22%7D%7D"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verdict"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Verdict"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "BLOCK": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "ALLOW": {
+                        "color": "green",
+                        "index": 1
+                      },
+                      "THROTTLED": {
+                        "color": "yellow",
+                        "index": 2
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "country_code"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Country"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "gateway"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Gateway"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "protocol"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Protocol"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "method"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Method"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "path"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Target Path"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "response_mode"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Defense Action"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reason"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Block Reason"
+              }
+            ]
+          }
+        ]
+      },
       "gridPos": {
-        "h": 12,
+        "h": 10,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 51
+      },
+      "id": 50,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "{app=\"routewarden\", verdict=~\"$verdict\", gateway=~\"$gateway\"} | json",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "\ud83d\udea8 Interactive Threat Incident Triage Table (Click IP to Investigate)",
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "format": "json",
+            "keepTime": true,
+            "source": "Line"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "app": true,
+              "id": true,
+              "labels": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "country_code": 1,
+              "client_ip": 2,
+              "gateway": 3,
+              "protocol": 4,
+              "method": 5,
+              "path": 6,
+              "verdict": 7,
+              "response_mode": 8,
+              "reason": 9
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 61
       },
       "id": 10,
       "options": {
@@ -689,7 +1704,7 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "{app=\"routewarden\"}",
+          "expr": "{app=\"routewarden\", verdict=~\"$verdict\", gateway=~\"$gateway\"}",
           "queryType": "range",
           "refId": "A"
         }
@@ -704,7 +1719,14 @@
     "routewarden",
     "waf",
     "security",
-    "loki"
+    "loki",
+    "geoip",
+    "layer4",
+    "scanners",
+    "alerting",
+    "soc",
+    "triage",
+    "threat-intel"
   ],
   "templating": {
     "list": [
@@ -722,7 +1744,11 @@
         "includeAll": true,
         "name": "gateway",
         "query": "label_values(gateway)",
-        "type": "query"
+        "type": "query",
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 1,
+        "label": "Gateway"
       },
       {
         "current": {
@@ -738,6 +1764,73 @@
         "includeAll": true,
         "name": "verdict",
         "query": "label_values(verdict)",
+        "type": "query",
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 1,
+        "label": "Verdict"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "definition": "label_values(country_code)",
+        "includeAll": true,
+        "label": "Country",
+        "multi": true,
+        "name": "country_code",
+        "query": "label_values(country_code)",
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "definition": "label_values(protocol)",
+        "includeAll": true,
+        "label": "Protocol",
+        "multi": true,
+        "name": "protocol",
+        "query": "label_values(protocol)",
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "Loki"
+        },
+        "definition": "label_values(transport)",
+        "includeAll": true,
+        "label": "Transport",
+        "multi": true,
+        "name": "transport",
+        "query": "label_values(transport)",
+        "refresh": 1,
+        "regex": "",
         "type": "query"
       }
     ]
@@ -756,7 +1849,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "RouteWarden — Threat & Security Intelligence",
+  "title": "RouteWarden \u2014 Threat & Security Intelligence",
   "uid": "routewarden-overview",
   "version": 1
 }
