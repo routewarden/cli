@@ -1,7 +1,7 @@
 services:
   loki:
     image: grafana/loki:3.0.0
-    container_name: routewarden-loki
+    container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/loki-config.yaml
     ports:
@@ -10,11 +10,11 @@ services:
       - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
       - loki-data:/loki
     networks:
-      - routewarden-observability
+      - routewarden
 
   alloy:
     image: grafana/alloy:v1.1.0
-    container_name: routewarden-alloy
+    container_name: alloy
     restart: unless-stopped
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     ports:
@@ -27,11 +27,11 @@ services:
     depends_on:
       - loki
     networks:
-      - routewarden-observability
+      - routewarden
 
   grafana:
     image: grafana/grafana:11.0.0
-    container_name: routewarden-grafana
+    container_name: grafana
     restart: unless-stopped
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
@@ -42,6 +42,8 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED:-true}
       - GF_AUTH_ANONYMOUS_ORG_ROLE=${GF_AUTH_ANONYMOUS_ORG_ROLE:-Viewer}
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=${GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH:-/var/lib/grafana/dashboards/routewarden-overview.json}
+      - GF_FEATURE_TOGGLES_ENABLE=${GF_FEATURE_TOGGLES_ENABLE:-publicDashboards}
+      - GF_SECURITY_ALLOW_EMBEDDING=${GF_SECURITY_ALLOW_EMBEDDING:-true}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -49,12 +51,12 @@ services:
     depends_on:
       - loki
     networks:
-      - routewarden-observability
+      - routewarden
 
 volumes:
   loki-data:
   grafana-data:
 
 networks:
-  routewarden-observability:
-    name: routewarden-observability
+  routewarden:
+    name: routewarden
