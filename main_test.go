@@ -631,6 +631,35 @@ func TestCLI_GenerateCommand(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("tcp-warden target generation via stdin", func(t *testing.T) {
+		tcpConfig := `{
+			"enabled": true,
+			"allowedIps": ["10.0.0.0/8", "192.168.1.1"],
+			"response": {
+				"mode": "drop"
+			}
+		}`
+		cmd := exec.Command(binaryPath, "generate", "--target", "tcp-warden", "--config", "-")
+		cmd.Stdin = strings.NewReader(tcpConfig)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected generate tcp-warden to succeed, got %v: %s", err, string(out))
+		}
+		strOut := string(out)
+		if !strings.Contains(strOut, "services:") {
+			t.Errorf("missing 'services:' in tcp-warden YAML:\n%s", strOut)
+		}
+		if !strings.Contains(strOut, "global:") {
+			t.Errorf("missing 'global:' in tcp-warden YAML:\n%s", strOut)
+		}
+		if !strings.Contains(strOut, "ip_filter:") {
+			t.Errorf("missing 'ip_filter:' in tcp-warden YAML:\n%s", strOut)
+		}
+		if !strings.Contains(strOut, "10.0.0.0/8") {
+			t.Errorf("missing allowed IP 10.0.0.0/8 in tcp-warden YAML:\n%s", strOut)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,8 +1521,46 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
 			t.Errorf("expected success message, got: %s", stdout)
 		}
-		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
+		composePath := filepath.Join(exportDir, "docker-compose.yml")
+		composeBytes, err := os.ReadFile(composePath)
+		if err != nil {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
+		} else {
+			composeStr := string(composeBytes)
+			if !strings.Contains(composeStr, "publicDashboards") {
+				t.Errorf("expected publicDashboards in exported docker-compose.yml")
+			}
+			if !strings.Contains(composeStr, "GF_SECURITY_ALLOW_EMBEDDING") {
+				t.Errorf("expected GF_SECURITY_ALLOW_EMBEDDING in exported docker-compose.yml")
+			}
+		}
+
+		alertingPath := filepath.Join(exportDir, "grafana", "provisioning", "alerting", "alerting.yaml")
+		alertingBytes, err := os.ReadFile(alertingPath)
+		if err != nil {
+			t.Errorf("alerting.yaml was not exported: %v", err)
+		} else {
+			alertingStr := string(alertingBytes)
+			if !strings.Contains(alertingStr, "rw-ddos-attack-spike") {
+				t.Errorf("expected rw-ddos-attack-spike in exported alerting.yaml")
+			}
+			if !strings.Contains(alertingStr, "routewarden-webhook") {
+				t.Errorf("expected routewarden-webhook in exported alerting.yaml")
+			}
+		}
+
+		dashPath := filepath.Join(exportDir, "grafana", "dashboards", "routewarden-overview.json")
+		dashBytes, err := os.ReadFile(dashPath)
+		if err != nil {
+			t.Errorf("routewarden-overview.json was not exported: %v", err)
+		} else {
+			dashStr := string(dashBytes)
+			if !strings.Contains(dashStr, "Interactive Threat Incident Triage Table") {
+				t.Errorf("expected incident triage table in exported dashboard")
+			}
+			if !strings.Contains(dashStr, "Threat Geography & GeoIP Intelligence") {
+				t.Errorf("expected threat geography in exported dashboard")
+			}
 		}
 	})
 

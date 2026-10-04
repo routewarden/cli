@@ -1,0 +1,249 @@
+apiVersion: 1
+
+# ------------------------------------------------------------------------------
+# 1. Contact Points (Notification Destinations)
+# ------------------------------------------------------------------------------
+contactPoints:
+  - orgId: 1
+    name: "RouteWarden Security Team"
+    receivers:
+      - uid: "routewarden-webhook"
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: "${ALERT_WEBHOOK_URL:-http://host.docker.internal:8080/alerts}"
+          httpMethod: "POST"
+        title: "RouteWarden Threat Alert - Webhook"
+
+      - uid: "routewarden-slack"
+        type: slack
+        disableResolveMessage: false
+        settings:
+          recipient: "#security-alerts"
+          url: "${SLACK_WEBHOOK_URL:-}"
+          title: "🚨 RouteWarden Threat Alert: {{ .CommonLabels.alertname }}"
+          text: |
+            *Alert:* {{ .CommonLabels.alertname }}
+            *Severity:* {{ .CommonLabels.severity }}
+            *Summary:* {{ .CommonAnnotations.summary }}
+            *Description:* {{ .CommonAnnotations.description }}
+            *Gateway:* {{ .CommonLabels.gateway }}
+
+      - uid: "routewarden-discord"
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: "${DISCORD_WEBHOOK_URL:-}"
+          message: "🛡️ **RouteWarden Alert: {{ .CommonLabels.alertname }}** [{{ .CommonLabels.severity }}]\n{{ .CommonAnnotations.description }}"
+
+      - uid: "routewarden-pagerduty"
+        type: pagerduty
+        disableResolveMessage: false
+        settings:
+          integrationKey: "${PAGERDUTY_KEY:-}"
+          severity: "{{ .CommonLabels.severity }}"
+          summary: "RouteWarden Security Alert: {{ .CommonLabels.alertname }}"
+
+# ------------------------------------------------------------------------------
+# 2. Notification Routing Policies
+# ------------------------------------------------------------------------------
+policies:
+  - orgId: 1
+    receiver: "RouteWarden Security Team"
+    group_by:
+      - "alertname"
+      - "gateway"
+      - "severity"
+    group_wait: 10s
+    group_interval: 1m
+    repeat_interval: 1h
+    routes:
+      - receiver: "RouteWarden Security Team"
+        matchers:
+          - "severity = critical"
+        continue: true
+
+# ------------------------------------------------------------------------------
+# 3. Threat Alert Rule Groups
+# ------------------------------------------------------------------------------
+groups:
+  - orgId: 1
+    name: "RouteWarden Threat & Security Alerts"
+    folder: "RouteWarden"
+    interval: "1m"
+    rules:
+      - uid: "rw-ddos-attack-spike"
+        title: "RouteWarden — Hostile Attack Rate Spike (DDoS)"
+        condition: "B"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "Loki"
+            model:
+              editorMode: "code"
+              expr: "sum(rate({app=\"routewarden\", verdict=\"BLOCK\"}[5m]))"
+              queryType: "range"
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 10
+                    type: "gt"
+                  operator:
+                    type: "and"
+                  query:
+                    params:
+                      - "A"
+                  reducer:
+                    params: []
+                    type: "last"
+                  type: "query"
+              expression: "A"
+              type: "threshold"
+              refId: "B"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "1m"
+        annotations:
+          summary: "Surge in blocked attacks detected across RouteWarden gateways"
+          description: "Attack block rate has exceeded 10 req/s over the last 5 minutes. Possible brute-force, web crawler scan, or DDoS campaign."
+        labels:
+          severity: "warning"
+          team: "secops"
+
+      - uid: "rw-sensitive-path-probe"
+        title: "RouteWarden — Critical Sensitive File Probing (.env / .git / .aws)"
+        condition: "B"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: "Loki"
+            model:
+              editorMode: "code"
+              expr: "sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} | json | path =~ \"(?i).*(/\\\\.env|/\\\\.git|/\\\\.aws|/actuator).*\" [2m]))"
+              queryType: "range"
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: "gt"
+                  operator:
+                    type: "and"
+                  query:
+                    params:
+                      - "A"
+                  reducer:
+                    params: []
+                    type: "last"
+                  type: "query"
+              expression: "A"
+              type: "threshold"
+              refId: "B"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "0s"
+        annotations:
+          summary: "Adversary probing critical environment files, source control, or cloud credentials"
+          description: "One or more requests attempted to access high-risk files (/.env, /.git, /.aws/credentials). Intercepted and blocked by RouteWarden."
+        labels:
+          severity: "critical"
+          team: "secops"
+
+      - uid: "rw-l4-brute-force"
+        title: "RouteWarden — Layer 4 Brute-Force & SSH Bastion Attack Surge"
+        condition: "B"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 180
+              to: 0
+            datasourceUid: "Loki"
+            model:
+              editorMode: "code"
+              expr: "sum(count_over_time({app=\"routewarden\", gateway=\"tcp-warden\", verdict=\"BLOCK\"} [3m]))"
+              queryType: "range"
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 15
+                    type: "gt"
+                  operator:
+                    type: "and"
+                  query:
+                    params:
+                      - "A"
+                  reducer:
+                    params: []
+                    type: "last"
+                  type: "query"
+              expression: "A"
+              type: "threshold"
+              refId: "B"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "1m"
+        annotations:
+          summary: "Layer 4 TCP/UDP attack surge or SSH authentication brute-force detected"
+          description: "More than 15 Layer 4 connection drops or bans recorded in 3 minutes by tcp-warden."
+        labels:
+          severity: "high"
+          team: "netsec"
+
+      - uid: "rw-scanner-nuclei-sqlmap"
+        title: "RouteWarden — Active Exploitation Tool Detected (sqlmap / Nuclei / Nikto)"
+        condition: "B"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: "Loki"
+            model:
+              editorMode: "code"
+              expr: "sum(count_over_time({app=\"routewarden\", verdict=\"BLOCK\"} | json | user_agent =~ \"(?i).*(sqlmap|nuclei|nikto|masscan|zgrab).*\" [2m]))"
+              queryType: "range"
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: "gt"
+                  operator:
+                    type: "and"
+                  query:
+                    params:
+                      - "A"
+                  reducer:
+                    params: []
+                    type: "last"
+                  type: "query"
+              expression: "A"
+              type: "threshold"
+              refId: "B"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "0s"
+        annotations:
+          summary: "Offensive security scanner or automated exploit tool targeted RouteWarden"
+          description: "Traffic originating from automated attack toolkits (sqlmap, nuclei, nikto, masscan) blocked by RouteWarden defense engine."
+        labels:
+          severity: "high"
+          team: "secops"
