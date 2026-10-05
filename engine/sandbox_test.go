@@ -14,7 +14,7 @@ import (
 
 func TestSandbox_GenerateSandboxConfig(t *testing.T) {
 	cfg := engine.CreateConfig()
-	cfg.PathPatterns = []string{"^/admin/.*$"}
+	cfg.BlockPatterns = []string{"^/admin/.*$"}
 	cfg.AllowPatterns = []string{"^/admin/public$"}
 	cfg.AllowedIPs = []string{"192.168.1.10"}
 	cfg.Methods = []string{"GET", "POST"}

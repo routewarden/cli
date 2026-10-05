@@ -223,18 +223,6 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("Top-level action alias is normalized into Response.Mode", func(t *testing.T) {
-		cfg := engine.CreateConfig()
-		cfg.Action = "silentDrop"
-		cfg.Response = nil
-		eng, err := engine.NewEngine(cfg)
-		if err != nil {
-			t.Fatalf("expected NewEngine to succeed with top-level action, got: %v", err)
-		}
-		if eng.Config.Response.Mode != "silentDrop" {
-			t.Fatalf("expected Response.Mode to be 'silentDrop', got %q", eng.Config.Response.Mode)
-		}
-	})
 
 	t.Run("All valid response.mode options compile and validate", func(t *testing.T) {
 		validModes := []struct {
@@ -647,7 +635,7 @@ func TestEngine_GenerateWithCheckBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("caddy generate failed: %v", err)
 	}
-	if !strings.Contains(caddyOut, "check_body") || !strings.Contains(caddyOut, "check_body_max_bytes 32768") || !strings.Contains(caddyOut, "body_pattern \"(?i)grant_type=password\"") {
+	if !strings.Contains(caddyOut, "check_body") || !strings.Contains(caddyOut, "check_body_max_bytes 32768") || !strings.Contains(caddyOut, "check_body_patterns \"(?i)grant_type=password\"") {
 		t.Errorf("caddy missing check_body configurations: %s", caddyOut)
 	}
 
@@ -656,7 +644,7 @@ func TestEngine_GenerateWithCheckBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nginx generate failed: %v", err)
 	}
-	if !strings.Contains(nginxOut, "check_body = true") || !strings.Contains(nginxOut, "check_body_max_bytes = 32768") || !strings.Contains(nginxOut, "body_patterns = {") {
+	if !strings.Contains(nginxOut, "check_body = true") || !strings.Contains(nginxOut, "check_body_max_bytes = 32768") || !strings.Contains(nginxOut, "check_body_patterns = {") {
 		t.Errorf("nginx missing check_body configurations: %s", nginxOut)
 	}
 }

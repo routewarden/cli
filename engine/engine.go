@@ -71,12 +71,8 @@ type ResponseConfig struct {
 // Config holds the RouteWarden configuration.
 type Config struct {
 	Enabled                    bool            `json:"enabled,omitempty"`
-	Disable                    bool            `json:"disable,omitempty"`
 	EnableDefaultPatterns      bool            `json:"enableDefaultPatterns,omitempty"`
-	DisableDefaultPatterns      bool            `json:"disableDefaultPatterns,omitempty"`
 	EnableDefaultAllowPatterns bool            `json:"enableDefaultAllowPatterns,omitempty"`
-	DisableDefaultAllowPatterns bool            `json:"disableDefaultAllowPatterns,omitempty"`
-	PathPatterns               []string        `json:"pathPatterns,omitempty"`
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
@@ -84,7 +80,6 @@ type Config struct {
 	Methods                    []string        `json:"methods,omitempty"`
 	StatusCode                 int             `json:"statusCode,omitempty"`
 	CustomResponseText         string          `json:"customResponseText,omitempty"`
-	Action                     string          `json:"action,omitempty"`
 	Mode                       string          `json:"mode,omitempty"`
 	CheckQuery                 bool            `json:"checkQuery,omitempty"`
 	CheckHeaders               []string        `json:"checkHeaders,omitempty"`
@@ -102,7 +97,6 @@ func CreateConfig() *Config {
 		Enabled:                    true,
 		EnableDefaultPatterns:      true,
 		EnableDefaultAllowPatterns: true,
-		PathPatterns:               []string{},
 		BlockPatterns:              []string{},
 		AllowPatterns:              []string{},
 		AllowedIPs:                 []string{},
@@ -110,6 +104,7 @@ func CreateConfig() *Config {
 		Methods:                    []string{"GET"},
 		StatusCode:                 403,
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
+		Mode:                       "text",
 		CheckQuery:                 false,
 		CheckHeaders:               []string{},
 		CheckBody:                  false,
@@ -226,15 +221,6 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	if cfg == nil {
 		cfg = CreateConfig()
 	}
-	if cfg.Disable {
-		cfg.Enabled = false
-	}
-	if cfg.DisableDefaultPatterns {
-		cfg.EnableDefaultPatterns = false
-	}
-	if cfg.DisableDefaultAllowPatterns {
-		cfg.EnableDefaultAllowPatterns = false
-	}
 
 	methodsMap := make(map[string]struct{})
 	if len(cfg.Methods) == 0 {
@@ -255,7 +241,6 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	if cfg.EnableDefaultPatterns {
 		blockPatterns = append(blockPatterns, DefaultBlockPatterns...)
 	}
-	blockPatterns = append(blockPatterns, cfg.PathPatterns...)
 	blockPatterns = append(blockPatterns, cfg.BlockPatterns...)
 
 	compiledBlock := make([]*regexp.Regexp, 0, len(blockPatterns))
@@ -349,15 +334,13 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		return nil, fmt.Errorf("invalid statusCode %d: must be between 100 and 599", cfg.StatusCode)
 	}
 
-	// Resolve top-level Mode or Action aliases into cfg.Response.Mode
+	// Resolve top-level Mode into cfg.Response.Mode
 	if cfg.Response == nil {
 		cfg.Response = &ResponseConfig{Mode: "text"}
 	}
 	if strings.TrimSpace(cfg.Response.Mode) == "" || cfg.Response.Mode == "text" {
 		if strings.TrimSpace(cfg.Mode) != "" {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Mode)
-		} else if strings.TrimSpace(cfg.Action) != "" {
-			cfg.Response.Mode = strings.TrimSpace(cfg.Action)
 		} else if cfg.Response.Mode == "" {
 			cfg.Response.Mode = "text"
 		}
@@ -739,8 +722,6 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 	if mode == "text" {
 		if strings.TrimSpace(cfg.Mode) != "" {
 			mode = strings.TrimSpace(cfg.Mode)
-		} else if strings.TrimSpace(cfg.Action) != "" {
-			mode = strings.TrimSpace(cfg.Action)
 		}
 	}
 
@@ -766,11 +747,9 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		b.WriteString("          securityLog: false\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		b.WriteString("          pathPatterns:\n")
-		for _, p := range allBlocks {
+	if len(cfg.BlockPatterns) > 0 {
+		b.WriteString("          blockPatterns:\n")
+		for _, p := range cfg.BlockPatterns {
 			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(p, "'", "''"))
 		}
 	}
@@ -898,11 +877,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		b.WriteString("  securityLog = false\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		b.WriteString("  pathPatterns = [")
-		for i, p := range allBlocks {
+	if len(cfg.BlockPatterns) > 0 {
+		b.WriteString("  blockPatterns = [")
+		for i, p := range cfg.BlockPatterns {
 			if i > 0 {
 				b.WriteString(", ")
 			}
@@ -1058,10 +1035,8 @@ func (cfg *Config) GenerateTraefikLabels() string {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.securityLog=false\"\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ","))
+	if len(cfg.BlockPatterns) > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.blockPatterns=%s\"\n", strings.Join(cfg.BlockPatterns, ","))
 	}
 	if len(cfg.AllowPatterns) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ","))
@@ -1170,18 +1145,16 @@ func (cfg *Config) GenerateCaddyfile() string {
 		fmt.Fprintf(&b, "    check_body_max_bytes %d\n", cfg.CheckBodyMaxBytes)
 	}
 	for _, p := range cfg.CheckBodyPatterns {
-		fmt.Fprintf(&b, "    body_pattern %q\n", p)
+		fmt.Fprintf(&b, "    check_body_patterns %q\n", p)
 	}
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	for _, p := range allBlocks {
-		fmt.Fprintf(&b, "    block_pattern %q\n", p)
+	for _, p := range cfg.BlockPatterns {
+		fmt.Fprintf(&b, "    block_patterns %q\n", p)
 	}
 	for _, a := range cfg.AllowPatterns {
-		fmt.Fprintf(&b, "    allow_pattern %q\n", a)
+		fmt.Fprintf(&b, "    allow_patterns %q\n", a)
 	}
 	for _, ip := range cfg.AllowedIPs {
-		fmt.Fprintf(&b, "    allowed_ip %s\n", ip)
+		fmt.Fprintf(&b, "    allowed_ips %s\n", ip)
 	}
 	for _, proxy := range cfg.TrustedProxies {
 		fmt.Fprintf(&b, "    trusted_proxies %s\n", proxy)
@@ -1202,7 +1175,7 @@ func (cfg *Config) GenerateCaddyfile() string {
 			fmt.Fprintf(&b, "        mode %s\n", mode)
 		}
 		if status != 0 {
-			fmt.Fprintf(&b, "        status %d\n", status)
+			fmt.Fprintf(&b, "        status_code %d\n", status)
 		}
 		if body != "" {
 			fmt.Fprintf(&b, "        body %q\n", body)
@@ -1270,11 +1243,9 @@ func (cfg *Config) GenerateNginxLua() string {
 	if !cfg.SecurityLog {
 		b.WriteString("    security_log = false,\n")
 	}
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
+	if len(cfg.BlockPatterns) > 0 {
 		b.WriteString("    block_patterns = {\n")
-		for _, p := range allBlocks {
+		for _, p := range cfg.BlockPatterns {
 			fmt.Fprintf(&b, "        %q,\n", p)
 		}
 		b.WriteString("    },\n")
@@ -1324,7 +1295,7 @@ func (cfg *Config) GenerateNginxLua() string {
 		fmt.Fprintf(&b, "    check_body_max_bytes = %d,\n", cfg.CheckBodyMaxBytes)
 	}
 	if len(cfg.CheckBodyPatterns) > 0 {
-		b.WriteString("    body_patterns = {\n")
+		b.WriteString("    check_body_patterns = {\n")
 		for _, p := range cfg.CheckBodyPatterns {
 			fmt.Fprintf(&b, "        %q,\n", p)
 		}

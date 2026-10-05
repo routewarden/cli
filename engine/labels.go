@@ -141,25 +141,17 @@ func normalizePropKey(prop string) string {
 	switch lower {
 	case "enabled":
 		return "enabled"
-	case "disable":
-		return "disable"
 	case "enabledefaultpatterns":
 		return "enableDefaultPatterns"
-	case "disabledefaultpatterns":
-		return "disableDefaultPatterns"
 	case "enabledefaultallowpatterns":
 		return "enableDefaultAllowPatterns"
-	case "disabledefaultallowpatterns":
-		return "disableDefaultAllowPatterns"
-	case "pathpatterns":
-		return "pathPatterns"
 	case "blockpatterns":
 		return "blockPatterns"
 	case "allowpatterns":
 		return "allowPatterns"
 	case "allowedips":
 		return "allowedIps"
-	case "trustedproxies", "trusted_proxies":
+	case "trustedproxies":
 		return "trustedProxies"
 	case "methods":
 		return "methods"
@@ -173,23 +165,19 @@ func normalizePropKey(prop string) string {
 		return "checkBodyMaxBytes"
 	case "checkbodypatterns":
 		return "checkBodyPatterns"
-	case "statuscode", "status":
+	case "statuscode":
 		return "statusCode"
-	case "customresponsetext":
-		return "customResponseText"
 	case "debug":
 		return "debug"
 	case "securitylog":
 		return "securityLog"
-	case "action":
-		return "action"
 	case "mode":
 		return "mode"
 	default:
-		if after, ok :=strings.CutPrefix(lower, "response."); ok  {
+		if after, ok := strings.CutPrefix(lower, "response."); ok {
 			sub := after
 			switch sub {
-			case "statuscode", "status":
+			case "statuscode":
 				return "response.statusCode"
 			case "mode":
 				return "response.mode"
@@ -287,28 +275,14 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		if val, ok := props["enabled"]; ok {
 			enabled = normalizeBool(val, true)
 		}
-		if val, ok := props["disable"]; ok && normalizeBool(val, false) {
-			enabled = false
-		}
 		fmt.Fprintf(&b, "          enabled: %t\n", enabled)
 
-		enableDefault := true
 		if val, ok := props["enableDefaultPatterns"]; ok {
-			enableDefault = normalizeBool(val, true)
+			fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", normalizeBool(val, true))
 		}
-		if val, ok := props["disableDefaultPatterns"]; ok && normalizeBool(val, false) {
-			enableDefault = false
-		}
-		fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", enableDefault)
-
-		enableAllow := true
 		if val, ok := props["enableDefaultAllowPatterns"]; ok {
-			enableAllow = normalizeBool(val, true)
+			fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", normalizeBool(val, true))
 		}
-		if val, ok := props["disableDefaultAllowPatterns"]; ok && normalizeBool(val, false) {
-			enableAllow = false
-		}
-		fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", enableAllow)
 		if val, ok := props["checkQuery"]; ok {
 			fmt.Fprintf(&b, "          checkQuery: %t\n", normalizeBool(val, false))
 		}
@@ -319,7 +293,6 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 			fmt.Fprintf(&b, "          securityLog: %t\n", normalizeBool(val, false))
 		}
 
-		writeListProp(&b, "pathPatterns", props["pathPatterns"])
 		writeListProp(&b, "blockPatterns", props["blockPatterns"])
 		writeListProp(&b, "allowPatterns", props["allowPatterns"])
 		writeListProp(&b, "allowedIps", props["allowedIps"])
@@ -344,7 +317,7 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 				break
 			}
 		}
-		if !hasResponse && (props["statusCode"] != "" || props["mode"] != "" || props["action"] != "" || props["customResponseText"] != "") {
+		if !hasResponse && (props["statusCode"] != "" || props["mode"] != "") {
 			hasResponse = true
 		}
 		if hasResponse {
@@ -352,9 +325,6 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 			mode := props["response.mode"]
 			if mode == "" {
 				mode = props["mode"]
-			}
-			if mode == "" {
-				mode = props["action"]
 			}
 			if mode != "" {
 				fmt.Fprintf(&b, "            mode: %s\n", mode)
@@ -367,9 +337,6 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 				fmt.Fprintf(&b, "            statusCode: %s\n", status)
 			}
 			body := props["response.body"]
-			if body == "" {
-				body = props["customResponseText"]
-			}
 			if body != "" {
 				fmt.Fprintf(&b, "            body: %q\n", body)
 			}

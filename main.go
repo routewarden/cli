@@ -744,7 +744,7 @@ func handleValidate(args []string) {
 	fmt.Printf("  - Default patterns enabled: %t\n", cfg.EnableDefaultPatterns)
 	fmt.Printf("  - Default allow patterns enabled: %t\n", cfg.EnableDefaultAllowPatterns)
 	fmt.Printf("  - Methods: %v\n", cfg.Methods)
-	customBlockCount := len(cfg.PathPatterns) + len(cfg.BlockPatterns)
+	customBlockCount := len(cfg.BlockPatterns)
 	if customBlockCount > 0 {
 		fmt.Printf("  - Custom block patterns: %d\n", customBlockCount)
 	}

@@ -20,11 +20,6 @@
       "default": true,
       "description": "Enable built-in whitelist rules (/robots.txt, /sitemap*.xml, /ads.txt, /security.txt, /.well-known/*)."
     },
-    "pathPatterns": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Custom regular expressions for paths to block (synonym for blockPatterns)."
-    },
     "blockPatterns": {
       "type": "array",
       "items": { "type": "string" },
@@ -105,10 +100,6 @@
         "infiniteStream",
         "xml"
       ],
-      "description": "Shorthand alias for response.mode action."
-    },
-    "action": {
-      "type": "string",
       "description": "Shorthand alias for response.mode action."
     },
     "debug": {

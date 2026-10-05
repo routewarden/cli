@@ -246,7 +246,7 @@ func TestCLI_GenerateCommand(t *testing.T) {
 	baseConfig := `{
 		"enabled": true,
 		"enableDefaultPatterns": true,
-		"pathPatterns": ["(?i)^/admin(/.*)?$"],
+		"blockPatterns": ["(?i)^/admin(/.*)?$"],
 		"allowPatterns": ["(?i)^/admin/public(/.*)?$"],
 		"allowedIps": ["192.168.1.1", "10.0.0.0/8"],
 		"methods": ["GET", "POST"],
@@ -269,8 +269,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "traefik.http.middlewares.warden.plugin.routewarden.enabled=true") {
 			t.Errorf("missing warden middleware label:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns=(?i)^/admin(/.*)?$") {
-			t.Errorf("missing pathPatterns in traefik-labels output:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns=(?i)^/admin(/.*)?$") {
+			t.Errorf("missing blockPatterns in traefik-labels output:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "allowPatterns=(?i)^/admin/public(/.*)?$") {
 			t.Errorf("missing allowPatterns in traefik-labels output:\n%s", strOut)
@@ -320,8 +320,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "enableDefaultPatterns: true") {
 			t.Errorf("missing 'enableDefaultPatterns: true' in traefik YAML:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns:") {
-			t.Errorf("missing 'pathPatterns:' in traefik YAML:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns:") {
+			t.Errorf("missing 'blockPatterns:' in traefik YAML:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "allowPatterns:") {
 			t.Errorf("missing 'allowPatterns:' in traefik YAML:\n%s", strOut)
@@ -354,14 +354,14 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "routewarden {") {
 			t.Errorf("missing 'routewarden {' block in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "block_pattern") {
-			t.Errorf("missing 'block_pattern' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "block_patterns") {
+			t.Errorf("missing 'block_patterns' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "allow_pattern") {
-			t.Errorf("missing 'allow_pattern' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "allow_patterns") {
+			t.Errorf("missing 'allow_patterns' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "allowed_ip 192.168.1.1") {
-			t.Errorf("missing 'allowed_ip' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "allowed_ips 192.168.1.1") {
+			t.Errorf("missing 'allowed_ips' in Caddyfile:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "methods GET POST") {
 			t.Errorf("missing 'methods GET POST' in Caddyfile:\n%s", strOut)
@@ -375,8 +375,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "mode json") {
 			t.Errorf("missing 'mode json' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "status 403") {
-			t.Errorf("missing 'status 403' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "status_code 403") {
+			t.Errorf("missing 'status_code 403' in Caddyfile:\n%s", strOut)
 		}
 	})
 
@@ -446,8 +446,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "enabled = true") {
 			t.Errorf("missing 'enabled = true' in TOML:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns = [") {
-			t.Errorf("missing 'pathPatterns = [' in TOML:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns = [") {
+			t.Errorf("missing 'blockPatterns = [' in TOML:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "[http.middlewares.routewarden.plugin.routewarden.response]") {
 			t.Errorf("missing TOML response section:\n%s", strOut)
@@ -545,7 +545,7 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		// Single quotes in patterns must be doubled in YAML single-quoted scalars
 		configWithQuote := `{
 			"enabled": true,
-			"pathPatterns": ["(?i)^/it's-admin(/.*)?$"]
+			"blockPatterns": ["(?i)^/it's-admin(/.*)?$"]
 		}`
 		cmd := exec.Command(binaryPath, "generate", "--target", "traefik", "--config", "-")
 		cmd.Stdin = strings.NewReader(configWithQuote)
@@ -584,10 +584,10 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple pathPatterns and allowPatterns all appear", func(t *testing.T) {
+	t.Run("multiple blockPatterns and allowPatterns all appear", func(t *testing.T) {
 		multiPatternConfig := `{
 			"enabled": true,
-			"pathPatterns": ["^/secret/.*$", "^/private/.*$"],
+			"blockPatterns": ["^/secret/.*$", "^/private/.*$"],
 			"allowPatterns": ["^/public/.*$", "^/assets/.*$"]
 		}`
 		for _, target := range []string{"traefik", "traefik-labels", "caddy", "nginx"} {
@@ -1078,7 +1078,7 @@ func TestCLI_SandboxCommand(t *testing.T) {
 		tomlPath := filepath.Join(tmpDir, "traefik.toml")
 		tomlContent := `[http.middlewares.shield.plugin.routewarden]
   enabled = true
-  pathPatterns = ["(?i)^/admin.*$"]
+  blockPatterns = ["(?i)^/admin.*$"]
 `
 		if err := os.WriteFile(tomlPath, []byte(tomlContent), 0644); err != nil {
 			t.Fatal(err)

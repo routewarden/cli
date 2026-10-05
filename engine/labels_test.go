@@ -81,7 +81,7 @@ func TestLabels_ParseAndConvert(t *testing.T) {
       - "traefik.enable=true"
       - "traefik.http.middlewares.my-shield.plugin.routewarden.enabled=true"
       - "traefik.http.middlewares.my-shield.plugin.routewarden.enableDefaultPatterns=true"
-      - "traefik.http.middlewares.my-shield.plugin.routewarden.pathPatterns=(?i)^/api/auth/login.*$,(?i)^/admin.*$"
+      - "traefik.http.middlewares.my-shield.plugin.routewarden.blockPatterns=(?i)^/api/auth/login.*$,(?i)^/admin.*$"
       - "traefik.http.middlewares.my-shield.plugin.routewarden.allowedIps=10.0.0.0/8,192.168.1.0/24"
       - "traefik.http.middlewares.my-shield.plugin.routewarden.response.mode=json"
       - "traefik.http.middlewares.my-shield.plugin.routewarden.response.statusCode=404"
