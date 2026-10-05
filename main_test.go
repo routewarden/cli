@@ -1663,3 +1663,146 @@ func TestCLI_DashboardCommands(t *testing.T) {
 	})
 }
 
+func TestCLI_Generate_StdinAndTargetErrors(t *testing.T) {
+	validJSON := `{
+		"enabled": true,
+		"blockPatterns": ["(?i)^/admin"]
+	}`
+
+	t.Run("generate from stdin with -", func(t *testing.T) {
+		stdout, stderr, code := runCLIWithStdin(t, validJSON, "generate", "caddy", "-")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "routewarden {") || !strings.Contains(stdout, "block_patterns \"(?i)^/admin\"") {
+			t.Errorf("expected caddy configuration output, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("generate with unsupported target format", func(t *testing.T) {
+		_, stderr, code := runCLIWithStdin(t, validJSON, "generate", "unsupported-gateway", "-")
+		if code != 1 {
+			t.Fatalf("expected code 1 for unsupported target, got %d", code)
+		}
+		if !strings.Contains(stderr, "unsupported target format") && !strings.Contains(stderr, "Error generating configuration") {
+			t.Errorf("expected error message about unsupported target format, got: %s", stderr)
+		}
+	})
+
+	t.Run("generate missing target", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "generate")
+		if code != 1 {
+			t.Fatalf("expected code 1 when target missing, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error: --target") {
+			t.Errorf("expected missing target error, got: %s", stderr)
+		}
+	})
+
+	t.Run("generate non-existent config file", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "generate", "caddy", "nonexistent-config-file.json")
+		if code != 1 {
+			t.Fatalf("expected code 1 for missing file, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error reading config file") {
+			t.Errorf("expected file read error, got: %s", stderr)
+		}
+	})
+}
+
+func TestCLI_Validate_StdinAndErrors(t *testing.T) {
+	t.Run("validate valid JSON from stdin", func(t *testing.T) {
+		validJSON := `{"enabled": true, "blockPatterns": ["^/secret"]}`
+		stdout, stderr, code := runCLIWithStdin(t, validJSON, "validate", "-")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(strings.ToLower(stdout), "valid") {
+			t.Errorf("expected validation success message, got: %s", stdout)
+		}
+	})
+
+	t.Run("validate malformed JSON from stdin", func(t *testing.T) {
+		invalidJSON := `{"enabled": true, unclosed json`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate", "-")
+		if code != 1 {
+			t.Fatalf("expected code 1 for invalid JSON, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error") && !strings.Contains(stderr, "invalid") {
+			t.Errorf("expected error message for malformed JSON, got: %s", stderr)
+		}
+	})
+
+	t.Run("validate non-existent file", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "validate", "missing-file-xyz.json")
+		if code != 1 {
+			t.Fatalf("expected code 1 for non-existent file, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error reading") && !strings.Contains(stderr, "no such file") {
+			t.Errorf("expected error for missing file, got: %s", stderr)
+		}
+	})
+}
+
+func TestCLI_Test_ClientIPAndQueryFlags(t *testing.T) {
+	configWithIP := `{
+		"enabled": true,
+		"blockPatterns": ["(?i)^/admin"],
+		"allowedIps": ["10.0.0.1"],
+		"checkQuery": true
+	}`
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "routewarden.json")
+	if err := os.WriteFile(cfgPath, []byte(configWithIP), 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	t.Run("test with whitelisted ip bypasses block", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "--ip", "10.0.0.1", "/admin")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "PASSED") && !strings.Contains(stdout, "ALLOWED") && !strings.Contains(stdout, "BYPASSED") {
+			t.Errorf("expected whitelisted IP to pass, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test with non-whitelisted ip gets blocked", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "--ip", "192.168.1.1", "/admin")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "BLOCKED") {
+			t.Errorf("expected non-whitelisted IP to be blocked, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test with query string blocked", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-q", "file=/.env", "/search")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "BLOCKED") {
+			t.Errorf("expected query string with /.env to be blocked, got:\n%s", stdout)
+		}
+	})
+}
+
+func TestCLI_Schema_ValidJSONSchema(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "schema")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema command, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("schema output is not valid JSON: %v", err)
+	}
+
+	if _, ok := schema["$schema"]; !ok {
+		t.Errorf("schema missing '$schema' field")
+	}
+	if _, ok := schema["properties"]; !ok {
+		t.Errorf("schema missing 'properties' field")
+	}
+}
