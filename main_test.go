@@ -149,13 +149,13 @@ func TestCLI_TestCommand(t *testing.T) {
 			wantOutput: "Result: 🛑 BLOCKED",
 		},
 		{
-			name: "Allow body with grant_type=send_access_token",
+			name: "Allow body with grant_type=send_access",
 			args: []string{
 				"test",
 				"--config", "-",
 				"--method", "POST",
 				"--path", "/identity/connect/token",
-				"--body", "grant_type=send_access_token",
+				"--body", "grant_type=send_access",
 			},
 			stdin: `{
 				"enabled": true,

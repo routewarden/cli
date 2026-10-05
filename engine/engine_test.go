@@ -580,10 +580,10 @@ func TestEngine_CheckBody(t *testing.T) {
 		t.Errorf("expected reason 'body_blocked', got %q", res1.Reason)
 	}
 
-	// 2. Should allow grant_type=send_access_token
-	res2 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=send_access_token")
+	// 2. Should allow grant_type=send_access
+	res2 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=send_access")
 	if res2.Blocked {
-		t.Errorf("expected send_access_token request body to be allowed")
+		t.Errorf("expected send_access request body to be allowed")
 	}
 
 	// 3. Fallback to BlockPatterns when CheckBodyPatterns is empty
