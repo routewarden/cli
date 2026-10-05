@@ -288,7 +288,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	var ips []net.IP
 	var nets []*net.IPNet
 	for _, ipStr := range cfg.AllowedIPs {
-		ipStr = strings.TrimSpace(ipStr)
+		ipStr = cleanIP(ipStr)
 		if ipStr == "" {
 			continue
 		}
@@ -310,7 +310,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	var proxyIPs []net.IP
 	var proxyNets []*net.IPNet
 	for _, ipStr := range cfg.TrustedProxies {
-		ipStr = strings.TrimSpace(ipStr)
+		ipStr = cleanIP(ipStr)
 		if ipStr == "" {
 			continue
 		}
@@ -454,12 +454,21 @@ func (e *Engine) isTrustedProxy(ip net.IP) bool {
 	return false
 }
 
+func cleanIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		raw = host
+	}
+	raw = strings.Trim(raw, "[]")
+	if idx := strings.IndexByte(raw, '%'); idx != -1 {
+		raw = raw[:idx]
+	}
+	return raw
+}
+
 // ExtractClientIP resolves the real client IP respecting trusted proxy configuration.
 func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) string {
-	remoteIPStr := strings.TrimSpace(remoteAddr)
-	if host, _, err := net.SplitHostPort(remoteIPStr); err == nil {
-		remoteIPStr = host
-	}
+	remoteIPStr := cleanIP(remoteAddr)
 	remoteIP := net.ParseIP(remoteIPStr)
 
 	// If remoteAddr is provided, verify whether it is a declared trusted proxy
@@ -472,10 +481,7 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 		for k, v := range headers {
 			if strings.EqualFold(k, "X-Forwarded-For") {
 				parts := strings.Split(v, ",")
-				first := strings.TrimSpace(parts[0])
-				if host, _, err := net.SplitHostPort(first); err == nil {
-					first = host
-				}
+				first := cleanIP(parts[0])
 				if net.ParseIP(first) != nil {
 					return first
 				}
@@ -483,10 +489,7 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 		}
 		for k, v := range headers {
 			if strings.EqualFold(k, "X-Real-IP") {
-				ip := strings.TrimSpace(v)
-				if host, _, err := net.SplitHostPort(ip); err == nil {
-					ip = host
-				}
+				ip := cleanIP(v)
 				if net.ParseIP(ip) != nil {
 					return ip
 				}
