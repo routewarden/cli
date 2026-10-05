@@ -223,17 +223,52 @@ func normalizeBool(val string, defaultVal bool) bool {
 // ConvertLabelsToTraefikDynamicYAML converts a collection of Traefik labels into a standalone dynamic YAML configuration.
 func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 	middlewareProps := make(map[string]map[string]string)
+	middlewareIndexedProps := make(map[string]map[string]map[int]string)
 	middlewareListPattern := regexp.MustCompile(`^traefik\.http\.middlewares\.([a-zA-Z0-9_-]+)\.plugin\.(?:routewarden|traefik-warden|traefik_warden|warden)\.(.+)$`)
+	indexPattern := regexp.MustCompile(`^(.+)\[(\d+)\]$`)
 
 	for _, l := range labels {
 		m := middlewareListPattern.FindStringSubmatch(l.Key)
 		if len(m) == 3 {
 			name := m[1]
-			prop := normalizePropKey(m[2])
+			rawProp := m[2]
 			if _, exists := middlewareProps[name]; !exists {
 				middlewareProps[name] = make(map[string]string)
 			}
-			middlewareProps[name][prop] = l.Value
+			if im := indexPattern.FindStringSubmatch(rawProp); len(im) == 3 {
+				base := normalizePropKey(im[1])
+				idx, _ := strconv.Atoi(im[2])
+				if _, exists := middlewareIndexedProps[name]; !exists {
+					middlewareIndexedProps[name] = make(map[string]map[int]string)
+				}
+				if _, exists := middlewareIndexedProps[name][base]; !exists {
+					middlewareIndexedProps[name][base] = make(map[int]string)
+				}
+				middlewareIndexedProps[name][base][idx] = l.Value
+			} else {
+				prop := normalizePropKey(rawProp)
+				middlewareProps[name][prop] = l.Value
+			}
+		}
+	}
+
+	for name, baseMap := range middlewareIndexedProps {
+		for base, idxMap := range baseMap {
+			var indices []int
+			for idx := range idxMap {
+				indices = append(indices, idx)
+			}
+			sort.Ints(indices)
+			var vals []string
+			for _, idx := range indices {
+				vals = append(vals, idxMap[idx])
+			}
+			joined := strings.Join(vals, ",")
+			if existing, ok := middlewareProps[name][base]; ok && existing != "" {
+				middlewareProps[name][base] = existing + "," + joined
+			} else {
+				middlewareProps[name][base] = joined
+			}
 		}
 	}
 

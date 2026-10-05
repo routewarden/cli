@@ -168,3 +168,29 @@ traefik.http.middlewares.proxy-shield.plugin.routewarden.trustedProxies=10.0.0.0
 	}
 }
 
+func TestLabels_IndexedArrayLabels(t *testing.T) {
+	labelContent := `
+traefik.http.middlewares.indexed-shield.plugin.routewarden.enabled=true
+traefik.http.middlewares.indexed-shield.plugin.routewarden.blockPatterns[0]=(?i)^/admin
+traefik.http.middlewares.indexed-shield.plugin.routewarden.blockPatterns[1]=(?i)^/metrics
+traefik.http.middlewares.indexed-shield.plugin.routewarden.allowedIps[0]=10.0.0.0/8
+traefik.http.middlewares.indexed-shield.plugin.routewarden.allowedIps[1]=192.168.1.100
+`
+	labels := engine.ParseTraefikLabels(labelContent)
+	yamlOut, err := engine.ConvertLabelsToTraefikDynamicYAML(labels)
+	if err != nil {
+		t.Fatalf("failed to convert labels: %v", err)
+	}
+
+	if !strings.Contains(yamlOut, "indexed-shield:") {
+		t.Errorf("expected 'indexed-shield:' in YAML:\n%s", yamlOut)
+	}
+	if !strings.Contains(yamlOut, "- '(?i)^/admin'") || !strings.Contains(yamlOut, "- '(?i)^/metrics'") {
+		t.Errorf("expected indexed blockPatterns in YAML:\n%s", yamlOut)
+	}
+	if !strings.Contains(yamlOut, "- '10.0.0.0/8'") || !strings.Contains(yamlOut, "- '192.168.1.100'") {
+		t.Errorf("expected indexed allowedIps in YAML:\n%s", yamlOut)
+	}
+}
+
+
