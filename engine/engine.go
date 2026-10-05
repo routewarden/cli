@@ -71,8 +71,11 @@ type ResponseConfig struct {
 // Config holds the RouteWarden configuration.
 type Config struct {
 	Enabled                    bool            `json:"enabled,omitempty"`
+	Disable                    bool            `json:"disable,omitempty"`
 	EnableDefaultPatterns      bool            `json:"enableDefaultPatterns,omitempty"`
+	DisableDefaultPatterns      bool            `json:"disableDefaultPatterns,omitempty"`
 	EnableDefaultAllowPatterns bool            `json:"enableDefaultAllowPatterns,omitempty"`
+	DisableDefaultAllowPatterns bool            `json:"disableDefaultAllowPatterns,omitempty"`
 	PathPatterns               []string        `json:"pathPatterns,omitempty"`
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
@@ -222,6 +225,15 @@ type Engine struct {
 func NewEngine(cfg *Config) (*Engine, error) {
 	if cfg == nil {
 		cfg = CreateConfig()
+	}
+	if cfg.Disable {
+		cfg.Enabled = false
+	}
+	if cfg.DisableDefaultPatterns {
+		cfg.EnableDefaultPatterns = false
+	}
+	if cfg.DisableDefaultAllowPatterns {
+		cfg.EnableDefaultAllowPatterns = false
 	}
 
 	methodsMap := make(map[string]struct{})

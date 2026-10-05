@@ -141,10 +141,16 @@ func normalizePropKey(prop string) string {
 	switch lower {
 	case "enabled":
 		return "enabled"
+	case "disable":
+		return "disable"
 	case "enabledefaultpatterns":
 		return "enableDefaultPatterns"
+	case "disabledefaultpatterns":
+		return "disableDefaultPatterns"
 	case "enabledefaultallowpatterns":
 		return "enableDefaultAllowPatterns"
+	case "disabledefaultallowpatterns":
+		return "disableDefaultAllowPatterns"
 	case "pathpatterns":
 		return "pathPatterns"
 	case "blockpatterns":
@@ -281,14 +287,28 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		if val, ok := props["enabled"]; ok {
 			enabled = normalizeBool(val, true)
 		}
+		if val, ok := props["disable"]; ok && normalizeBool(val, false) {
+			enabled = false
+		}
 		fmt.Fprintf(&b, "          enabled: %t\n", enabled)
 
+		enableDefault := true
 		if val, ok := props["enableDefaultPatterns"]; ok {
-			fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", normalizeBool(val, true))
+			enableDefault = normalizeBool(val, true)
 		}
+		if val, ok := props["disableDefaultPatterns"]; ok && normalizeBool(val, false) {
+			enableDefault = false
+		}
+		fmt.Fprintf(&b, "          enableDefaultPatterns: %t\n", enableDefault)
+
+		enableAllow := true
 		if val, ok := props["enableDefaultAllowPatterns"]; ok {
-			fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", normalizeBool(val, true))
+			enableAllow = normalizeBool(val, true)
 		}
+		if val, ok := props["disableDefaultAllowPatterns"]; ok && normalizeBool(val, false) {
+			enableAllow = false
+		}
+		fmt.Fprintf(&b, "          enableDefaultAllowPatterns: %t\n", enableAllow)
 		if val, ok := props["checkQuery"]; ok {
 			fmt.Fprintf(&b, "          checkQuery: %t\n", normalizeBool(val, false))
 		}
