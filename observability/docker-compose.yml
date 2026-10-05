@@ -1,3 +1,8 @@
+# RouteWarden Observability Stack
+# Configure environment variables in routewarden.env (see that file for all options).
+# To enable optional Threat Alerting, uncomment ALERTING_PROVISIONING_DIR in routewarden.env
+# or run: rwarden dashboard up --enable-alerting
+
 services:
   loki:
     image: grafana/loki:3.0.0

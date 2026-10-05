@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed docker-compose.yml config.alloy loki-config.yaml grafana/*
+//go:embed docker-compose.yml config.alloy loki-config.yaml routewarden.env grafana/*
 var EmbeddedFiles embed.FS
 
 // Export exports all embedded observability assets to targetDir.
