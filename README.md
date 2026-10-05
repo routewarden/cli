@@ -547,8 +547,10 @@ volumes:
 #### Optional Threat Alerting
 By default, the dashboard stack runs with alerting disabled to allow instant, zero-configuration startup without requiring external notification endpoints. To enable the pre-configured threat alert rules:
 - **With CLI**: `rwarden dashboard up --enable-alerting`
-- **With Docker Compose**: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
-- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://hooks.slack.com/services/..."` (defaults to `http://host.docker.internal:8080/alerts`)
+- **With Docker Compose**: 
+  - Using `routewarden.env`: Uncomment `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting` in `routewarden.env` and run `docker compose --env-file routewarden.env up -d`
+  - Or via inline environment variable: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
+- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://your-soc-endpoint.example.com/alerts"` (defaults to `http://host.docker.internal:8080/alerts`)
 
 #### Reusing an Existing Grafana & Loki Stack
 
