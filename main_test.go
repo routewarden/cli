@@ -131,6 +131,40 @@ func TestCLI_TestCommand(t *testing.T) {
 			}`,
 			wantOutput: "Result: 🛑 BLOCKED (HTTP Status 429, Mode: rateLimitChallenge)",
 		},
+		{
+			name: "Block body containing grant_type=password",
+			args: []string{
+				"test",
+				"--config", "-",
+				"--method", "POST",
+				"--path", "/identity/connect/token",
+				"--body", "grant_type=password&username=admin",
+			},
+			stdin: `{
+				"enabled": true,
+				"methods": ["POST"],
+				"checkBody": true,
+				"checkBodyPatterns": ["(?i)grant_type=password"]
+			}`,
+			wantOutput: "Result: 🛑 BLOCKED",
+		},
+		{
+			name: "Allow body with grant_type=send_access_token",
+			args: []string{
+				"test",
+				"--config", "-",
+				"--method", "POST",
+				"--path", "/identity/connect/token",
+				"--body", "grant_type=send_access_token",
+			},
+			stdin: `{
+				"enabled": true,
+				"methods": ["POST"],
+				"checkBody": true,
+				"checkBodyPatterns": ["(?i)grant_type=password"]
+			}`,
+			wantOutput: "Result: ✅ ALLOWED",
+		},
 	}
 
 	for _, tc := range tests {

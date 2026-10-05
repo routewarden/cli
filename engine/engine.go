@@ -85,6 +85,9 @@ type Config struct {
 	Mode                       string          `json:"mode,omitempty"`
 	CheckQuery                 bool            `json:"checkQuery,omitempty"`
 	CheckHeaders               []string        `json:"checkHeaders,omitempty"`
+	CheckBody                  bool            `json:"checkBody,omitempty"`
+	CheckBodyMaxBytes          int64           `json:"checkBodyMaxBytes,omitempty"`
+	CheckBodyPatterns          []string        `json:"checkBodyPatterns,omitempty"`
 	Debug                      bool            `json:"debug,omitempty"`
 	SecurityLog                bool            `json:"securityLog,omitempty"`
 	Response                   *ResponseConfig `json:"response,omitempty"`
@@ -106,6 +109,9 @@ func CreateConfig() *Config {
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
 		CheckQuery:                 false,
 		CheckHeaders:               []string{},
+		CheckBody:                  false,
+		CheckBodyMaxBytes:          65536,
+		CheckBodyPatterns:          []string{},
 		Debug:                      false,
 		SecurityLog:                true,
 		Response: &ResponseConfig{
@@ -205,6 +211,7 @@ type Engine struct {
 	Methods          map[string]struct{}
 	BlockRegexes     []*regexp.Regexp
 	AllowRegexes     []*regexp.Regexp
+	BodyRegexes      []*regexp.Regexp
 	AllowedIPs       []net.IP
 	AllowedNets      []*net.IPNet
 	TrustedProxyIPs  []net.IP
@@ -267,6 +274,18 @@ func NewEngine(cfg *Config) (*Engine, error) {
 			return nil, fmt.Errorf("invalid allow regex %q: %w", p, err)
 		}
 		compiledAllow = append(compiledAllow, re)
+	}
+
+	compiledBody := make([]*regexp.Regexp, 0, len(cfg.CheckBodyPatterns))
+	for _, p := range cfg.CheckBodyPatterns {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid body regex %q: %w", p, err)
+		}
+		compiledBody = append(compiledBody, re)
 	}
 
 	var ips []net.IP
@@ -397,6 +416,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		Methods:          methodsMap,
 		BlockRegexes:     compiledBlock,
 		AllowRegexes:     compiledAllow,
+		BodyRegexes:      compiledBody,
 		AllowedIPs:       ips,
 		AllowedNets:      nets,
 		TrustedProxyIPs:  proxyIPs,
@@ -417,7 +437,7 @@ type EvaluationResult struct {
 
 // Evaluate inspects a simulated request against compiled rules without client IP.
 func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[string]string) *EvaluationResult {
-	return e.EvaluateWithClientIP(method, requestPath, queryString, headers, "")
+	return e.EvaluateWithBody(method, requestPath, queryString, headers, "", "")
 }
 
 // isTrustedProxy returns true if remoteIP matches any declared trusted proxy IP or CIDR.
@@ -484,6 +504,11 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 
 // EvaluateWithClientIP inspects a simulated request against compiled rules including client IP check.
 func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, headers map[string]string, clientIPStr string) *EvaluationResult {
+	return e.EvaluateWithBody(method, requestPath, queryString, headers, clientIPStr, "")
+}
+
+// EvaluateWithBody inspects a simulated request against compiled rules including client IP and body check.
+func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, headers map[string]string, clientIPStr string, body string) *EvaluationResult {
 	result := &EvaluationResult{
 		Allowed:        false,
 		Bypassed:       false,
@@ -609,6 +634,46 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 		}
 	}
 
+	// Check body
+	shouldCheckBody := e.Config.CheckBody || len(e.BodyRegexes) > 0
+	if shouldCheckBody && body != "" {
+		maxBytes := e.Config.CheckBodyMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 65536
+		}
+		bodyBytes := []byte(body)
+		if int64(len(bodyBytes)) > maxBytes {
+			bodyBytes = bodyBytes[:maxBytes]
+		}
+		bodyStr := string(bodyBytes)
+		unescapedBody, err := url.QueryUnescape(bodyStr)
+		if err != nil {
+			unescapedBody = bodyStr
+		}
+
+		bodyCandidates := []string{bodyStr}
+		if unescapedBody != bodyStr {
+			bodyCandidates = append(bodyCandidates, unescapedBody)
+		}
+
+		patternsToCheck := e.BodyRegexes
+		if len(patternsToCheck) == 0 {
+			patternsToCheck = e.BlockRegexes
+		}
+
+		for _, bCand := range bodyCandidates {
+			for _, re := range patternsToCheck {
+				if re.MatchString(bCand) {
+					result.Blocked = true
+					result.MatchedPattern = re.String()
+					result.MatchedTarget = "[body payload]"
+					result.Reason = "body_blocked"
+					return result
+				}
+			}
+		}
+	}
+
 	result.Allowed = true
 	result.Reason = "passed_inspection"
 	return result
@@ -728,6 +793,18 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		b.WriteString("          checkHeaders:\n")
 		for _, h := range cfg.CheckHeaders {
 			fmt.Fprintf(&b, "            - '%s'\n", h)
+		}
+	}
+	if cfg.CheckBody {
+		b.WriteString("          checkBody: true\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "          checkBodyMaxBytes: %d\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("          checkBodyPatterns:\n")
+		for _, p := range cfg.CheckBodyPatterns {
+			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(p, "'", "''"))
 		}
 	}
 
@@ -874,6 +951,22 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		}
 		b.WriteString("]\n")
 	}
+	if cfg.CheckBody {
+		b.WriteString("  checkBody = true\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "  checkBodyMaxBytes = %d\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("  checkBodyPatterns = [")
+		for i, p := range cfg.CheckBodyPatterns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", p)
+		}
+		b.WriteString("]\n")
+	}
 
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response]\n")
@@ -976,6 +1069,15 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ","))
 	}
+	if cfg.CheckBody {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBody=true\"\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBodyMaxBytes=%d\"\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBodyPatterns=%s\"\n", strings.Join(cfg.CheckBodyPatterns, ","))
+	}
 
 	mode, status, body := cfg.ResolveResponse()
 	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode)
@@ -1048,6 +1150,15 @@ func (cfg *Config) GenerateCaddyfile() string {
 	}
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Fprintf(&b, "    check_headers %s\n", strings.Join(cfg.CheckHeaders, " "))
+	}
+	if cfg.CheckBody {
+		b.WriteString("    check_body\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "    check_body_max_bytes %d\n", cfg.CheckBodyMaxBytes)
+	}
+	for _, p := range cfg.CheckBodyPatterns {
+		fmt.Fprintf(&b, "    body_pattern %q\n", p)
 	}
 	allBlocks := append([]string{}, cfg.PathPatterns...)
 	allBlocks = append(allBlocks, cfg.BlockPatterns...)
@@ -1191,6 +1302,19 @@ func (cfg *Config) GenerateNginxLua() string {
 		b.WriteString("    check_headers = {\n")
 		for _, h := range cfg.CheckHeaders {
 			fmt.Fprintf(&b, "        %q,\n", h)
+		}
+		b.WriteString("    },\n")
+	}
+	if cfg.CheckBody {
+		b.WriteString("    check_body = true,\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "    check_body_max_bytes = %d,\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("    body_patterns = {\n")
+		for _, p := range cfg.CheckBodyPatterns {
+			fmt.Fprintf(&b, "        %q,\n", p)
 		}
 		b.WriteString("    },\n")
 	}

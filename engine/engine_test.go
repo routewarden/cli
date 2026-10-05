@@ -560,4 +560,105 @@ func TestEngine_GenerateWithTrustedProxies(t *testing.T) {
 	}
 }
 
+func TestEngine_CheckBody(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Methods = []string{"POST"}
+	cfg.CheckBody = true
+	cfg.CheckBodyPatterns = []string{"(?i)grant_type=password"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// 1. Should block grant_type=password
+	res1 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=password&username=admin")
+	if !res1.Blocked {
+		t.Errorf("expected request body to be blocked")
+	}
+	if res1.Reason != "body_blocked" {
+		t.Errorf("expected reason 'body_blocked', got %q", res1.Reason)
+	}
+
+	// 2. Should allow grant_type=send_access_token
+	res2 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=send_access_token")
+	if res2.Blocked {
+		t.Errorf("expected send_access_token request body to be allowed")
+	}
+
+	// 3. Fallback to BlockPatterns when CheckBodyPatterns is empty
+	cfgFallback := engine.CreateConfig()
+	cfgFallback.Methods = []string{"POST"}
+	cfgFallback.CheckBody = true
+	cfgFallback.BlockPatterns = []string{"(?i)sql_injection"}
+
+	engFallback, err := engine.NewEngine(cfgFallback)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	res3 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql_injection")
+	if !res3.Blocked {
+		t.Errorf("expected request to be blocked by fallback BlockPatterns")
+	}
+
+	// 4. URL percent-encoded body payload check
+	res4 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql%5Finjection")
+	if !res4.Blocked {
+		t.Errorf("expected URL-encoded request body to be detected and blocked")
+	}
+}
+
+func TestEngine_GenerateWithCheckBody(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.CheckBody = true
+	cfg.CheckBodyMaxBytes = 32768
+	cfg.CheckBodyPatterns = []string{"(?i)grant_type=password"}
+
+	// Traefik YAML
+	yamlOut, err := cfg.Generate("traefik-yaml")
+	if err != nil {
+		t.Fatalf("traefik-yaml generate failed: %v", err)
+	}
+	if !strings.Contains(yamlOut, "checkBody: true") || !strings.Contains(yamlOut, "checkBodyMaxBytes: 32768") || !strings.Contains(yamlOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-yaml missing checkBody configurations: %s", yamlOut)
+	}
+
+	// Traefik TOML
+	tomlOut, err := cfg.Generate("traefik-toml")
+	if err != nil {
+		t.Fatalf("traefik-toml generate failed: %v", err)
+	}
+	if !strings.Contains(tomlOut, "checkBody = true") || !strings.Contains(tomlOut, "checkBodyMaxBytes = 32768") || !strings.Contains(tomlOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-toml missing checkBody configurations: %s", tomlOut)
+	}
+
+	// Traefik Labels
+	labelsOut, err := cfg.Generate("traefik-labels")
+	if err != nil {
+		t.Fatalf("traefik-labels generate failed: %v", err)
+	}
+	if !strings.Contains(labelsOut, "checkBody=true") || !strings.Contains(labelsOut, "checkBodyMaxBytes=32768") || !strings.Contains(labelsOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-labels missing checkBody configurations: %s", labelsOut)
+	}
+
+	// Caddyfile
+	caddyOut, err := cfg.Generate("caddy")
+	if err != nil {
+		t.Fatalf("caddy generate failed: %v", err)
+	}
+	if !strings.Contains(caddyOut, "check_body") || !strings.Contains(caddyOut, "check_body_max_bytes 32768") || !strings.Contains(caddyOut, "body_pattern \"(?i)grant_type=password\"") {
+		t.Errorf("caddy missing check_body configurations: %s", caddyOut)
+	}
+
+	// NGINX
+	nginxOut, err := cfg.Generate("nginx")
+	if err != nil {
+		t.Fatalf("nginx generate failed: %v", err)
+	}
+	if !strings.Contains(nginxOut, "check_body = true") || !strings.Contains(nginxOut, "check_body_max_bytes = 32768") || !strings.Contains(nginxOut, "body_patterns = {") {
+		t.Errorf("nginx missing check_body configurations: %s", nginxOut)
+	}
+}
+
 

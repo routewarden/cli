@@ -161,6 +161,12 @@ func normalizePropKey(prop string) string {
 		return "checkQuery"
 	case "checkheaders":
 		return "checkHeaders"
+	case "checkbody":
+		return "checkBody"
+	case "checkbodymaxbytes":
+		return "checkBodyMaxBytes"
+	case "checkbodypatterns":
+		return "checkBodyPatterns"
 	case "statuscode", "status":
 		return "statusCode"
 	case "customresponsetext":
@@ -300,6 +306,15 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		writeListProp(&b, "trustedProxies", props["trustedProxies"])
 		writeListProp(&b, "methods", props["methods"])
 		writeListProp(&b, "checkHeaders", props["checkHeaders"])
+		if val, ok := props["checkBody"]; ok {
+			fmt.Fprintf(&b, "          checkBody: %t\n", normalizeBool(val, false))
+		}
+		if val, ok := props["checkBodyMaxBytes"]; ok {
+			if num, err := strconv.ParseInt(val, 10, 64); err == nil && num > 0 {
+				fmt.Fprintf(&b, "          checkBodyMaxBytes: %d\n", num)
+			}
+		}
+		writeListProp(&b, "checkBodyPatterns", props["checkBodyPatterns"])
 
 		// Response sub-tree
 		hasResponse := false

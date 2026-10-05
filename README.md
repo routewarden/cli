@@ -184,7 +184,9 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `-X`, `-m`, `--method` | string | `"GET"` | HTTP method (e.g. `GET`, `POST`, `HEAD`) |
 | `--ip` | string | `""` | Optional client IP address to evaluate against `allowedIps` |
 | `-H`, `--header` | string | `""` | Optional header in `Key:Value` format to test (repeatable) |
+| `-b`, `--body` | string | `""` | Optional request body payload to evaluate |
 | `--check-query` | bool | `true` | Enable or disable query string inspection |
+| `--check-body` | bool | `false` | Enable or disable request body inspection |
 
 **Example Output**:
 ```text

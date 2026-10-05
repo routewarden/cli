@@ -61,6 +61,22 @@
       "items": { "type": "string" },
       "description": "Optional list of HTTP request headers to inspect for path smuggling (e.g. X-Forwarded-Uri, X-Rewrite-URL, X-Original-URL)."
     },
+    "checkBody": {
+      "type": "boolean",
+      "default": false,
+      "description": "Inspect HTTP request bodies against checkBodyPatterns or blockPatterns."
+    },
+    "checkBodyMaxBytes": {
+      "type": "integer",
+      "default": 65536,
+      "minimum": 1,
+      "description": "Maximum number of request body bytes to buffer and inspect."
+    },
+    "checkBodyPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional list of regular expression patterns to match specifically against request body payloads."
+    },
     "statusCode": {
       "type": "integer",
       "minimum": 100,

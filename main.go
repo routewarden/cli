@@ -760,6 +760,9 @@ func handleValidate(args []string) {
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Printf("  - Monitored headers: %v\n", cfg.CheckHeaders)
 	}
+	if cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0 {
+		fmt.Printf("  - Body inspection enabled: maxBytes=%d, patterns=%d\n", cfg.CheckBodyMaxBytes, len(cfg.CheckBodyPatterns))
+	}
 }
 
 func handleTest(args []string) {
@@ -767,6 +770,8 @@ func handleTest(args []string) {
 	testPath := fs.String("path", "", "Request path to evaluate (e.g. /.env or /api/v1)")
 	testQuery := fs.String("query", "", "Request query string to evaluate (optional)")
 	shortQuery := fs.String("q", "", "Alias for --query")
+	testBody := fs.String("body", "", "Request body payload to evaluate (optional)")
+	shortBody := fs.String("b", "", "Alias for --body")
 	testMethod := fs.String("method", "GET", "HTTP method (default: GET)")
 	shortMethodX := fs.String("X", "", "Alias for --method (HTTP method)")
 	shortMethodM := fs.String("m", "", "Alias for --method (HTTP method)")
@@ -774,6 +779,7 @@ func handleTest(args []string) {
 	configPath := fs.String("config", "", "Optional path to RouteWarden JSON config file (or '-' for stdin)")
 	shortConfig := fs.String("c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
+	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
 
 	var headerList stringSlice
 	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
@@ -787,6 +793,9 @@ func handleTest(args []string) {
 	}
 	if *shortQuery != "" && *testQuery == "" {
 		*testQuery = *shortQuery
+	}
+	if *shortBody != "" && *testBody == "" {
+		*testBody = *shortBody
 	}
 	if *shortConfig != "" && *configPath == "" {
 		*configPath = *shortConfig
@@ -802,6 +811,7 @@ func handleTest(args []string) {
 
 	cfg := engine.CreateConfig()
 	cfg.CheckQuery = *checkQuery
+	cfg.CheckBody = *checkBody
 	if *configPath != "" {
 		var data []byte
 		var err error
@@ -818,18 +828,30 @@ func handleTest(args []string) {
 			fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
 			os.Exit(1)
 		}
-		// When --config is used, only override checkQuery if explicitly specified on CLI
+		// When --config is used, only override checkQuery/checkBody if explicitly specified on CLI
 		queryFlagPassed := false
+		bodyFlagPassed := false
 		fs.Visit(func(f *flag.Flag) {
 			if f.Name == "check-query" {
 				queryFlagPassed = true
+			}
+			if f.Name == "check-body" {
+				bodyFlagPassed = true
 			}
 		})
 		if queryFlagPassed {
 			cfg.CheckQuery = *checkQuery
 		}
+		if bodyFlagPassed {
+			cfg.CheckBody = *checkBody
+		}
 	} else {
 		cfg.CheckQuery = *checkQuery
+		cfg.CheckBody = *checkBody
+	}
+
+	if *testBody != "" && !cfg.CheckBody && len(cfg.CheckBodyPatterns) == 0 {
+		cfg.CheckBody = true
 	}
 
 	headers := make(map[string]string)
@@ -858,7 +880,7 @@ func handleTest(args []string) {
 	}
 	fmt.Println()
 
-	eval := eng.EvaluateWithClientIP(*testMethod, *testPath, *testQuery, headers, *testIP)
+	eval := eng.EvaluateWithBody(*testMethod, *testPath, *testQuery, headers, *testIP, *testBody)
 
 	fmt.Printf("  Candidate paths extracted (%d):\n", len(eval.CandidatePaths))
 	for _, c := range eval.CandidatePaths {
