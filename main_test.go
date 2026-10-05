@@ -1594,6 +1594,30 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("dashboard up with --enable-alerting and export", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "alerting-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir, "--enable-alerting")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported observability configuration") {
+			t.Errorf("expected export message, got: %s", stdout)
+		}
+		alertingPath := filepath.Join(exportDir, "grafana", "provisioning", "alerting", "alerting.yaml")
+		if _, err := os.Stat(alertingPath); err != nil {
+			t.Errorf("alerting.yaml was not exported: %v", err)
+		}
+		pluginsPath := filepath.Join(exportDir, "grafana", "provisioning", "plugins", "plugins.yaml")
+		if _, err := os.Stat(pluginsPath); err != nil {
+			t.Errorf("plugins.yaml was not exported: %v", err)
+		}
+		emptyKeepPath := filepath.Join(exportDir, "grafana", "provisioning", "empty", "README.md")
+		if _, err := os.Stat(emptyKeepPath); err != nil {
+			t.Errorf("empty/README.md was not exported: %v", err)
+		}
+	})
+
 	t.Run("dashboard unknown subcommand rejected", func(t *testing.T) {
 		_, stderr, code := runCLI(t, "dashboard", "foobar")
 		if code != 1 {

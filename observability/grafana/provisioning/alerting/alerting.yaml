@@ -11,38 +11,41 @@ contactPoints:
         type: webhook
         disableResolveMessage: false
         settings:
-          url: "${ALERT_WEBHOOK_URL:-http://host.docker.internal:8080/alerts}"
+          url: "${ALERT_WEBHOOK_URL}"
           httpMethod: "POST"
         title: "RouteWarden Threat Alert - Webhook"
 
-      - uid: "routewarden-slack"
-        type: slack
-        disableResolveMessage: false
-        settings:
-          recipient: "#security-alerts"
-          url: "${SLACK_WEBHOOK_URL:-}"
-          title: "🚨 RouteWarden Threat Alert: {{ .CommonLabels.alertname }}"
-          text: |
-            *Alert:* {{ .CommonLabels.alertname }}
-            *Severity:* {{ .CommonLabels.severity }}
-            *Summary:* {{ .CommonAnnotations.summary }}
-            *Description:* {{ .CommonAnnotations.description }}
-            *Gateway:* {{ .CommonLabels.gateway }}
-
-      - uid: "routewarden-discord"
-        type: discord
-        disableResolveMessage: false
-        settings:
-          url: "${DISCORD_WEBHOOK_URL:-}"
-          message: "🛡️ **RouteWarden Alert: {{ .CommonLabels.alertname }}** [{{ .CommonLabels.severity }}]\n{{ .CommonAnnotations.description }}"
-
-      - uid: "routewarden-pagerduty"
-        type: pagerduty
-        disableResolveMessage: false
-        settings:
-          integrationKey: "${PAGERDUTY_KEY:-}"
-          severity: "{{ .CommonLabels.severity }}"
-          summary: "RouteWarden Security Alert: {{ .CommonLabels.alertname }}"
+# ------------------------------------------------------------------------------
+# Optional Alert Integrations: Uncomment and configure to enable
+# ------------------------------------------------------------------------------
+#       - uid: "routewarden-slack"
+#         type: slack
+#         disableResolveMessage: false
+#         settings:
+#           recipient: "#security-alerts"
+#           url: "${SLACK_WEBHOOK_URL}"
+#           title: "🚨 RouteWarden Threat Alert: {{ .CommonLabels.alertname }}"
+#           text: |
+#             *Alert:* {{ .CommonLabels.alertname }}
+#             *Severity:* {{ .CommonLabels.severity }}
+#             *Summary:* {{ .CommonAnnotations.summary }}
+#             *Description:* {{ .CommonAnnotations.description }}
+#             *Gateway:* {{ .CommonLabels.gateway }}
+#
+#       - uid: "routewarden-discord"
+#         type: discord
+#         disableResolveMessage: false
+#         settings:
+#           url: "${DISCORD_WEBHOOK_URL}"
+#           message: "🛡️ **RouteWarden Alert: {{ .CommonLabels.alertname }}** [{{ .CommonLabels.severity }}]\n{{ .CommonAnnotations.description }}"
+#
+#       - uid: "routewarden-pagerduty"
+#         type: pagerduty
+#         disableResolveMessage: false
+#         settings:
+#           integrationKey: "${PAGERDUTY_KEY}"
+#           severity: "{{ .CommonLabels.severity }}"
+#           summary: "RouteWarden Security Alert: {{ .CommonLabels.alertname }}"
 
 # ------------------------------------------------------------------------------
 # 2. Notification Routing Policies

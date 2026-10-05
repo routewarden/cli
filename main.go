@@ -58,6 +58,7 @@ Commands:
   dashboard   Launch or manage the Grafana + Loki + Alloy security dashboard
                 e.g. rwarden dashboard
                 e.g. rwarden dashboard up --port 3000
+                e.g. rwarden dashboard up --enable-alerting
                 e.g. rwarden dashboard down
                 e.g. rwarden dashboard status
                 e.g. rwarden dashboard export ./observability
@@ -170,6 +171,8 @@ func handleDashboard(args []string) {
 		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
+		enableAlerting := fs.Bool("enable-alerting", false, "Enable pre-configured Grafana threat alert rules and notification channels")
+		fs.BoolVar(enableAlerting, "alerting", false, "Alias for --enable-alerting")
 		var envList stringSlice
 		fs.Var(&envList, "env", "Environment variable to pass to dashboard stack (repeatable, e.g. --env GF_SECURITY_ADMIN_PASSWORD=secret)")
 		fs.Var(&envList, "e", "Alias for --env (repeatable)")
@@ -188,7 +191,7 @@ func handleDashboard(args []string) {
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, envList...); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, *enableAlerting, envList...); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
 			os.Exit(1)

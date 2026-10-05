@@ -472,6 +472,9 @@ rwarden dashboard down
 
 # 5. Export docker-compose.yml, config.alloy, and Grafana dashboard files to a custom directory
 rwarden dashboard export ./my-observability
+
+# 6. Launch with optional Threat Alerting enabled (threat rules & webhook contact points)
+rwarden dashboard up --enable-alerting
 ```
 
 #### Standalone Docker Compose Deployment
@@ -527,7 +530,10 @@ services:
       - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins:ro
+      - ${ALERTING_PROVISIONING_DIR:-./grafana/provisioning/empty}:/etc/grafana/provisioning/alerting:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -537,6 +543,12 @@ volumes:
   loki-data:
   grafana-data:
 ```
+
+#### Optional Threat Alerting
+By default, the dashboard stack runs with alerting disabled to allow instant, zero-configuration startup without requiring external notification endpoints. To enable the pre-configured threat alert rules:
+- **With CLI**: `rwarden dashboard up --enable-alerting`
+- **With Docker Compose**: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
+- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://hooks.slack.com/services/..."` (defaults to `http://host.docker.internal:8080/alerts`)
 
 #### Reusing an Existing Grafana & Loki Stack
 
