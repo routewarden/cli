@@ -1131,13 +1131,13 @@ func (cfg *Config) GenerateCaddyfile() string {
 	var b strings.Builder
 	b.WriteString("routewarden {\n")
 	if !cfg.Enabled {
-		b.WriteString("    disable\n")
+		b.WriteString("    enabled false\n")
 	}
 	if !cfg.EnableDefaultPatterns {
-		b.WriteString("    disable_default_patterns\n")
+		b.WriteString("    enable_default_patterns false\n")
 	}
 	if !cfg.EnableDefaultAllowPatterns {
-		b.WriteString("    disable_default_allow_patterns\n")
+		b.WriteString("    enable_default_allow_patterns false\n")
 	}
 	if cfg.Debug {
 		b.WriteString("    debug\n")
