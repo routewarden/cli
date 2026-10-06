@@ -24,6 +24,9 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
+//go:embed tcp-warden.schema.json
+var embeddedTCPSchemaJSON string
+
 var version = "4.3.0"
 
 type stringSlice []string
@@ -81,7 +84,7 @@ func main() {
 		fmt.Printf("rwarden version %s\n", version)
 
 	case "schema":
-		handleSchema()
+		handleSchema(os.Args[2:])
 
 	case "validate":
 		handleValidate(os.Args[2:])
@@ -667,7 +670,16 @@ func handleSandbox(args []string) {
 	}
 }
 
-func handleSchema() {
+func handleSchema(args []string) {
+	fs := flag.NewFlagSet("schema", flag.ExitOnError)
+	tcp := fs.Bool("tcp", false, "Output Layer 4 TCP Warden schema (tcp-warden.yaml)")
+	fs.BoolVar(tcp, "t", false, "Alias for --tcp")
+	_ = parseFlagsLenient(fs, args)
+
+	if *tcp {
+		fmt.Print(embeddedTCPSchemaJSON)
+		return
+	}
 	fmt.Print(embeddedSchemaJSON)
 }
 

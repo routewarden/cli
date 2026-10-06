@@ -1806,3 +1806,23 @@ func TestCLI_Schema_ValidJSONSchema(t *testing.T) {
 		t.Errorf("schema missing 'properties' field")
 	}
 }
+
+func TestCLI_Schema_TCPSchema(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "schema", "--tcp")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema --tcp, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("tcp schema output is not valid JSON: %v", err)
+	}
+
+	if _, ok := schema["$schema"]; !ok {
+		t.Errorf("tcp schema missing '$schema' field")
+	}
+	if title, ok := schema["title"].(string); !ok || !strings.Contains(title, "TCP Warden") {
+		t.Errorf("expected title to mention 'TCP Warden', got %v", schema["title"])
+	}
+}
+
