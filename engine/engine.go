@@ -447,7 +447,7 @@ func (e *Engine) isTrustedProxy(ip net.IP) bool {
 		}
 	}
 	for _, n := range e.TrustedProxyNets {
-		if n.Contains(ip) {
+		if n.Contains(ip) || (ip.To4() != nil && n.Contains(ip.To4())) {
 			return true
 		}
 	}
@@ -542,7 +542,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				}
 			}
 			for _, allowedNet := range e.AllowedNets {
-				if allowedNet.Contains(ip) {
+				if allowedNet.Contains(ip) || (ip.To4() != nil && allowedNet.Contains(ip.To4())) {
 					result.Allowed = true
 					result.Reason = "ip_whitelisted"
 					return result

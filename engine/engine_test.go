@@ -649,4 +649,36 @@ func TestEngine_GenerateWithCheckBody(t *testing.T) {
 	}
 }
 
+func TestEngine_IPv4MappedIPv6Evaluation(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.AllowedIPs = []string{"192.168.1.0/24", "10.0.0.1"}
+	cfg.TrustedProxies = []string{"172.16.0.0/12"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	// 1. Direct peer with IPv4-mapped IPv6 matching allowed CIDR
+	res := eng.EvaluateWithClientIP("GET", "/.env", "", nil, "::ffff:192.168.1.55")
+	if !res.Allowed || res.Reason != "ip_whitelisted" {
+		t.Errorf("expected ::ffff:192.168.1.55 to be whitelisted via 192.168.1.0/24, got allowed=%v reason=%q", res.Allowed, res.Reason)
+	}
+
+	// 2. Direct peer with bracketed IPv6
+	resBracket := eng.EvaluateWithClientIP("GET", "/.env", "", nil, "[::ffff:10.0.0.1]")
+	if !resBracket.Allowed || resBracket.Reason != "ip_whitelisted" {
+		t.Errorf("expected [::ffff:10.0.0.1] to be whitelisted, got allowed=%v reason=%q", resBracket.Allowed, resBracket.Reason)
+	}
+
+	// 3. Trusted proxy with IPv4-mapped IPv6 in XFF
+	headers := map[string]string{
+		"X-Forwarded-For": "::ffff:192.168.1.99",
+	}
+	resProxy := eng.EvaluateWithClientIP("GET", "/.env", "", headers, "172.16.5.10")
+	if !resProxy.Allowed || resProxy.Reason != "ip_whitelisted" {
+		t.Errorf("expected forwarded IPv4-mapped IP from trusted proxy to be whitelisted, got allowed=%v reason=%q", resProxy.Allowed, resProxy.Reason)
+	}
+}
+
 
