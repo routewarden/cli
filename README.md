@@ -56,7 +56,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 4.2.0
+# rwarden version 4.3.0
 ```
 
 ---
@@ -184,7 +184,9 @@ docker run --rm -v $(pwd)/routewarden.json:/routewarden.json ghcr.io/routewarden
 | `-X`, `-m`, `--method` | string | `"GET"` | HTTP method (e.g. `GET`, `POST`, `HEAD`) |
 | `--ip` | string | `""` | Optional client IP address to evaluate against `allowedIps` |
 | `-H`, `--header` | string | `""` | Optional header in `Key:Value` format to test (repeatable) |
+| `-b`, `--body` | string | `""` | Optional request body payload to evaluate |
 | `--check-query` | bool | `true` | Enable or disable query string inspection |
+| `--check-body` | bool | `false` | Enable or disable request body inspection |
 
 **Example Output**:
 ```text
@@ -472,6 +474,9 @@ rwarden dashboard down
 
 # 5. Export docker-compose.yml, config.alloy, and Grafana dashboard files to a custom directory
 rwarden dashboard export ./my-observability
+
+# 6. Launch with optional Threat Alerting enabled (threat rules & webhook contact points)
+rwarden dashboard up --enable-alerting
 ```
 
 #### Standalone Docker Compose Deployment
@@ -527,7 +532,10 @@ services:
       - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins:ro
+      - ${ALERTING_PROVISIONING_DIR:-./grafana/provisioning/empty}:/etc/grafana/provisioning/alerting:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -537,6 +545,14 @@ volumes:
   loki-data:
   grafana-data:
 ```
+
+#### Optional Threat Alerting
+By default, the dashboard stack runs with alerting disabled to allow instant, zero-configuration startup without requiring external notification endpoints. To enable the pre-configured threat alert rules:
+- **With CLI**: `rwarden dashboard up --enable-alerting`
+- **With Docker Compose**: 
+  - Using `routewarden.env`: Uncomment `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting` in `routewarden.env` and run `docker compose --env-file routewarden.env up -d`
+  - Or via inline environment variable: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
+- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://your-soc-endpoint.example.com/alerts"` (defaults to `http://host.docker.internal:8080/alerts`)
 
 #### Reusing an Existing Grafana & Loki Stack
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,7 +47,7 @@ func EnsureStackPrepared(dir string) error {
 }
 
 // Up starts the Grafana, Loki, and Alloy stack.
-func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool, extraEnv ...string) error {
+func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool, enableAlerting bool, extraEnv ...string) error {
 	composeCmd, err := FindDockerCompose()
 	if err != nil {
 		return err
@@ -62,6 +63,18 @@ func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool,
 
 	composeFile := filepath.Join(dir, "docker-compose.yml")
 
+	alertingEnabled := enableAlerting ||
+		strings.EqualFold(os.Getenv("ENABLE_ALERTING"), "true") ||
+		strings.EqualFold(os.Getenv("ALERTING_ENABLED"), "true")
+
+	// Check if extraEnv explicitly defines ALERTING_PROVISIONING_DIR or ENABLE_ALERTING
+	for _, env := range extraEnv {
+		if strings.HasPrefix(env, "ENABLE_ALERTING=true") || strings.HasPrefix(env, "ALERTING_ENABLED=true") ||
+			strings.HasPrefix(env, "ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting") {
+			alertingEnabled = true
+		}
+	}
+
 	fmt.Println("🚀 Launching RouteWarden Observability Stack (Grafana + Loki + Alloy)...")
 	fmt.Printf("   Config Directory: %s\n", dir)
 
@@ -72,6 +85,16 @@ func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool,
 		"GRAFANA_PORT="+strconv.Itoa(grafanaPort),
 		"LOKI_PORT="+strconv.Itoa(lokiPort),
 	)
+
+	if alertingEnabled {
+		cmd.Env = append(cmd.Env, "ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting")
+		if os.Getenv("ALERT_WEBHOOK_URL") == "" {
+			cmd.Env = append(cmd.Env, "ALERT_WEBHOOK_URL=http://host.docker.internal:8080/alerts")
+		}
+	} else {
+		cmd.Env = append(cmd.Env, "ALERTING_PROVISIONING_DIR=./grafana/provisioning/empty")
+	}
+
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -88,6 +111,11 @@ func Up(ctx context.Context, dir string, grafanaPort, lokiPort int, noOpen bool,
 	fmt.Printf("📊 Grafana Dashboard:  %s  (Anonymous / Admin: admin/admin)\n", grafanaURL)
 	fmt.Printf("🗄️  Loki Log Engine:    %s\n", lokiURL)
 	fmt.Printf("🔄 Grafana Alloy:       http://localhost:12345\n")
+	if alertingEnabled {
+		fmt.Printf("🔔 Threat Alerting:     ENABLED (RouteWarden Security Team contact points & 4 threat rules)\n")
+	} else {
+		fmt.Printf("🔕 Threat Alerting:     OPTIONAL (disabled by default; run with '--enable-alerting' to activate)\n")
+	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("💡 Tailing Docker containers: Traefik, Caddy, NGINX, and TCP Warden")
 	fmt.Println("   Pre-provisioned dashboard: 'RouteWarden — Threat & Security Intelligence'")

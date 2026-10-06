@@ -7,11 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,7 +24,10 @@ import (
 //go:embed config.schema.json
 var embeddedSchemaJSON string
 
-var version = "4.2.0"
+//go:embed tcp-warden.schema.json
+var embeddedTCPSchemaJSON string
+
+var version = "4.3.0"
 
 type stringSlice []string
 
@@ -58,6 +61,7 @@ Commands:
   dashboard   Launch or manage the Grafana + Loki + Alloy security dashboard
                 e.g. rwarden dashboard
                 e.g. rwarden dashboard up --port 3000
+                e.g. rwarden dashboard up --enable-alerting
                 e.g. rwarden dashboard down
                 e.g. rwarden dashboard status
                 e.g. rwarden dashboard export ./observability
@@ -80,7 +84,7 @@ func main() {
 		fmt.Printf("rwarden version %s\n", version)
 
 	case "schema":
-		handleSchema()
+		handleSchema(os.Args[2:])
 
 	case "validate":
 		handleValidate(os.Args[2:])
@@ -170,6 +174,8 @@ func handleDashboard(args []string) {
 		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
+		enableAlerting := fs.Bool("enable-alerting", false, "Enable pre-configured Grafana threat alert rules and notification channels")
+		fs.BoolVar(enableAlerting, "alerting", false, "Alias for --enable-alerting")
 		var envList stringSlice
 		fs.Var(&envList, "env", "Environment variable to pass to dashboard stack (repeatable, e.g. --env GF_SECURITY_ADMIN_PASSWORD=secret)")
 		fs.Var(&envList, "e", "Alias for --env (repeatable)")
@@ -188,7 +194,7 @@ func handleDashboard(args []string) {
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, envList...); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, *enableAlerting, envList...); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
 			os.Exit(1)
@@ -206,24 +212,6 @@ func handleDashboard(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: rwarden dashboard [up|down|status|export] [flags]")
 		os.Exit(1)
 	}
-}
-
-// openBrowser opens the given URL in the default system browser.
-func openBrowser(url string) {
-	var cmd string
-	var cmdArgs []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		cmdArgs = []string{url}
-	case "windows":
-		cmd = "rundll32"
-		cmdArgs = []string{"url.dll,FileProtocolHandler", url}
-	default: // linux, freebsd, etc.
-		cmd = "xdg-open"
-		cmdArgs = []string{url}
-	}
-	_ = exec.Command(cmd, cmdArgs...).Start()
 }
 
 func handleCleanup(args []string) {
@@ -664,7 +652,16 @@ func handleSandbox(args []string) {
 	}
 }
 
-func handleSchema() {
+func handleSchema(args []string) {
+	fs := flag.NewFlagSet("schema", flag.ExitOnError)
+	tcp := fs.Bool("tcp", false, "Output Layer 4 TCP Warden schema (tcp-warden.yaml)")
+	fs.BoolVar(tcp, "t", false, "Alias for --tcp")
+	_ = parseFlagsLenient(fs, args)
+
+	if *tcp {
+		fmt.Print(embeddedTCPSchemaJSON)
+		return
+	}
 	fmt.Print(embeddedSchemaJSON)
 }
 
@@ -741,7 +738,7 @@ func handleValidate(args []string) {
 	fmt.Printf("  - Default patterns enabled: %t\n", cfg.EnableDefaultPatterns)
 	fmt.Printf("  - Default allow patterns enabled: %t\n", cfg.EnableDefaultAllowPatterns)
 	fmt.Printf("  - Methods: %v\n", cfg.Methods)
-	customBlockCount := len(cfg.PathPatterns) + len(cfg.BlockPatterns)
+	customBlockCount := len(cfg.BlockPatterns)
 	if customBlockCount > 0 {
 		fmt.Printf("  - Custom block patterns: %d\n", customBlockCount)
 	}
@@ -757,6 +754,9 @@ func handleValidate(args []string) {
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Printf("  - Monitored headers: %v\n", cfg.CheckHeaders)
 	}
+	if cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0 {
+		fmt.Printf("  - Body inspection enabled: maxBytes=%d, patterns=%d\n", cfg.CheckBodyMaxBytes, len(cfg.CheckBodyPatterns))
+	}
 }
 
 func handleTest(args []string) {
@@ -764,6 +764,8 @@ func handleTest(args []string) {
 	testPath := fs.String("path", "", "Request path to evaluate (e.g. /.env or /api/v1)")
 	testQuery := fs.String("query", "", "Request query string to evaluate (optional)")
 	shortQuery := fs.String("q", "", "Alias for --query")
+	testBody := fs.String("body", "", "Request body payload to evaluate (optional)")
+	shortBody := fs.String("b", "", "Alias for --body")
 	testMethod := fs.String("method", "GET", "HTTP method (default: GET)")
 	shortMethodX := fs.String("X", "", "Alias for --method (HTTP method)")
 	shortMethodM := fs.String("m", "", "Alias for --method (HTTP method)")
@@ -771,6 +773,7 @@ func handleTest(args []string) {
 	configPath := fs.String("config", "", "Optional path to RouteWarden JSON config file (or '-' for stdin)")
 	shortConfig := fs.String("c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
+	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
 
 	var headerList stringSlice
 	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
@@ -785,6 +788,9 @@ func handleTest(args []string) {
 	if *shortQuery != "" && *testQuery == "" {
 		*testQuery = *shortQuery
 	}
+	if *shortBody != "" && *testBody == "" {
+		*testBody = *shortBody
+	}
 	if *shortConfig != "" && *configPath == "" {
 		*configPath = *shortConfig
 	}
@@ -797,8 +803,26 @@ func handleTest(args []string) {
 		os.Exit(1)
 	}
 
+	if strings.HasPrefix(*testPath, "http://") || strings.HasPrefix(*testPath, "https://") {
+		if u, err := url.Parse(*testPath); err == nil {
+			if *testQuery == "" && u.RawQuery != "" {
+				*testQuery = u.RawQuery
+			}
+			if u.Path != "" {
+				*testPath = u.Path
+			} else {
+				*testPath = "/"
+			}
+		}
+	} else if *testQuery == "" && strings.Contains(*testPath, "?") {
+		parts := strings.SplitN(*testPath, "?", 2)
+		*testPath = parts[0]
+		*testQuery = parts[1]
+	}
+
 	cfg := engine.CreateConfig()
 	cfg.CheckQuery = *checkQuery
+	cfg.CheckBody = *checkBody
 	if *configPath != "" {
 		var data []byte
 		var err error
@@ -815,18 +839,30 @@ func handleTest(args []string) {
 			fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
 			os.Exit(1)
 		}
-		// When --config is used, only override checkQuery if explicitly specified on CLI
+		// When --config is used, only override checkQuery/checkBody if explicitly specified on CLI
 		queryFlagPassed := false
+		bodyFlagPassed := false
 		fs.Visit(func(f *flag.Flag) {
 			if f.Name == "check-query" {
 				queryFlagPassed = true
+			}
+			if f.Name == "check-body" {
+				bodyFlagPassed = true
 			}
 		})
 		if queryFlagPassed {
 			cfg.CheckQuery = *checkQuery
 		}
+		if bodyFlagPassed {
+			cfg.CheckBody = *checkBody
+		}
 	} else {
 		cfg.CheckQuery = *checkQuery
+		cfg.CheckBody = *checkBody
+	}
+
+	if *testBody != "" && !cfg.CheckBody && len(cfg.CheckBodyPatterns) == 0 {
+		cfg.CheckBody = true
 	}
 
 	headers := make(map[string]string)
@@ -855,7 +891,7 @@ func handleTest(args []string) {
 	}
 	fmt.Println()
 
-	eval := eng.EvaluateWithClientIP(*testMethod, *testPath, *testQuery, headers, *testIP)
+	eval := eng.EvaluateWithBody(*testMethod, *testPath, *testQuery, headers, *testIP, *testBody)
 
 	fmt.Printf("  Candidate paths extracted (%d):\n", len(eval.CandidatePaths))
 	for _, c := range eval.CandidatePaths {
