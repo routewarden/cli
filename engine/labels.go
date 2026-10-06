@@ -69,8 +69,8 @@ func ParseTraefikLabels(content string) []TraefikLabel {
 		}
 		// If line contains multiple comma-separated traefik labels (e.g. CLI flag format)
 		if strings.Contains(l, ",traefik.") {
-			parts := strings.Split(l, ",")
-			for _, p := range parts {
+			parts := strings.SplitSeq(l, ",")
+			for p := range parts {
 				items = append(items, strings.TrimSpace(p))
 			}
 		} else {
