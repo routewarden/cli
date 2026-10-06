@@ -1,3 +1,8 @@
+# RouteWarden Observability Stack
+# Configure environment variables in routewarden.env (see that file for all options).
+# To enable optional Threat Alerting, uncomment ALERTING_PROVISIONING_DIR in routewarden.env
+# or run: rwarden dashboard up --enable-alerting
+
 services:
   loki:
     image: grafana/loki:3.0.0
@@ -44,8 +49,15 @@ services:
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=${GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH:-/var/lib/grafana/dashboards/routewarden-overview.json}
       - GF_FEATURE_TOGGLES_ENABLE=${GF_FEATURE_TOGGLES_ENABLE:-publicDashboards}
       - GF_SECURITY_ALLOW_EMBEDDING=${GF_SECURITY_ALLOW_EMBEDDING:-true}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-http://host.docker.internal:8080/alerts}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - PAGERDUTY_KEY=${PAGERDUTY_KEY:-}
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins:ro
+      - ${ALERTING_PROVISIONING_DIR:-./grafana/provisioning/empty}:/etc/grafana/provisioning/alerting:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:

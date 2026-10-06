@@ -223,18 +223,6 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("Top-level action alias is normalized into Response.Mode", func(t *testing.T) {
-		cfg := engine.CreateConfig()
-		cfg.Action = "silentDrop"
-		cfg.Response = nil
-		eng, err := engine.NewEngine(cfg)
-		if err != nil {
-			t.Fatalf("expected NewEngine to succeed with top-level action, got: %v", err)
-		}
-		if eng.Config.Response.Mode != "silentDrop" {
-			t.Fatalf("expected Response.Mode to be 'silentDrop', got %q", eng.Config.Response.Mode)
-		}
-	})
 
 	t.Run("All valid response.mode options compile and validate", func(t *testing.T) {
 		validModes := []struct {
@@ -559,5 +547,200 @@ func TestEngine_GenerateWithTrustedProxies(t *testing.T) {
 		t.Errorf("nginx missing trusted_proxies: %s", nginxOut)
 	}
 }
+
+func TestEngine_CheckBody(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Methods = []string{"POST"}
+	cfg.CheckBody = true
+	cfg.CheckBodyPatterns = []string{"(?i)grant_type=password"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// 1. Should block grant_type=password
+	res1 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=password&username=admin")
+	if !res1.Blocked {
+		t.Errorf("expected request body to be blocked")
+	}
+	if res1.Reason != "body_blocked" {
+		t.Errorf("expected reason 'body_blocked', got %q", res1.Reason)
+	}
+
+	// 2. Should allow grant_type=send_access
+	res2 := eng.EvaluateWithBody("POST", "/identity/connect/token", "", nil, "127.0.0.1", "grant_type=send_access")
+	if res2.Blocked {
+		t.Errorf("expected send_access request body to be allowed")
+	}
+
+	// 3. Fallback to BlockPatterns when CheckBodyPatterns is empty
+	cfgFallback := engine.CreateConfig()
+	cfgFallback.Methods = []string{"POST"}
+	cfgFallback.CheckBody = true
+	cfgFallback.BlockPatterns = []string{"(?i)sql_injection"}
+
+	engFallback, err := engine.NewEngine(cfgFallback)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	res3 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql_injection")
+	if !res3.Blocked {
+		t.Errorf("expected request to be blocked by fallback BlockPatterns")
+	}
+
+	// 4. URL percent-encoded body payload check
+	res4 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql%5Finjection")
+	if !res4.Blocked {
+		t.Errorf("expected URL-encoded request body to be detected and blocked")
+	}
+}
+
+func TestEngine_GenerateWithCheckBody(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.CheckBody = true
+	cfg.CheckBodyMaxBytes = 32768
+	cfg.CheckBodyPatterns = []string{"(?i)grant_type=password"}
+
+	// Traefik YAML
+	yamlOut, err := cfg.Generate("traefik-yaml")
+	if err != nil {
+		t.Fatalf("traefik-yaml generate failed: %v", err)
+	}
+	if !strings.Contains(yamlOut, "checkBody: true") || !strings.Contains(yamlOut, "checkBodyMaxBytes: 32768") || !strings.Contains(yamlOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-yaml missing checkBody configurations: %s", yamlOut)
+	}
+
+	// Traefik TOML
+	tomlOut, err := cfg.Generate("traefik-toml")
+	if err != nil {
+		t.Fatalf("traefik-toml generate failed: %v", err)
+	}
+	if !strings.Contains(tomlOut, "checkBody = true") || !strings.Contains(tomlOut, "checkBodyMaxBytes = 32768") || !strings.Contains(tomlOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-toml missing checkBody configurations: %s", tomlOut)
+	}
+
+	// Traefik Labels
+	labelsOut, err := cfg.Generate("traefik-labels")
+	if err != nil {
+		t.Fatalf("traefik-labels generate failed: %v", err)
+	}
+	if !strings.Contains(labelsOut, "checkBody=true") || !strings.Contains(labelsOut, "checkBodyMaxBytes=32768") || !strings.Contains(labelsOut, "(?i)grant_type=password") {
+		t.Errorf("traefik-labels missing checkBody configurations: %s", labelsOut)
+	}
+
+	// Caddyfile
+	caddyOut, err := cfg.Generate("caddy")
+	if err != nil {
+		t.Fatalf("caddy generate failed: %v", err)
+	}
+	if !strings.Contains(caddyOut, "check_body") || !strings.Contains(caddyOut, "check_body_max_bytes 32768") || !strings.Contains(caddyOut, "check_body_patterns \"(?i)grant_type=password\"") {
+		t.Errorf("caddy missing check_body configurations: %s", caddyOut)
+	}
+
+	// NGINX
+	nginxOut, err := cfg.Generate("nginx")
+	if err != nil {
+		t.Fatalf("nginx generate failed: %v", err)
+	}
+	if !strings.Contains(nginxOut, "check_body = true") || !strings.Contains(nginxOut, "check_body_max_bytes = 32768") || !strings.Contains(nginxOut, "check_body_patterns = {") {
+		t.Errorf("nginx missing check_body configurations: %s", nginxOut)
+	}
+}
+
+func TestEngine_IPv4MappedIPv6Evaluation(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.AllowedIPs = []string{"192.168.1.0/24", "10.0.0.1"}
+	cfg.TrustedProxies = []string{"172.16.0.0/12"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	// 1. Direct peer with IPv4-mapped IPv6 matching allowed CIDR
+	res := eng.EvaluateWithClientIP("GET", "/.env", "", nil, "::ffff:192.168.1.55")
+	if !res.Allowed || res.Reason != "ip_whitelisted" {
+		t.Errorf("expected ::ffff:192.168.1.55 to be whitelisted via 192.168.1.0/24, got allowed=%v reason=%q", res.Allowed, res.Reason)
+	}
+
+	// 2. Direct peer with bracketed IPv6
+	resBracket := eng.EvaluateWithClientIP("GET", "/.env", "", nil, "[::ffff:10.0.0.1]")
+	if !resBracket.Allowed || resBracket.Reason != "ip_whitelisted" {
+		t.Errorf("expected [::ffff:10.0.0.1] to be whitelisted, got allowed=%v reason=%q", resBracket.Allowed, resBracket.Reason)
+	}
+
+	// 3. Trusted proxy with IPv4-mapped IPv6 in XFF
+	headers := map[string]string{
+		"X-Forwarded-For": "::ffff:192.168.1.99",
+	}
+	resProxy := eng.EvaluateWithClientIP("GET", "/.env", "", headers, "172.16.5.10")
+	if !resProxy.Allowed || resProxy.Reason != "ip_whitelisted" {
+		t.Errorf("expected forwarded IPv4-mapped IP from trusted proxy to be whitelisted, got allowed=%v reason=%q", resProxy.Allowed, resProxy.Reason)
+	}
+}
+
+func TestGenerate_SecurityBoundaries(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Response = &engine.ResponseConfig{
+		Mode:        "custom",
+		StatusCode:  403,
+		ContentType: "text/html; charset=utf-8",
+		RedirectURL: "https://example.com/login?param=1&foo=bar",
+		ProxyURL:    "http://127.0.0.1:8080/honeypot",
+		Headers: map[string]string{
+			"Server":                 "RouteWarden Firewall v2.0",
+			"X-Injected\r\nHeader":  "evil-value\r\nInjected: 1",
+		},
+	}
+
+	// 1. Caddyfile generator must quote strings with spaces and sanitize CRLF
+	caddy := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddy, `content_type "text/html; charset=utf-8"`) {
+		t.Errorf("expected quoted content_type in Caddyfile, got:\n%s", caddy)
+	}
+	if !strings.Contains(caddy, `header Server "RouteWarden Firewall v2.0"`) {
+		t.Errorf("expected quoted header value with spaces in Caddyfile, got:\n%s", caddy)
+	}
+	if strings.Contains(caddy, "X-Injected\r\n") || strings.Contains(caddy, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Caddyfile, got:\n%s", caddy)
+	}
+	if !strings.Contains(caddy, `header X-InjectedHeader "evil-value\r\nInjected: 1"`) {
+		t.Errorf("expected sanitized header key and escaped value in Caddyfile, got:\n%s", caddy)
+	}
+
+	// 2. Traefik YAML generator must sanitize header keys
+	traefik := cfg.GenerateTraefikYAML()
+	if strings.Contains(traefik, "X-Injected\r\n") || strings.Contains(traefik, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik YAML, got:\n%s", traefik)
+	}
+	if !strings.Contains(traefik, `X-InjectedHeader: "evil-value\r\nInjected: 1"`) {
+		t.Errorf("expected sanitized header key and escaped value in Traefik YAML, got:\n%s", traefik)
+	}
+
+	// 3. Traefik TOML generator must sanitize header keys
+	toml := cfg.GenerateTraefikTOML()
+	if strings.Contains(toml, "X-Injected\r\n") || strings.Contains(toml, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik TOML, got:\n%s", toml)
+	}
+	if strings.Contains(toml, "\revil-value") || strings.Contains(toml, "\nevil-value") {
+		t.Errorf("expected header value with CRLF to be sanitized in Traefik TOML, got:\n%s", toml)
+	}
+
+	// 4. Traefik Labels generator must sanitize header keys
+	labels := cfg.GenerateTraefikLabels()
+	if strings.Contains(labels, "X-Injected\r\n") || strings.Contains(labels, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik Labels, got:\n%s", labels)
+	}
+
+	// 5. Nginx Lua generator must sanitize header keys
+	nginx := cfg.GenerateNginxLua()
+	if strings.Contains(nginx, "X-Injected\r\n") || strings.Contains(nginx, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Nginx Lua, got:\n%s", nginx)
+	}
+}
+
+
 
 

@@ -27,6 +27,7 @@ func TestExportObservabilityAssets(t *testing.T) {
 		"loki-config.yaml",
 		"grafana/provisioning/datasources/datasources.yaml",
 		"grafana/provisioning/dashboards/dashboards.yaml",
+		"grafana/provisioning/plugins/plugins.yaml",
 		"grafana/provisioning/alerting/alerting.yaml",
 		"grafana/dashboards/routewarden-overview.json",
 	}
@@ -244,6 +245,44 @@ func TestPublicDashboardAndThreatIntelligenceDrilldowns(t *testing.T) {
 	}
 	if !containsSubstring(dashContent, "explore?left=") {
 		t.Errorf("dashboard missing Loki forensic threat hunter drilldown link")
+	}
+}
+
+func TestOptionalAlertingProvisioning(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "routewarden-opt-alert-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	if err := observability.Export(tempDir); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// 1. Verify plugins.yaml exists and is valid
+	pluginsPath := filepath.Join(tempDir, "grafana/provisioning/plugins/plugins.yaml")
+	if _, err := os.Stat(pluginsPath); err != nil {
+		t.Errorf("expected plugins.yaml to exist: %v", err)
+	}
+
+	// 2. Verify empty placeholder exists for disabled alerting mount
+	emptyKeepPath := filepath.Join(tempDir, "grafana/provisioning/empty/README.md")
+	if _, err := os.Stat(emptyKeepPath); err != nil {
+		t.Errorf("expected empty/README.md placeholder to exist: %v", err)
+	}
+
+	// 3. Verify docker-compose.yml uses ALERTING_PROVISIONING_DIR defaulting to empty
+	composePath := filepath.Join(tempDir, "docker-compose.yml")
+	composeData, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("failed to read docker-compose.yml: %v", err)
+	}
+	composeContent := string(composeData)
+	if !containsSubstring(composeContent, "ALERTING_PROVISIONING_DIR") {
+		t.Errorf("docker-compose.yml should contain ALERTING_PROVISIONING_DIR variable mount")
+	}
+	if !containsSubstring(composeContent, "ALERT_WEBHOOK_URL") {
+		t.Errorf("docker-compose.yml should pass ALERT_WEBHOOK_URL environment variable")
 	}
 }
 

@@ -73,7 +73,6 @@ type Config struct {
 	Enabled                    bool            `json:"enabled,omitempty"`
 	EnableDefaultPatterns      bool            `json:"enableDefaultPatterns,omitempty"`
 	EnableDefaultAllowPatterns bool            `json:"enableDefaultAllowPatterns,omitempty"`
-	PathPatterns               []string        `json:"pathPatterns,omitempty"`
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
@@ -81,10 +80,12 @@ type Config struct {
 	Methods                    []string        `json:"methods,omitempty"`
 	StatusCode                 int             `json:"statusCode,omitempty"`
 	CustomResponseText         string          `json:"customResponseText,omitempty"`
-	Action                     string          `json:"action,omitempty"`
 	Mode                       string          `json:"mode,omitempty"`
 	CheckQuery                 bool            `json:"checkQuery,omitempty"`
 	CheckHeaders               []string        `json:"checkHeaders,omitempty"`
+	CheckBody                  bool            `json:"checkBody,omitempty"`
+	CheckBodyMaxBytes          int64           `json:"checkBodyMaxBytes,omitempty"`
+	CheckBodyPatterns          []string        `json:"checkBodyPatterns,omitempty"`
 	Debug                      bool            `json:"debug,omitempty"`
 	SecurityLog                bool            `json:"securityLog,omitempty"`
 	Response                   *ResponseConfig `json:"response,omitempty"`
@@ -96,7 +97,6 @@ func CreateConfig() *Config {
 		Enabled:                    true,
 		EnableDefaultPatterns:      true,
 		EnableDefaultAllowPatterns: true,
-		PathPatterns:               []string{},
 		BlockPatterns:              []string{},
 		AllowPatterns:              []string{},
 		AllowedIPs:                 []string{},
@@ -104,8 +104,12 @@ func CreateConfig() *Config {
 		Methods:                    []string{"GET"},
 		StatusCode:                 403,
 		CustomResponseText:         "403 Forbidden: Access to sensitive endpoint is blocked",
+		Mode:                       "text",
 		CheckQuery:                 false,
 		CheckHeaders:               []string{},
+		CheckBody:                  false,
+		CheckBodyMaxBytes:          65536,
+		CheckBodyPatterns:          []string{},
 		Debug:                      false,
 		SecurityLog:                true,
 		Response: &ResponseConfig{
@@ -205,6 +209,7 @@ type Engine struct {
 	Methods          map[string]struct{}
 	BlockRegexes     []*regexp.Regexp
 	AllowRegexes     []*regexp.Regexp
+	BodyRegexes      []*regexp.Regexp
 	AllowedIPs       []net.IP
 	AllowedNets      []*net.IPNet
 	TrustedProxyIPs  []net.IP
@@ -236,7 +241,6 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	if cfg.EnableDefaultPatterns {
 		blockPatterns = append(blockPatterns, DefaultBlockPatterns...)
 	}
-	blockPatterns = append(blockPatterns, cfg.PathPatterns...)
 	blockPatterns = append(blockPatterns, cfg.BlockPatterns...)
 
 	compiledBlock := make([]*regexp.Regexp, 0, len(blockPatterns))
@@ -269,10 +273,22 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		compiledAllow = append(compiledAllow, re)
 	}
 
+	compiledBody := make([]*regexp.Regexp, 0, len(cfg.CheckBodyPatterns))
+	for _, p := range cfg.CheckBodyPatterns {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid body regex %q: %w", p, err)
+		}
+		compiledBody = append(compiledBody, re)
+	}
+
 	var ips []net.IP
 	var nets []*net.IPNet
 	for _, ipStr := range cfg.AllowedIPs {
-		ipStr = strings.TrimSpace(ipStr)
+		ipStr = cleanIP(ipStr)
 		if ipStr == "" {
 			continue
 		}
@@ -294,7 +310,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 	var proxyIPs []net.IP
 	var proxyNets []*net.IPNet
 	for _, ipStr := range cfg.TrustedProxies {
-		ipStr = strings.TrimSpace(ipStr)
+		ipStr = cleanIP(ipStr)
 		if ipStr == "" {
 			continue
 		}
@@ -318,15 +334,13 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		return nil, fmt.Errorf("invalid statusCode %d: must be between 100 and 599", cfg.StatusCode)
 	}
 
-	// Resolve top-level Mode or Action aliases into cfg.Response.Mode
+	// Resolve top-level Mode into cfg.Response.Mode
 	if cfg.Response == nil {
 		cfg.Response = &ResponseConfig{Mode: "text"}
 	}
 	if strings.TrimSpace(cfg.Response.Mode) == "" || cfg.Response.Mode == "text" {
 		if strings.TrimSpace(cfg.Mode) != "" {
 			cfg.Response.Mode = strings.TrimSpace(cfg.Mode)
-		} else if strings.TrimSpace(cfg.Action) != "" {
-			cfg.Response.Mode = strings.TrimSpace(cfg.Action)
 		} else if cfg.Response.Mode == "" {
 			cfg.Response.Mode = "text"
 		}
@@ -397,6 +411,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		Methods:          methodsMap,
 		BlockRegexes:     compiledBlock,
 		AllowRegexes:     compiledAllow,
+		BodyRegexes:      compiledBody,
 		AllowedIPs:       ips,
 		AllowedNets:      nets,
 		TrustedProxyIPs:  proxyIPs,
@@ -417,7 +432,7 @@ type EvaluationResult struct {
 
 // Evaluate inspects a simulated request against compiled rules without client IP.
 func (e *Engine) Evaluate(method, requestPath, queryString string, headers map[string]string) *EvaluationResult {
-	return e.EvaluateWithClientIP(method, requestPath, queryString, headers, "")
+	return e.EvaluateWithBody(method, requestPath, queryString, headers, "", "")
 }
 
 // isTrustedProxy returns true if remoteIP matches any declared trusted proxy IP or CIDR.
@@ -432,19 +447,28 @@ func (e *Engine) isTrustedProxy(ip net.IP) bool {
 		}
 	}
 	for _, n := range e.TrustedProxyNets {
-		if n.Contains(ip) {
+		if n.Contains(ip) || (ip.To4() != nil && n.Contains(ip.To4())) {
 			return true
 		}
 	}
 	return false
 }
 
+func cleanIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		raw = host
+	}
+	raw = strings.Trim(raw, "[]")
+	if idx := strings.IndexByte(raw, '%'); idx != -1 {
+		raw = raw[:idx]
+	}
+	return raw
+}
+
 // ExtractClientIP resolves the real client IP respecting trusted proxy configuration.
 func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) string {
-	remoteIPStr := strings.TrimSpace(remoteAddr)
-	if host, _, err := net.SplitHostPort(remoteIPStr); err == nil {
-		remoteIPStr = host
-	}
+	remoteIPStr := cleanIP(remoteAddr)
 	remoteIP := net.ParseIP(remoteIPStr)
 
 	// If remoteAddr is provided, verify whether it is a declared trusted proxy
@@ -457,10 +481,7 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 		for k, v := range headers {
 			if strings.EqualFold(k, "X-Forwarded-For") {
 				parts := strings.Split(v, ",")
-				first := strings.TrimSpace(parts[0])
-				if host, _, err := net.SplitHostPort(first); err == nil {
-					first = host
-				}
+				first := cleanIP(parts[0])
 				if net.ParseIP(first) != nil {
 					return first
 				}
@@ -468,10 +489,7 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 		}
 		for k, v := range headers {
 			if strings.EqualFold(k, "X-Real-IP") {
-				ip := strings.TrimSpace(v)
-				if host, _, err := net.SplitHostPort(ip); err == nil {
-					ip = host
-				}
+				ip := cleanIP(v)
 				if net.ParseIP(ip) != nil {
 					return ip
 				}
@@ -484,6 +502,11 @@ func (e *Engine) ExtractClientIP(headers map[string]string, remoteAddr string) s
 
 // EvaluateWithClientIP inspects a simulated request against compiled rules including client IP check.
 func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, headers map[string]string, clientIPStr string) *EvaluationResult {
+	return e.EvaluateWithBody(method, requestPath, queryString, headers, clientIPStr, "")
+}
+
+// EvaluateWithBody inspects a simulated request against compiled rules including client IP and body check.
+func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, headers map[string]string, clientIPStr string, body string) *EvaluationResult {
 	result := &EvaluationResult{
 		Allowed:        false,
 		Bypassed:       false,
@@ -519,7 +542,7 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 				}
 			}
 			for _, allowedNet := range e.AllowedNets {
-				if allowedNet.Contains(ip) {
+				if allowedNet.Contains(ip) || (ip.To4() != nil && allowedNet.Contains(ip.To4())) {
 					result.Allowed = true
 					result.Reason = "ip_whitelisted"
 					return result
@@ -609,6 +632,46 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 		}
 	}
 
+	// Check body
+	shouldCheckBody := e.Config.CheckBody || len(e.BodyRegexes) > 0
+	if shouldCheckBody && body != "" {
+		maxBytes := e.Config.CheckBodyMaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 65536
+		}
+		bodyBytes := []byte(body)
+		if int64(len(bodyBytes)) > maxBytes {
+			bodyBytes = bodyBytes[:maxBytes]
+		}
+		bodyStr := string(bodyBytes)
+		unescapedBody, err := url.QueryUnescape(bodyStr)
+		if err != nil {
+			unescapedBody = bodyStr
+		}
+
+		bodyCandidates := []string{bodyStr}
+		if unescapedBody != bodyStr {
+			bodyCandidates = append(bodyCandidates, unescapedBody)
+		}
+
+		patternsToCheck := e.BodyRegexes
+		if len(patternsToCheck) == 0 {
+			patternsToCheck = e.BlockRegexes
+		}
+
+		for _, bCand := range bodyCandidates {
+			for _, re := range patternsToCheck {
+				if re.MatchString(bCand) {
+					result.Blocked = true
+					result.MatchedPattern = re.String()
+					result.MatchedTarget = "[body payload]"
+					result.Reason = "body_blocked"
+					return result
+				}
+			}
+		}
+	}
+
 	result.Allowed = true
 	result.Reason = "passed_inspection"
 	return result
@@ -662,8 +725,6 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 	if mode == "text" {
 		if strings.TrimSpace(cfg.Mode) != "" {
 			mode = strings.TrimSpace(cfg.Mode)
-		} else if strings.TrimSpace(cfg.Action) != "" {
-			mode = strings.TrimSpace(cfg.Action)
 		}
 	}
 
@@ -689,11 +750,9 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		b.WriteString("          securityLog: false\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		b.WriteString("          pathPatterns:\n")
-		for _, p := range allBlocks {
+	if len(cfg.BlockPatterns) > 0 {
+		b.WriteString("          blockPatterns:\n")
+		for _, p := range cfg.BlockPatterns {
 			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(p, "'", "''"))
 		}
 	}
@@ -728,6 +787,18 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		b.WriteString("          checkHeaders:\n")
 		for _, h := range cfg.CheckHeaders {
 			fmt.Fprintf(&b, "            - '%s'\n", h)
+		}
+	}
+	if cfg.CheckBody {
+		b.WriteString("          checkBody: true\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "          checkBodyMaxBytes: %d\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("          checkBodyPatterns:\n")
+		for _, p := range cfg.CheckBodyPatterns {
+			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(p, "'", "''"))
 		}
 	}
 
@@ -786,7 +857,10 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "              %s: %q\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "              %s: %q\n", cleanKey, cfg.Response.Headers[k])
+				}
 			}
 		}
 	}
@@ -809,11 +883,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		b.WriteString("  securityLog = false\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		b.WriteString("  pathPatterns = [")
-		for i, p := range allBlocks {
+	if len(cfg.BlockPatterns) > 0 {
+		b.WriteString("  blockPatterns = [")
+		for i, p := range cfg.BlockPatterns {
 			if i > 0 {
 				b.WriteString(", ")
 			}
@@ -874,6 +946,22 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		}
 		b.WriteString("]\n")
 	}
+	if cfg.CheckBody {
+		b.WriteString("  checkBody = true\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "  checkBodyMaxBytes = %d\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("  checkBodyPatterns = [")
+		for i, p := range cfg.CheckBodyPatterns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", p)
+		}
+		b.WriteString("]\n")
+	}
 
 	mode, status, body := cfg.ResolveResponse()
 	b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response]\n")
@@ -930,7 +1018,12 @@ func (cfg *Config) GenerateTraefikTOML() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "  %s = %q\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanKey = strings.TrimSpace(cleanKey)
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "  %s = %q\n", cleanKey, cleanVal)
+				}
 			}
 		}
 	}
@@ -953,10 +1046,8 @@ func (cfg *Config) GenerateTraefikLabels() string {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.securityLog=false\"\n")
 	}
 
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
-		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.pathPatterns=%s\"\n", strings.Join(allBlocks, ","))
+	if len(cfg.BlockPatterns) > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.blockPatterns=%s\"\n", strings.Join(cfg.BlockPatterns, ","))
 	}
 	if len(cfg.AllowPatterns) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ","))
@@ -976,23 +1067,38 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkHeaders=%s\"\n", strings.Join(cfg.CheckHeaders, ","))
 	}
+	if cfg.CheckBody {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBody=true\"\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBodyMaxBytes=%d\"\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.checkBodyPatterns=%s\"\n", strings.Join(cfg.CheckBodyPatterns, ","))
+	}
 
 	mode, status, body := cfg.ResolveResponse()
 	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode)
 	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status)
 	if body != "" {
-		escapedBody := strings.ReplaceAll(body, "\"", "\\\"")
+		escapedBody := strings.ReplaceAll(body, "\\", "\\\\")
+		escapedBody = strings.ReplaceAll(escapedBody, "\"", "\\\"")
+		escapedBody = strings.ReplaceAll(escapedBody, "\r", "\\r")
+		escapedBody = strings.ReplaceAll(escapedBody, "\n", "\\n")
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody)
 	}
 	if cfg.Response != nil {
 		if cfg.Response.ContentType != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.contentType=%s\"\n", cfg.Response.ContentType)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.ContentType, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.contentType=%s\"\n", esc)
 		}
 		if cfg.Response.RedirectURL != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.redirectUrl=%s\"\n", cfg.Response.RedirectURL)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.RedirectURL, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.redirectUrl=%s\"\n", esc)
 		}
 		if cfg.Response.ProxyURL != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", cfg.Response.ProxyURL)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.ProxyURL, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", esc)
 		}
 		if cfg.Response.GzipBombMB > 0 {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.gzipBombMB=%d\"\n", cfg.Response.GzipBombMB)
@@ -1020,6 +1126,21 @@ func (cfg *Config) GenerateTraefikLabels() string {
 				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.title=%s\"\n", cfg.Response.Captcha.Title)
 			}
 		}
+		if len(cfg.Response.Headers) > 0 {
+			var hKeys []string
+			for k := range cfg.Response.Headers {
+				hKeys = append(hKeys, k)
+			}
+			sort.Strings(hKeys)
+			for _, k := range hKeys {
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				cleanVal = strings.ReplaceAll(cleanVal, "\"", "\\\"")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.headers.%s=%s\"\n", cleanKey, cleanVal)
+				}
+			}
+		}
 	}
 	return b.String()
 }
@@ -1029,13 +1150,13 @@ func (cfg *Config) GenerateCaddyfile() string {
 	var b strings.Builder
 	b.WriteString("routewarden {\n")
 	if !cfg.Enabled {
-		b.WriteString("    disable\n")
+		b.WriteString("    enabled false\n")
 	}
 	if !cfg.EnableDefaultPatterns {
-		b.WriteString("    disable_default_patterns\n")
+		b.WriteString("    enable_default_patterns false\n")
 	}
 	if !cfg.EnableDefaultAllowPatterns {
-		b.WriteString("    disable_default_allow_patterns\n")
+		b.WriteString("    enable_default_allow_patterns false\n")
 	}
 	if cfg.Debug {
 		b.WriteString("    debug\n")
@@ -1049,16 +1170,23 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if len(cfg.CheckHeaders) > 0 {
 		fmt.Fprintf(&b, "    check_headers %s\n", strings.Join(cfg.CheckHeaders, " "))
 	}
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	for _, p := range allBlocks {
-		fmt.Fprintf(&b, "    block_pattern %q\n", p)
+	if cfg.CheckBody {
+		b.WriteString("    check_body\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "    check_body_max_bytes %d\n", cfg.CheckBodyMaxBytes)
+	}
+	for _, p := range cfg.CheckBodyPatterns {
+		fmt.Fprintf(&b, "    check_body_patterns %q\n", p)
+	}
+	for _, p := range cfg.BlockPatterns {
+		fmt.Fprintf(&b, "    block_patterns %q\n", p)
 	}
 	for _, a := range cfg.AllowPatterns {
-		fmt.Fprintf(&b, "    allow_pattern %q\n", a)
+		fmt.Fprintf(&b, "    allow_patterns %q\n", a)
 	}
 	for _, ip := range cfg.AllowedIPs {
-		fmt.Fprintf(&b, "    allowed_ip %s\n", ip)
+		fmt.Fprintf(&b, "    allowed_ips %s\n", ip)
 	}
 	for _, proxy := range cfg.TrustedProxies {
 		fmt.Fprintf(&b, "    trusted_proxies %s\n", proxy)
@@ -1079,20 +1207,20 @@ func (cfg *Config) GenerateCaddyfile() string {
 			fmt.Fprintf(&b, "        mode %s\n", mode)
 		}
 		if status != 0 {
-			fmt.Fprintf(&b, "        status %d\n", status)
+			fmt.Fprintf(&b, "        status_code %d\n", status)
 		}
 		if body != "" {
 			fmt.Fprintf(&b, "        body %q\n", body)
 		}
 		if cfg.Response != nil {
 			if cfg.Response.ContentType != "" {
-				fmt.Fprintf(&b, "        content_type %s\n", cfg.Response.ContentType)
+				fmt.Fprintf(&b, "        content_type %q\n", cfg.Response.ContentType)
 			}
 			if cfg.Response.RedirectURL != "" {
-				fmt.Fprintf(&b, "        redirect_url %s\n", cfg.Response.RedirectURL)
+				fmt.Fprintf(&b, "        redirect_url %q\n", cfg.Response.RedirectURL)
 			}
 			if cfg.Response.ProxyURL != "" {
-				fmt.Fprintf(&b, "        proxy_url %s\n", cfg.Response.ProxyURL)
+				fmt.Fprintf(&b, "        proxy_url %q\n", cfg.Response.ProxyURL)
 			}
 			if cfg.Response.GzipBombMB > 0 {
 				fmt.Fprintf(&b, "        gzip_bomb_mb %d\n", cfg.Response.GzipBombMB)
@@ -1123,7 +1251,10 @@ func (cfg *Config) GenerateCaddyfile() string {
 				}
 				sort.Strings(hKeys)
 				for _, k := range hKeys {
-					fmt.Fprintf(&b, "        header %s %s\n", k, cfg.Response.Headers[k])
+					cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+					if cleanKey != "" {
+						fmt.Fprintf(&b, "        header %s %q\n", cleanKey, cfg.Response.Headers[k])
+					}
 				}
 			}
 		}
@@ -1147,11 +1278,9 @@ func (cfg *Config) GenerateNginxLua() string {
 	if !cfg.SecurityLog {
 		b.WriteString("    security_log = false,\n")
 	}
-	allBlocks := append([]string{}, cfg.PathPatterns...)
-	allBlocks = append(allBlocks, cfg.BlockPatterns...)
-	if len(allBlocks) > 0 {
+	if len(cfg.BlockPatterns) > 0 {
 		b.WriteString("    block_patterns = {\n")
-		for _, p := range allBlocks {
+		for _, p := range cfg.BlockPatterns {
 			fmt.Fprintf(&b, "        %q,\n", p)
 		}
 		b.WriteString("    },\n")
@@ -1191,6 +1320,19 @@ func (cfg *Config) GenerateNginxLua() string {
 		b.WriteString("    check_headers = {\n")
 		for _, h := range cfg.CheckHeaders {
 			fmt.Fprintf(&b, "        %q,\n", h)
+		}
+		b.WriteString("    },\n")
+	}
+	if cfg.CheckBody {
+		b.WriteString("    check_body = true,\n")
+	}
+	if cfg.CheckBodyMaxBytes > 0 {
+		fmt.Fprintf(&b, "    check_body_max_bytes = %d,\n", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) > 0 {
+		b.WriteString("    check_body_patterns = {\n")
+		for _, p := range cfg.CheckBodyPatterns {
+			fmt.Fprintf(&b, "        %q,\n", p)
 		}
 		b.WriteString("    },\n")
 	}
@@ -1254,7 +1396,11 @@ func (cfg *Config) GenerateNginxLua() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "            [%q] = %q,\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "            [%q] = %q,\n", cleanKey, cleanVal)
+				}
 			}
 			b.WriteString("        },\n")
 		}

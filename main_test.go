@@ -131,6 +131,40 @@ func TestCLI_TestCommand(t *testing.T) {
 			}`,
 			wantOutput: "Result: 🛑 BLOCKED (HTTP Status 429, Mode: rateLimitChallenge)",
 		},
+		{
+			name: "Block body containing grant_type=password",
+			args: []string{
+				"test",
+				"--config", "-",
+				"--method", "POST",
+				"--path", "/identity/connect/token",
+				"--body", "grant_type=password&username=admin",
+			},
+			stdin: `{
+				"enabled": true,
+				"methods": ["POST"],
+				"checkBody": true,
+				"checkBodyPatterns": ["(?i)grant_type=password"]
+			}`,
+			wantOutput: "Result: 🛑 BLOCKED",
+		},
+		{
+			name: "Allow body with grant_type=send_access",
+			args: []string{
+				"test",
+				"--config", "-",
+				"--method", "POST",
+				"--path", "/identity/connect/token",
+				"--body", "grant_type=send_access",
+			},
+			stdin: `{
+				"enabled": true,
+				"methods": ["POST"],
+				"checkBody": true,
+				"checkBodyPatterns": ["(?i)grant_type=password"]
+			}`,
+			wantOutput: "Result: ✅ ALLOWED",
+		},
 	}
 
 	for _, tc := range tests {
@@ -212,7 +246,7 @@ func TestCLI_GenerateCommand(t *testing.T) {
 	baseConfig := `{
 		"enabled": true,
 		"enableDefaultPatterns": true,
-		"pathPatterns": ["(?i)^/admin(/.*)?$"],
+		"blockPatterns": ["(?i)^/admin(/.*)?$"],
 		"allowPatterns": ["(?i)^/admin/public(/.*)?$"],
 		"allowedIps": ["192.168.1.1", "10.0.0.0/8"],
 		"methods": ["GET", "POST"],
@@ -235,8 +269,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "traefik.http.middlewares.warden.plugin.routewarden.enabled=true") {
 			t.Errorf("missing warden middleware label:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns=(?i)^/admin(/.*)?$") {
-			t.Errorf("missing pathPatterns in traefik-labels output:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns=(?i)^/admin(/.*)?$") {
+			t.Errorf("missing blockPatterns in traefik-labels output:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "allowPatterns=(?i)^/admin/public(/.*)?$") {
 			t.Errorf("missing allowPatterns in traefik-labels output:\n%s", strOut)
@@ -286,8 +320,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "enableDefaultPatterns: true") {
 			t.Errorf("missing 'enableDefaultPatterns: true' in traefik YAML:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns:") {
-			t.Errorf("missing 'pathPatterns:' in traefik YAML:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns:") {
+			t.Errorf("missing 'blockPatterns:' in traefik YAML:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "allowPatterns:") {
 			t.Errorf("missing 'allowPatterns:' in traefik YAML:\n%s", strOut)
@@ -320,14 +354,14 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "routewarden {") {
 			t.Errorf("missing 'routewarden {' block in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "block_pattern") {
-			t.Errorf("missing 'block_pattern' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "block_patterns") {
+			t.Errorf("missing 'block_patterns' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "allow_pattern") {
-			t.Errorf("missing 'allow_pattern' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "allow_patterns") {
+			t.Errorf("missing 'allow_patterns' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "allowed_ip 192.168.1.1") {
-			t.Errorf("missing 'allowed_ip' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "allowed_ips 192.168.1.1") {
+			t.Errorf("missing 'allowed_ips' in Caddyfile:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "methods GET POST") {
 			t.Errorf("missing 'methods GET POST' in Caddyfile:\n%s", strOut)
@@ -341,8 +375,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "mode json") {
 			t.Errorf("missing 'mode json' in Caddyfile:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "status 403") {
-			t.Errorf("missing 'status 403' in Caddyfile:\n%s", strOut)
+		if !strings.Contains(strOut, "status_code 403") {
+			t.Errorf("missing 'status_code 403' in Caddyfile:\n%s", strOut)
 		}
 	})
 
@@ -412,8 +446,8 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		if !strings.Contains(strOut, "enabled = true") {
 			t.Errorf("missing 'enabled = true' in TOML:\n%s", strOut)
 		}
-		if !strings.Contains(strOut, "pathPatterns = [") {
-			t.Errorf("missing 'pathPatterns = [' in TOML:\n%s", strOut)
+		if !strings.Contains(strOut, "blockPatterns = [") {
+			t.Errorf("missing 'blockPatterns = [' in TOML:\n%s", strOut)
 		}
 		if !strings.Contains(strOut, "[http.middlewares.routewarden.plugin.routewarden.response]") {
 			t.Errorf("missing TOML response section:\n%s", strOut)
@@ -511,7 +545,7 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		// Single quotes in patterns must be doubled in YAML single-quoted scalars
 		configWithQuote := `{
 			"enabled": true,
-			"pathPatterns": ["(?i)^/it's-admin(/.*)?$"]
+			"blockPatterns": ["(?i)^/it's-admin(/.*)?$"]
 		}`
 		cmd := exec.Command(binaryPath, "generate", "--target", "traefik", "--config", "-")
 		cmd.Stdin = strings.NewReader(configWithQuote)
@@ -550,10 +584,10 @@ func TestCLI_GenerateCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple pathPatterns and allowPatterns all appear", func(t *testing.T) {
+	t.Run("multiple blockPatterns and allowPatterns all appear", func(t *testing.T) {
 		multiPatternConfig := `{
 			"enabled": true,
-			"pathPatterns": ["^/secret/.*$", "^/private/.*$"],
+			"blockPatterns": ["^/secret/.*$", "^/private/.*$"],
 			"allowPatterns": ["^/public/.*$", "^/assets/.*$"]
 		}`
 		for _, target := range []string{"traefik", "traefik-labels", "caddy", "nginx"} {
@@ -1044,7 +1078,7 @@ func TestCLI_SandboxCommand(t *testing.T) {
 		tomlPath := filepath.Join(tmpDir, "traefik.toml")
 		tomlContent := `[http.middlewares.shield.plugin.routewarden]
   enabled = true
-  pathPatterns = ["(?i)^/admin.*$"]
+  blockPatterns = ["(?i)^/admin.*$"]
 `
 		if err := os.WriteFile(tomlPath, []byte(tomlContent), 0644); err != nil {
 			t.Fatal(err)
@@ -1594,6 +1628,30 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("dashboard up with --enable-alerting and export", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exportDir := filepath.Join(tmpDir, "alerting-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir, "--enable-alerting")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Exported observability configuration") {
+			t.Errorf("expected export message, got: %s", stdout)
+		}
+		alertingPath := filepath.Join(exportDir, "grafana", "provisioning", "alerting", "alerting.yaml")
+		if _, err := os.Stat(alertingPath); err != nil {
+			t.Errorf("alerting.yaml was not exported: %v", err)
+		}
+		pluginsPath := filepath.Join(exportDir, "grafana", "provisioning", "plugins", "plugins.yaml")
+		if _, err := os.Stat(pluginsPath); err != nil {
+			t.Errorf("plugins.yaml was not exported: %v", err)
+		}
+		emptyKeepPath := filepath.Join(exportDir, "grafana", "provisioning", "empty", "README.md")
+		if _, err := os.Stat(emptyKeepPath); err != nil {
+			t.Errorf("empty/README.md was not exported: %v", err)
+		}
+	})
+
 	t.Run("dashboard unknown subcommand rejected", func(t *testing.T) {
 		_, stderr, code := runCLI(t, "dashboard", "foobar")
 		if code != 1 {
@@ -1604,4 +1662,194 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 	})
 }
+
+func TestCLI_Generate_StdinAndTargetErrors(t *testing.T) {
+	validJSON := `{
+		"enabled": true,
+		"blockPatterns": ["(?i)^/admin"]
+	}`
+
+	t.Run("generate from stdin with -", func(t *testing.T) {
+		stdout, stderr, code := runCLIWithStdin(t, validJSON, "generate", "caddy", "-")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "routewarden {") || !strings.Contains(stdout, "block_patterns \"(?i)^/admin\"") {
+			t.Errorf("expected caddy configuration output, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("generate with unsupported target format", func(t *testing.T) {
+		_, stderr, code := runCLIWithStdin(t, validJSON, "generate", "unsupported-gateway", "-")
+		if code != 1 {
+			t.Fatalf("expected code 1 for unsupported target, got %d", code)
+		}
+		if !strings.Contains(stderr, "unsupported target format") && !strings.Contains(stderr, "Error generating configuration") {
+			t.Errorf("expected error message about unsupported target format, got: %s", stderr)
+		}
+	})
+
+	t.Run("generate missing target", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "generate")
+		if code != 1 {
+			t.Fatalf("expected code 1 when target missing, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error: --target") {
+			t.Errorf("expected missing target error, got: %s", stderr)
+		}
+	})
+
+	t.Run("generate non-existent config file", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "generate", "caddy", "nonexistent-config-file.json")
+		if code != 1 {
+			t.Fatalf("expected code 1 for missing file, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error reading config file") {
+			t.Errorf("expected file read error, got: %s", stderr)
+		}
+	})
+}
+
+func TestCLI_Validate_StdinAndErrors(t *testing.T) {
+	t.Run("validate valid JSON from stdin", func(t *testing.T) {
+		validJSON := `{"enabled": true, "blockPatterns": ["^/secret"]}`
+		stdout, stderr, code := runCLIWithStdin(t, validJSON, "validate", "-")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(strings.ToLower(stdout), "valid") {
+			t.Errorf("expected validation success message, got: %s", stdout)
+		}
+	})
+
+	t.Run("validate malformed JSON from stdin", func(t *testing.T) {
+		invalidJSON := `{"enabled": true, unclosed json`
+		_, stderr, code := runCLIWithStdin(t, invalidJSON, "validate", "-")
+		if code != 1 {
+			t.Fatalf("expected code 1 for invalid JSON, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error") && !strings.Contains(stderr, "invalid") {
+			t.Errorf("expected error message for malformed JSON, got: %s", stderr)
+		}
+	})
+
+	t.Run("validate non-existent file", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "validate", "missing-file-xyz.json")
+		if code != 1 {
+			t.Fatalf("expected code 1 for non-existent file, got %d", code)
+		}
+		if !strings.Contains(stderr, "Error reading") && !strings.Contains(stderr, "no such file") {
+			t.Errorf("expected error for missing file, got: %s", stderr)
+		}
+	})
+}
+
+func TestCLI_Test_ClientIPAndQueryFlags(t *testing.T) {
+	configWithIP := `{
+		"enabled": true,
+		"blockPatterns": ["(?i)^/admin"],
+		"allowedIps": ["10.0.0.1"],
+		"checkQuery": true
+	}`
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "routewarden.json")
+	if err := os.WriteFile(cfgPath, []byte(configWithIP), 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	t.Run("test with whitelisted ip bypasses block", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "--ip", "10.0.0.1", "/admin")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "PASSED") && !strings.Contains(stdout, "ALLOWED") && !strings.Contains(stdout, "BYPASSED") {
+			t.Errorf("expected whitelisted IP to pass, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test with non-whitelisted ip gets blocked", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "--ip", "192.168.1.1", "/admin")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "BLOCKED") {
+			t.Errorf("expected non-whitelisted IP to be blocked, got:\n%s", stdout)
+		}
+	})
+
+	t.Run("test with query string blocked", func(t *testing.T) {
+		stdout, stderr, code := runCLI(t, "test", "-q", "file=/.env", "/search")
+		if code != 0 {
+			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "BLOCKED") {
+			t.Errorf("expected query string with /.env to be blocked, got:\n%s", stdout)
+		}
+	})
+}
+
+func TestCLI_Schema_ValidJSONSchema(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "schema")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema command, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("schema output is not valid JSON: %v", err)
+	}
+
+	if _, ok := schema["$schema"]; !ok {
+		t.Errorf("schema missing '$schema' field")
+	}
+	if _, ok := schema["properties"]; !ok {
+		t.Errorf("schema missing 'properties' field")
+	}
+}
+
+func TestCLI_Schema_TCPSchema(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "schema", "--tcp")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema --tcp, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("tcp schema output is not valid JSON: %v", err)
+	}
+
+	if _, ok := schema["$schema"]; !ok {
+		t.Errorf("tcp schema missing '$schema' field")
+	}
+	if title, ok := schema["title"].(string); !ok || !strings.Contains(title, "TCP Warden") {
+		t.Errorf("expected title to mention 'TCP Warden', got %v", schema["title"])
+	}
+}
+
+func TestCLI_Test_URLAndInlineQueryParsing(t *testing.T) {
+	// Test full URL containing path and query with block pattern
+	stdout, stderr, code := runCLI(t, "test", "http://example.com/search?file=/.env")
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected blocked result for URL containing query with .env, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Reason:  query_blocked") {
+		t.Errorf("expected reason query_blocked, got: %s", stdout)
+	}
+
+	// Test path containing inline query without scheme
+	stdout2, stderr2, code2 := runCLI(t, "test", "/search?q=/.env")
+	if code2 != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code2, stderr2)
+	}
+	if !strings.Contains(stdout2, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected blocked result for path containing inline query with .env, got: %s", stdout2)
+	}
+	if !strings.Contains(stdout2, "Reason:  query_blocked") {
+		t.Errorf("expected reason query_blocked, got: %s", stdout2)
+	}
+}
+
 

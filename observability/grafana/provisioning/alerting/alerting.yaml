@@ -11,16 +11,19 @@ contactPoints:
         type: webhook
         disableResolveMessage: false
         settings:
-          url: "${ALERT_WEBHOOK_URL:-http://host.docker.internal:8080/alerts}"
+          url: "${ALERT_WEBHOOK_URL}"
           httpMethod: "POST"
         title: "RouteWarden Threat Alert - Webhook"
 
+# ------------------------------------------------------------------------------
+# Optional Alert Integrations — active when env var is set, skipped when empty
+# ------------------------------------------------------------------------------
       - uid: "routewarden-slack"
         type: slack
         disableResolveMessage: false
         settings:
           recipient: "#security-alerts"
-          url: "${SLACK_WEBHOOK_URL:-}"
+          url: "${SLACK_WEBHOOK_URL}"
           title: "🚨 RouteWarden Threat Alert: {{ .CommonLabels.alertname }}"
           text: |
             *Alert:* {{ .CommonLabels.alertname }}
@@ -33,16 +36,17 @@ contactPoints:
         type: discord
         disableResolveMessage: false
         settings:
-          url: "${DISCORD_WEBHOOK_URL:-}"
+          url: "${DISCORD_WEBHOOK_URL}"
           message: "🛡️ **RouteWarden Alert: {{ .CommonLabels.alertname }}** [{{ .CommonLabels.severity }}]\n{{ .CommonAnnotations.description }}"
 
       - uid: "routewarden-pagerduty"
         type: pagerduty
         disableResolveMessage: false
         settings:
-          integrationKey: "${PAGERDUTY_KEY:-}"
+          integrationKey: "${PAGERDUTY_KEY}"
           severity: "{{ .CommonLabels.severity }}"
           summary: "RouteWarden Security Alert: {{ .CommonLabels.alertname }}"
+
 
 # ------------------------------------------------------------------------------
 # 2. Notification Routing Policies
