@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TraefikLabel represents a single key-value label pair.
@@ -87,52 +89,53 @@ func ParseTraefikLabels(content string) []TraefikLabel {
 
 // ExtractLabelsFromCompose extracts Traefik labels from docker-compose.yaml content,
 // supporting both list-of-strings format (- "traefik.xxx=yyy") and YAML dictionary format
-// (traefik.xxx: true).
+// (traefik.xxx: true). Uses standard yaml.Unmarshal for robust structured parsing.
 func ExtractLabelsFromCompose(composeContent string) []TraefikLabel {
+	var composeData struct {
+		Services map[string]struct {
+			Labels any `yaml:"labels"`
+			Deploy struct {
+				Labels any `yaml:"labels"`
+			} `yaml:"deploy"`
+		} `yaml:"services"`
+	}
+
 	var labels []TraefikLabel
-	lines := strings.Split(composeContent, "\n")
-	inLabels := false
-	labelsIndent := -1
-
-	for _, rawLine := range lines {
-		trimmed := strings.TrimSpace(rawLine)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "labels:") {
-			inLabels = true
-			labelsIndent = len(rawLine) - len(strings.TrimLeft(rawLine, " \t"))
-			continue
-		}
-
-		if inLabels {
-			currentIndent := len(rawLine) - len(strings.TrimLeft(rawLine, " \t"))
-			// Exit labels block if indentation is back to labelsIndent or less
-			if currentIndent <= labelsIndent {
-				inLabels = false
-				continue
+	if err := yaml.Unmarshal([]byte(composeContent), &composeData); err == nil && len(composeData.Services) > 0 {
+		extract := func(raw any) {
+			if raw == nil {
+				return
 			}
-
-			if lbl, ok := parseLabelLine(trimmed); ok {
-				labels = append(labels, lbl)
-				continue
-			}
-
-			// If it's another YAML property at the same service level (e.g. image:, ports:, environment:)
-			if !strings.HasPrefix(trimmed, "-") && strings.Contains(trimmed, ":") && !strings.HasPrefix(trimmed, "traefik.") {
-				if currentIndent <= labelsIndent+2 {
-					inLabels = false
+			switch v := raw.(type) {
+			case []any:
+				for _, item := range v {
+					if s, ok := item.(string); ok {
+						if lbl, ok := parseLabelLine(s); ok {
+							labels = append(labels, lbl)
+						}
+					}
+				}
+			case map[string]any:
+				for k, val := range v {
+					s := fmt.Sprintf("%s=%v", k, val)
+					if lbl, ok := parseLabelLine(s); ok {
+						labels = append(labels, lbl)
+					}
 				}
 			}
 		}
+
+		for _, svc := range composeData.Services {
+			extract(svc.Labels)
+			extract(svc.Deploy.Labels)
+		}
+		if len(labels) > 0 {
+			return labels
+		}
 	}
 
-	// Fallback: if inLabels didn't catch or labels are formatted differently, scan all lines
-	if len(labels) == 0 {
-		return ParseTraefikLabels(composeContent)
-	}
-	return labels
+	// Fallback to text scanning if not valid Compose YAML
+	return ParseTraefikLabels(composeContent)
 }
 
 // normalizePropKey normalizes property casing and naming variations.

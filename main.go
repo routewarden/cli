@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -213,24 +212,6 @@ func handleDashboard(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: rwarden dashboard [up|down|status|export] [flags]")
 		os.Exit(1)
 	}
-}
-
-// openBrowser opens the given URL in the default system browser.
-func openBrowser(url string) {
-	var cmd string
-	var cmdArgs []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		cmdArgs = []string{url}
-	case "windows":
-		cmd = "rundll32"
-		cmdArgs = []string{"url.dll,FileProtocolHandler", url}
-	default: // linux, freebsd, etc.
-		cmd = "xdg-open"
-		cmdArgs = []string{url}
-	}
-	_ = exec.Command(cmd, cmdArgs...).Start()
 }
 
 func handleCleanup(args []string) {
