@@ -681,4 +681,44 @@ func TestEngine_IPv4MappedIPv6Evaluation(t *testing.T) {
 	}
 }
 
+func TestGenerate_SecurityBoundaries(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Response = &engine.ResponseConfig{
+		Mode:        "custom",
+		StatusCode:  403,
+		ContentType: "text/html; charset=utf-8",
+		RedirectURL: "https://example.com/login?param=1&foo=bar",
+		ProxyURL:    "http://127.0.0.1:8080/honeypot",
+		Headers: map[string]string{
+			"Server":                 "RouteWarden Firewall v2.0",
+			"X-Injected\r\nHeader":  "evil-value\r\nInjected: 1",
+		},
+	}
+
+	// 1. Caddyfile generator must quote strings with spaces and sanitize CRLF
+	caddy := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddy, `content_type "text/html; charset=utf-8"`) {
+		t.Errorf("expected quoted content_type in Caddyfile, got:\n%s", caddy)
+	}
+	if !strings.Contains(caddy, `header Server "RouteWarden Firewall v2.0"`) {
+		t.Errorf("expected quoted header value with spaces in Caddyfile, got:\n%s", caddy)
+	}
+	if strings.Contains(caddy, "X-Injected\r\n") || strings.Contains(caddy, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Caddyfile, got:\n%s", caddy)
+	}
+	if !strings.Contains(caddy, `header X-InjectedHeader "evil-value\r\nInjected: 1"`) {
+		t.Errorf("expected sanitized header key and escaped value in Caddyfile, got:\n%s", caddy)
+	}
+
+	// 2. Traefik YAML generator must sanitize header keys
+	traefik := cfg.GenerateTraefikYAML()
+	if strings.Contains(traefik, "X-Injected\r\n") || strings.Contains(traefik, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik YAML, got:\n%s", traefik)
+	}
+	if !strings.Contains(traefik, `X-InjectedHeader: "evil-value\r\nInjected: 1"`) {
+		t.Errorf("expected sanitized header key and escaped value in Traefik YAML, got:\n%s", traefik)
+	}
+}
+
+
 

@@ -857,7 +857,10 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "              %s: %q\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "              %s: %q\n", cleanKey, cfg.Response.Headers[k])
+				}
 			}
 		}
 	}
@@ -1185,13 +1188,13 @@ func (cfg *Config) GenerateCaddyfile() string {
 		}
 		if cfg.Response != nil {
 			if cfg.Response.ContentType != "" {
-				fmt.Fprintf(&b, "        content_type %s\n", cfg.Response.ContentType)
+				fmt.Fprintf(&b, "        content_type %q\n", cfg.Response.ContentType)
 			}
 			if cfg.Response.RedirectURL != "" {
-				fmt.Fprintf(&b, "        redirect_url %s\n", cfg.Response.RedirectURL)
+				fmt.Fprintf(&b, "        redirect_url %q\n", cfg.Response.RedirectURL)
 			}
 			if cfg.Response.ProxyURL != "" {
-				fmt.Fprintf(&b, "        proxy_url %s\n", cfg.Response.ProxyURL)
+				fmt.Fprintf(&b, "        proxy_url %q\n", cfg.Response.ProxyURL)
 			}
 			if cfg.Response.GzipBombMB > 0 {
 				fmt.Fprintf(&b, "        gzip_bomb_mb %d\n", cfg.Response.GzipBombMB)
@@ -1222,7 +1225,10 @@ func (cfg *Config) GenerateCaddyfile() string {
 				}
 				sort.Strings(hKeys)
 				for _, k := range hKeys {
-					fmt.Fprintf(&b, "        header %s %s\n", k, cfg.Response.Headers[k])
+					cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+					if cleanKey != "" {
+						fmt.Fprintf(&b, "        header %s %q\n", cleanKey, cfg.Response.Headers[k])
+					}
 				}
 			}
 		}
