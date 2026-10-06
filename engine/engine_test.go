@@ -718,7 +718,29 @@ func TestGenerate_SecurityBoundaries(t *testing.T) {
 	if !strings.Contains(traefik, `X-InjectedHeader: "evil-value\r\nInjected: 1"`) {
 		t.Errorf("expected sanitized header key and escaped value in Traefik YAML, got:\n%s", traefik)
 	}
+
+	// 3. Traefik TOML generator must sanitize header keys
+	toml := cfg.GenerateTraefikTOML()
+	if strings.Contains(toml, "X-Injected\r\n") || strings.Contains(toml, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik TOML, got:\n%s", toml)
+	}
+	if strings.Contains(toml, "\revil-value") || strings.Contains(toml, "\nevil-value") {
+		t.Errorf("expected header value with CRLF to be sanitized in Traefik TOML, got:\n%s", toml)
+	}
+
+	// 4. Traefik Labels generator must sanitize header keys
+	labels := cfg.GenerateTraefikLabels()
+	if strings.Contains(labels, "X-Injected\r\n") || strings.Contains(labels, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Traefik Labels, got:\n%s", labels)
+	}
+
+	// 5. Nginx Lua generator must sanitize header keys
+	nginx := cfg.GenerateNginxLua()
+	if strings.Contains(nginx, "X-Injected\r\n") || strings.Contains(nginx, "X-Injected\n") {
+		t.Errorf("expected header key with CRLF to be sanitized in Nginx Lua, got:\n%s", nginx)
+	}
 }
+
 
 
 

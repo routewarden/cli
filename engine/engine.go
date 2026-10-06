@@ -1018,7 +1018,12 @@ func (cfg *Config) GenerateTraefikTOML() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "  %s = %q\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanKey = strings.TrimSpace(cleanKey)
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "  %s = %q\n", cleanKey, cleanVal)
+				}
 			}
 		}
 	}
@@ -1076,18 +1081,24 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.mode=%s\"\n", mode)
 	fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.statusCode=%d\"\n", status)
 	if body != "" {
-		escapedBody := strings.ReplaceAll(body, "\"", "\\\"")
+		escapedBody := strings.ReplaceAll(body, "\\", "\\\\")
+		escapedBody = strings.ReplaceAll(escapedBody, "\"", "\\\"")
+		escapedBody = strings.ReplaceAll(escapedBody, "\r", "\\r")
+		escapedBody = strings.ReplaceAll(escapedBody, "\n", "\\n")
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.body=%s\"\n", escapedBody)
 	}
 	if cfg.Response != nil {
 		if cfg.Response.ContentType != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.contentType=%s\"\n", cfg.Response.ContentType)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.ContentType, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.contentType=%s\"\n", esc)
 		}
 		if cfg.Response.RedirectURL != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.redirectUrl=%s\"\n", cfg.Response.RedirectURL)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.RedirectURL, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.redirectUrl=%s\"\n", esc)
 		}
 		if cfg.Response.ProxyURL != "" {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", cfg.Response.ProxyURL)
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.ProxyURL, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", esc)
 		}
 		if cfg.Response.GzipBombMB > 0 {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.gzipBombMB=%d\"\n", cfg.Response.GzipBombMB)
@@ -1113,6 +1124,21 @@ func (cfg *Config) GenerateTraefikLabels() string {
 			}
 			if cfg.Response.Captcha.Title != "" {
 				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.title=%s\"\n", cfg.Response.Captcha.Title)
+			}
+		}
+		if len(cfg.Response.Headers) > 0 {
+			var hKeys []string
+			for k := range cfg.Response.Headers {
+				hKeys = append(hKeys, k)
+			}
+			sort.Strings(hKeys)
+			for _, k := range hKeys {
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				cleanVal = strings.ReplaceAll(cleanVal, "\"", "\\\"")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.headers.%s=%s\"\n", cleanKey, cleanVal)
+				}
 			}
 		}
 	}
@@ -1370,7 +1396,11 @@ func (cfg *Config) GenerateNginxLua() string {
 			}
 			sort.Strings(hKeys)
 			for _, k := range hKeys {
-				fmt.Fprintf(&b, "            [%q] = %q,\n", k, cfg.Response.Headers[k])
+				cleanKey := strings.ReplaceAll(strings.ReplaceAll(k, "\r", ""), "\n", "")
+				cleanVal := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.Headers[k], "\r", ""), "\n", "")
+				if cleanKey != "" {
+					fmt.Fprintf(&b, "            [%q] = %q,\n", cleanKey, cleanVal)
+				}
 			}
 			b.WriteString("        },\n")
 		}
