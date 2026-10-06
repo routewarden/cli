@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -819,6 +820,23 @@ func handleTest(args []string) {
 	if *testPath == "" {
 		fmt.Fprintln(os.Stderr, "Error: --path <url-path> is required")
 		os.Exit(1)
+	}
+
+	if strings.HasPrefix(*testPath, "http://") || strings.HasPrefix(*testPath, "https://") {
+		if u, err := url.Parse(*testPath); err == nil {
+			if *testQuery == "" && u.RawQuery != "" {
+				*testQuery = u.RawQuery
+			}
+			if u.Path != "" {
+				*testPath = u.Path
+			} else {
+				*testPath = "/"
+			}
+		}
+	} else if *testQuery == "" && strings.Contains(*testPath, "?") {
+		parts := strings.SplitN(*testPath, "?", 2)
+		*testPath = parts[0]
+		*testQuery = parts[1]
 	}
 
 	cfg := engine.CreateConfig()

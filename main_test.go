@@ -1826,3 +1826,30 @@ func TestCLI_Schema_TCPSchema(t *testing.T) {
 	}
 }
 
+func TestCLI_Test_URLAndInlineQueryParsing(t *testing.T) {
+	// Test full URL containing path and query with block pattern
+	stdout, stderr, code := runCLI(t, "test", "http://example.com/search?file=/.env")
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected blocked result for URL containing query with .env, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Reason:  query_blocked") {
+		t.Errorf("expected reason query_blocked, got: %s", stdout)
+	}
+
+	// Test path containing inline query without scheme
+	stdout2, stderr2, code2 := runCLI(t, "test", "/search?q=/.env")
+	if code2 != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code2, stderr2)
+	}
+	if !strings.Contains(stdout2, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected blocked result for path containing inline query with .env, got: %s", stdout2)
+	}
+	if !strings.Contains(stdout2, "Reason:  query_blocked") {
+		t.Errorf("expected reason query_blocked, got: %s", stdout2)
+	}
+}
+
+
