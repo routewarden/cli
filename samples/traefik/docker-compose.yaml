@@ -14,7 +14,7 @@ services:
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.enabled=true"
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.enableDefaultPatterns=true"
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.enableDefaultAllowPatterns=true"
-      - "traefik.http.middlewares.compose-shield.plugin.routewarden.pathPatterns=(?i)^/admin/secret.*$,(?i)^/backup/.*$"
+      - "traefik.http.middlewares.compose-shield.plugin.routewarden.blockPatterns=(?i)^/admin/secret.*$,(?i)^/backup/.*$"
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.allowPatterns=(?i)^/backup/status$"
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.allowedIps=192.168.100.50,10.99.0.0/16"
       - "traefik.http.middlewares.compose-shield.plugin.routewarden.methods=GET,POST"

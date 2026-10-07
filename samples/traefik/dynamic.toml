@@ -13,7 +13,7 @@
   enabled = true
   enableDefaultPatterns = true
   enableDefaultAllowPatterns = true
-  pathPatterns = ["(?i)^/admin/secret.*$", "(?i)^/vault/.*$"]
+  blockPatterns = ["(?i)^/admin/secret.*$", "(?i)^/vault/.*$"]
   allowPatterns = ["(?i)^/vault/public$"]
   allowedIps = ["192.168.100.50", "10.99.0.0/16"]
   methods = ["GET", "POST"]
