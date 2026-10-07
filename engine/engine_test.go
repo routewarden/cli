@@ -741,6 +741,168 @@ func TestGenerate_SecurityBoundaries(t *testing.T) {
 	}
 }
 
+func TestEngine_AllowAndBlockPatterns_Comprehensive(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.EnableDefaultAllowPatterns = true
+	cfg.BlockPatterns = []string{
+		`(?i)^/admin/.*$`,
+		`(?i)\.(key|pem|conf|secret)$`,
+		`(?i)^/internal/debug$`,
+	}
+	cfg.AllowPatterns = []string{
+		`(?i)^/admin/public/health$`,
+		`(?i)^/admin/assets/.*$`,
+		`(?i)^/public/sample\.conf$`,
+		`(?i)^/\.well-known/acme-challenge/.*$`,
+	}
+	cfg.AllowedIPs = []string{"192.168.100.50"}
+	cfg.CheckQuery = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		method        string
+		path          string
+		query         string
+		clientIP      string
+		expectBlocked bool
+		expectReason  string
+	}{
+		// BlockPatterns matches
+		{
+			name:          "Block pattern: /admin/dashboard blocked",
+			method:        "GET",
+			path:          "/admin/dashboard",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		{
+			name:          "Block pattern: case insensitive /ADMIN/Settings blocked",
+			method:        "GET",
+			path:          "/ADMIN/Settings",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		{
+			name:          "Block pattern: file extension /certs/server.key blocked",
+			method:        "GET",
+			path:          "/certs/server.key",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		{
+			name:          "Block pattern: file extension /config/app.conf blocked",
+			method:        "GET",
+			path:          "/config/app.conf",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		{
+			name:          "Block pattern: exact endpoint /internal/debug blocked",
+			method:        "GET",
+			path:          "/internal/debug",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		// AllowPatterns overriding BlockPatterns
+		{
+			name:          "Allow pattern override: /admin/public/health passes",
+			method:        "GET",
+			path:          "/admin/public/health",
+			expectBlocked: false,
+		},
+		{
+			name:          "Allow pattern override: /admin/assets/app.js passes",
+			method:        "GET",
+			path:          "/admin/assets/app.js",
+			expectBlocked: false,
+		},
+		{
+			name:          "Allow pattern override: /public/sample.conf passes despite .conf extension",
+			method:        "GET",
+			path:          "/public/sample.conf",
+			expectBlocked: false,
+		},
+		{
+			name:          "Allow pattern override on default block: /.well-known/acme-challenge/abc-token passes",
+			method:        "GET",
+			path:          "/.well-known/acme-challenge/abc-token",
+			expectBlocked: false,
+		},
+		// Default block pattern still active
+		{
+			name:          "Default block pattern: /.env blocked",
+			method:        "GET",
+			path:          "/.env",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		// Non-matching clean routes
+		{
+			name:          "Clean route: /api/v1/products passes",
+			method:        "GET",
+			path:          "/api/v1/products",
+			expectBlocked: false,
+		},
+		{
+			name:          "Clean route: /internal/debug/public passes (not exact /internal/debug)",
+			method:        "GET",
+			path:          "/internal/debug/public",
+			expectBlocked: false,
+		},
+		// IP Whitelist bypass for blocked paths
+		{
+			name:          "IP Whitelist bypass: /admin/dashboard allowed from whitelisted IP",
+			method:        "GET",
+			path:          "/admin/dashboard",
+			clientIP:      "192.168.100.50",
+			expectBlocked: false,
+			expectReason:  "ip_whitelisted",
+		},
+		{
+			name:          "Non-whitelisted IP blocked on /admin/dashboard",
+			method:        "GET",
+			path:          "/admin/dashboard",
+			clientIP:      "10.0.0.1",
+			expectBlocked: true,
+			expectReason:  "path_blocked",
+		},
+		// CheckQuery inspection with BlockPatterns
+		{
+			name:          "Query string matching BlockPatterns is blocked",
+			method:        "GET",
+			path:          "/search",
+			query:         "redirect=/admin/dashboard",
+			expectBlocked: true,
+		},
+		{
+			name:          "Query string not matching BlockPatterns passes",
+			method:        "GET",
+			path:          "/search",
+			query:         "q=normal-search-term",
+			expectBlocked: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := eng.EvaluateWithClientIP(tc.method, tc.path, tc.query, nil, tc.clientIP)
+			if res.Blocked != tc.expectBlocked {
+				t.Errorf("[%s] expected Blocked=%v, got %v (reason=%q)", tc.name, tc.expectBlocked, res.Blocked, res.Reason)
+			}
+			if tc.expectReason != "" && res.Reason != tc.expectReason {
+				t.Errorf("[%s] expected reason %q, got %q", tc.name, tc.expectReason, res.Reason)
+			}
+		})
+	}
+}
+
+
 
 
 
