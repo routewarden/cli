@@ -1226,13 +1226,13 @@ func (cfg *Config) GenerateCaddyfile() string {
 				fmt.Fprintf(&b, "        gzip_bomb_mb %d\n", cfg.Response.GzipBombMB)
 			}
 			if cfg.Response.RetryAfterSeconds > 0 {
-				fmt.Fprintf(&b, "        retry_after %d\n", cfg.Response.RetryAfterSeconds)
+				fmt.Fprintf(&b, "        retry_after_seconds %d\n", cfg.Response.RetryAfterSeconds)
 			}
 			if cfg.Response.TarpitDelayMs > 0 {
 				fmt.Fprintf(&b, "        tarpit_delay_ms %d\n", cfg.Response.TarpitDelayMs)
 			}
 			if cfg.Response.TarpitMaxDurationSeconds > 0 {
-				fmt.Fprintf(&b, "        tarpit_max_duration %d\n", cfg.Response.TarpitMaxDurationSeconds)
+				fmt.Fprintf(&b, "        tarpit_max_duration_seconds %d\n", cfg.Response.TarpitMaxDurationSeconds)
 			}
 			if cfg.Response.StreamSizeMB > 0 {
 				fmt.Fprintf(&b, "        stream_size_mb %d\n", cfg.Response.StreamSizeMB)
