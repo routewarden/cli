@@ -13,7 +13,7 @@
         debug
         check_query
         check_headers X-Forwarded-Uri X-Rewrite-URL
-        path_patterns (?i)^/admin/secret.*$ (?i)^/private/.*$
+        block_patterns (?i)^/admin/secret.*$ (?i)^/private/.*$
         allow_patterns (?i)^/private/healthz$
         allowed_ips 192.168.100.50 10.99.0.0/16
         methods GET POST
