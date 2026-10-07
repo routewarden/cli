@@ -20,7 +20,7 @@ http:
           enabled: true
           enableDefaultPatterns: true
           enableDefaultAllowPatterns: true
-          pathPatterns:
+          blockPatterns:
             - '(?i)^/admin/secret.*$'
             - '(?i)^/api/v1/internal.*$'
           allowPatterns:
