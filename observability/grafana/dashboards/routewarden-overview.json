@@ -586,11 +586,9 @@
       "id": 20,
       "options": {
         "basemap": {
-          "config": {
-            "theme": "dark"
-          },
-          "name": "Layer 0",
-          "type": "carto"
+          "config": {},
+          "name": "OpenStreetMap",
+          "type": "osm-standard"
         },
         "controls": {
           "mouseWheelZoom": true,
