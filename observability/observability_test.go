@@ -1,10 +1,11 @@
 package observability_test
 
 import (
-	"slices"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/routewarden/cli/observability"
@@ -285,6 +286,55 @@ func TestOptionalAlertingProvisioning(t *testing.T) {
 		t.Errorf("docker-compose.yml should pass ALERT_WEBHOOK_URL environment variable")
 	}
 }
+
+func TestObservabilityManager_Helpers(t *testing.T) {
+	// 1. DefaultDir returns non-empty path ending with .routewarden/observability
+	defaultDir := observability.DefaultDir()
+	if defaultDir == "" {
+		t.Errorf("expected non-empty DefaultDir")
+	}
+	if !strings.Contains(defaultDir, filepath.Join(".routewarden", "observability")) {
+		t.Errorf("expected DefaultDir to contain .routewarden/observability, got: %s", defaultDir)
+	}
+
+	// 2. EnsureStackPrepared creates directory and files on first call, no-ops on second call
+	tempDir, err := os.MkdirTemp("", "routewarden-ensure-stack-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	if err := observability.EnsureStackPrepared(tempDir); err != nil {
+		t.Fatalf("EnsureStackPrepared failed on initial call: %v", err)
+	}
+
+	composePath := filepath.Join(tempDir, "docker-compose.yml")
+	stat1, err := os.Stat(composePath)
+	if err != nil {
+		t.Fatalf("expected docker-compose.yml to exist: %v", err)
+	}
+
+	// Second call should return nil immediately because file exists
+	if err := observability.EnsureStackPrepared(tempDir); err != nil {
+		t.Fatalf("EnsureStackPrepared failed on second call: %v", err)
+	}
+	stat2, err := os.Stat(composePath)
+	if err != nil || stat1.ModTime() != stat2.ModTime() {
+		t.Errorf("EnsureStackPrepared should not have re-exported on second call")
+	}
+
+	// 3. Export can overwrite existing files without error
+	if err := observability.Export(tempDir); err != nil {
+		t.Fatalf("Export failed on overwrite: %v", err)
+	}
+
+	// 4. FindDockerCompose executes without panic
+	cmd, err := observability.FindDockerCompose()
+	if err == nil && len(cmd) == 0 {
+		t.Errorf("expected non-empty command when FindDockerCompose succeeds")
+	}
+}
+
 
 func containsSubstring(s, sub string) bool {
 	return filepath.Clean(s) != "" && len(sub) > 0 && (len(s) >= len(sub) && (s == sub || searchSubstring(s, sub)))
