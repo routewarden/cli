@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -901,6 +903,403 @@ func TestEngine_AllowAndBlockPatterns_Comprehensive(t *testing.T) {
 		})
 	}
 }
+
+func TestEngine_CleanIP_Comprehensive(t *testing.T) {
+	cfg := engine.CreateConfig()
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	tests := []struct {
+		input       string
+		remoteAddr  string
+		headers     map[string]string
+		expectIP    string
+	}{
+		{
+			remoteAddr: "192.0.2.1:8080",
+			expectIP:   "192.0.2.1",
+		},
+		{
+			remoteAddr: "[2001:db8::1]:443",
+			expectIP:   "2001:db8::1",
+		},
+		{
+			remoteAddr: "10.0.0.1",
+			expectIP:   "10.0.0.1",
+		},
+		{
+			remoteAddr: "fe80::1%eth0:1234",
+			expectIP:   "fe80::1",
+		},
+		{
+			remoteAddr: "",
+			expectIP:   "",
+		},
+	}
+
+	for _, tc := range tests {
+		got := eng.ExtractClientIP(tc.headers, tc.remoteAddr)
+		if got != tc.expectIP {
+			t.Errorf("ExtractClientIP(remote=%q): expected %q, got %q", tc.remoteAddr, tc.expectIP, got)
+		}
+	}
+}
+
+func TestEngine_ExtractClientIP_TrustedProxiesChains(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.TrustedProxies = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.1.1"}
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// 1. Untrusted remoteAddr ignores X-Forwarded-For
+	untrustedHeaders := map[string]string{"X-Forwarded-For": "203.0.113.50"}
+	if ip := eng.ExtractClientIP(untrustedHeaders, "198.51.100.1:12345"); ip != "198.51.100.1" {
+		t.Errorf("expected untrusted remoteAddr to be returned directly, got %q", ip)
+	}
+
+	// 2. Trusted proxy with X-Forwarded-For chain: client -> proxy1 -> proxy2 -> routewarden
+	proxyChainHeaders := map[string]string{
+		"X-Forwarded-For": "203.0.113.99, 10.0.0.2, 172.16.1.5",
+	}
+	if ip := eng.ExtractClientIP(proxyChainHeaders, "10.0.0.1:443"); ip != "203.0.113.99" {
+		t.Errorf("expected client IP 203.0.113.99 from proxy chain, got %q", ip)
+	}
+
+	// 3. Trusted proxy with X-Real-IP when X-Forwarded-For is missing
+	realIPHeaders := map[string]string{"X-Real-IP": "198.51.100.200"}
+	if ip := eng.ExtractClientIP(realIPHeaders, "192.168.1.1:5000"); ip != "198.51.100.200" {
+		t.Errorf("expected X-Real-IP 198.51.100.200, got %q", ip)
+	}
+
+	// 4. Trusted proxy with spaces and multiple commas
+	spacedHeaders := map[string]string{
+		"X-Forwarded-For": "  198.51.100.77  , 10.0.0.5  ",
+	}
+	if ip := eng.ExtractClientIP(spacedHeaders, "10.0.0.1:443"); ip != "198.51.100.77" {
+		t.Errorf("expected client IP 198.51.100.77 with spaced header, got %q", ip)
+	}
+}
+
+func TestEngine_GenerateTraefikTOML_AllResponseModes(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Enabled = true
+	cfg.EnableDefaultPatterns = true
+	cfg.EnableDefaultAllowPatterns = true
+	cfg.CheckQuery = true
+	cfg.CheckBody = true
+	cfg.CheckBodyMaxBytes = 32768
+	cfg.CheckBodyPatterns = []string{`(?i)select.*from`}
+	cfg.CheckHeaders = []string{"X-Forwarded-Host"}
+	cfg.Methods = []string{"GET", "POST"}
+	cfg.BlockPatterns = []string{`(?i)^/admin`}
+	cfg.AllowPatterns = []string{`(?i)^/public`}
+	cfg.AllowedIPs = []string{"10.0.0.0/8"}
+	cfg.TrustedProxies = []string{"172.16.0.0/12"}
+	cfg.Response = &engine.ResponseConfig{
+		Mode:                     "tarpit",
+		StatusCode:               429,
+		ContentType:              "text/plain",
+		Body:                     "slow down",
+		RedirectURL:              "https://sinkhole.example.com",
+		ProxyURL:                 "http://honeypot:8080",
+		GzipBombMB:               15,
+		RetryAfterSeconds:        60,
+		TarpitDelayMs:            1500,
+		TarpitMaxDurationSeconds: 10,
+		StreamSizeMB:             5,
+		Headers: map[string]string{
+			"X-Firewall": "RouteWarden",
+			"Retry-After": "60",
+		},
+		Captcha: &engine.CaptchaConfig{
+			Provider: "turnstile",
+			SiteKey:  "0x4AAAAAA",
+			Title:    "Bot Check",
+			Template: "custom-template.html",
+		},
+	}
+
+	toml := cfg.GenerateTraefikTOML()
+
+	expectedSnippets := []string{
+		"[http.middlewares.routewarden.plugin.routewarden]",
+		"enabled = true",
+		"enableDefaultPatterns = true",
+		"enableDefaultAllowPatterns = true",
+		"checkQuery = true",
+		"checkBody = true",
+		"checkBodyMaxBytes = 32768",
+		"mode = \"tarpit\"",
+		"statusCode = 429",
+		"contentType = \"text/plain\"",
+		"body = \"slow down\"",
+		"redirectUrl = \"https://sinkhole.example.com\"",
+		"proxyUrl = \"http://honeypot:8080\"",
+		"gzipBombMB = 15",
+		"retryAfterSeconds = 60",
+		"tarpitDelayMs = 1500",
+		"tarpitMaxDurationSeconds = 10",
+		"streamSizeMB = 5",
+		"[http.middlewares.routewarden.plugin.routewarden.response.captcha]",
+		"provider = \"turnstile\"",
+		"siteKey = \"0x4AAAAAA\"",
+		"title = \"Bot Check\"",
+		"template = \"custom-template.html\"",
+		"[http.middlewares.routewarden.plugin.routewarden.response.headers]",
+		"X-Firewall = \"RouteWarden\"",
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(toml, s) {
+			t.Errorf("missing expected snippet %q in generated TOML:\n%s", s, toml)
+		}
+	}
+}
+
+func TestEngine_Generate_AllTargetsAndError(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.BlockPatterns = []string{`(?i)^/admin`}
+	cfg.Response = &engine.ResponseConfig{
+		Mode:       "captcha",
+		StatusCode: 403,
+		Captcha: &engine.CaptchaConfig{
+			Provider: "hcaptcha",
+			SiteKey:  "my-site-key",
+			Title:    "Please Verify",
+		},
+	}
+
+	validTargets := []string{
+		"traefik-yaml",
+		"traefik-toml",
+		"traefik-labels",
+		"caddy",
+		"nginx",
+		"tcp-warden",
+	}
+
+	for _, target := range validTargets {
+		out, err := cfg.Generate(target)
+		if err != nil {
+			t.Errorf("Generate(%q) unexpected error: %v", target, err)
+		}
+		if len(out) == 0 {
+			t.Errorf("Generate(%q) produced empty output", target)
+		}
+	}
+
+	// Unknown target error
+	_, err := cfg.Generate("unknown-target")
+	if err == nil {
+		t.Fatalf("expected error for unknown target, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported target") {
+		t.Errorf("expected 'unsupported target' in error, got: %v", err)
+	}
+}
+
+func TestEngine_ExtractCandidatePaths_EvasionMatrix(t *testing.T) {
+	testCases := []struct {
+		name          string
+		rawPath       string
+		expectMatched string
+	}{
+		{
+			name:          "Multiple consecutive slashes",
+			rawPath:       "//////admin///////.env",
+			expectMatched: "/admin/.env",
+		},
+		{
+			name:          "Mixed backslashes and slashes",
+			rawPath:       "/api\\v1\\.env",
+			expectMatched: "/api/v1/.env",
+		},
+		{
+			name:          "Matrix parameters stripping",
+			rawPath:       "/api;session=xyz/admin;role=admin/.env",
+			expectMatched: "/api/admin/.env",
+		},
+		{
+			name:          "Triple percent-encoded dots and slashes",
+			rawPath:       "%25252e%25252e%25252f%25252e%252565%25256e%252576",
+			expectMatched: "/.env",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidates := engine.ExtractCandidatePaths(tc.rawPath, tc.rawPath, tc.rawPath)
+			found := false
+			for _, c := range candidates {
+				if strings.Contains(c, tc.expectMatched) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("[%s] expected candidate containing %q, got: %v", tc.name, tc.expectMatched, candidates)
+			}
+		})
+	}
+}
+
+func TestEngine_EvaluateWithBody_BoundaryLimits(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.Methods = []string{"GET", "POST"}
+	cfg.CheckBody = true
+	cfg.CheckBodyMaxBytes = 20
+	cfg.CheckBodyPatterns = []string{`(?i)drop\s+table`}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// 1. Body within maxBytes matching pattern is blocked
+	res1 := eng.EvaluateWithBody("POST", "/api/query", "", nil, "", "DROP TABLE users;")
+	if !res1.Blocked {
+		t.Errorf("expected DROP TABLE body to be blocked, got allowed")
+	}
+
+	// 2. Malicious keyword pushed past CheckBodyMaxBytes (20 bytes)
+	// First 20 bytes is "safe safe safe safe " (20 bytes). The "DROP TABLE" occurs at byte 21.
+	padding := "safe safe safe safe DROP TABLE users;"
+	res2 := eng.EvaluateWithBody("POST", "/api/query", "", nil, "", padding)
+	if res2.Blocked {
+		t.Errorf("expected payload beyond maxBytes to be truncated and allowed, got blocked")
+	}
+
+	// 3. Clean body passes inspection
+	res3 := eng.EvaluateWithBody("POST", "/api/query", "", nil, "", `{"name":"alice"}`)
+	if res3.Blocked {
+		t.Errorf("expected clean JSON body to pass, got blocked")
+	}
+}
+
+func TestEngine_ConfigFile_LoadAndOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	basePath := filepath.Join(tmpDir, "base_routewarden.json")
+	baseContent := `{
+		"blockPatterns": ["(?i)^/admin(/.*)?$"],
+		"allowedIps": ["10.0.0.1"],
+		"methods": ["GET"],
+		"response": {
+			"mode": "json",
+			"statusCode": 403
+		}
+	}`
+	if err := os.WriteFile(basePath, []byte(baseContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Load with configFile (camelCase) and override response mode & methods
+	cfg := engine.CreateConfig()
+	cfg.ConfigFile = basePath
+	cfg.Methods = []string{"GET", "POST"}
+	cfg.Response = &engine.ResponseConfig{
+		Mode:       "text",
+		StatusCode: 404,
+	}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// Preserved block patterns from base file
+	eval1 := eng.EvaluateWithClientIP("POST", "/admin/secrets", "", nil, "192.168.1.1")
+	if !eval1.Blocked {
+		t.Errorf("expected /admin/secrets to be blocked based on base configFile patterns")
+	}
+
+	// Preserved IP allowlist from base file
+	eval2 := eng.EvaluateWithClientIP("POST", "/admin/secrets", "", nil, "10.0.0.1")
+	if eval2.Blocked || eval2.Reason != "ip_whitelisted" {
+		t.Errorf("expected 10.0.0.1 to be whitelisted from base configFile, got: blocked=%v reason=%s", eval2.Blocked, eval2.Reason)
+	}
+
+	// 2. Load with config_file (snake_case alias)
+	cfgSnake := engine.CreateConfig()
+	cfgSnake.ConfigFileSnake = basePath
+	engSnake, err := engine.NewEngine(cfgSnake)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error with config_file alias: %v", err)
+	}
+	evalSnake := engSnake.EvaluateWithClientIP("GET", "/admin/settings", "", nil, "192.168.1.1")
+	if !evalSnake.Blocked {
+		t.Errorf("expected /admin/settings to be blocked using config_file alias")
+	}
+}
+
+func TestEngine_ConfigFile_ErrorHandling(t *testing.T) {
+	// 1. Missing file error
+	cfgMissing := engine.CreateConfig()
+	cfgMissing.ConfigFile = "/path/to/definitely/nonexistent/routewarden.json"
+	_, err := engine.NewEngine(cfgMissing)
+	if err == nil {
+		t.Fatalf("expected error for missing configFile, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot read configFile") {
+		t.Errorf("expected 'cannot read configFile' in error, got: %v", err)
+	}
+
+	// 2. Malformed JSON file error
+	tmpDir := t.TempDir()
+	malformedPath := filepath.Join(tmpDir, "malformed.json")
+	if err := os.WriteFile(malformedPath, []byte(`{ broken json`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfgMalformed := engine.CreateConfig()
+	cfgMalformed.ConfigFile = malformedPath
+	_, err2 := engine.NewEngine(cfgMalformed)
+	if err2 == nil {
+		t.Fatalf("expected error for malformed configFile, got nil")
+	}
+	if !strings.Contains(err2.Error(), "cannot parse configFile") {
+		t.Errorf("expected 'cannot parse configFile' in error, got: %v", err2)
+	}
+}
+
+func TestEngine_ConfigFile_Generators(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.ConfigFile = "/etc/routewarden/shared.json"
+
+	// Traefik YAML
+	yamlOut := cfg.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, "configFile: /etc/routewarden/shared.json") {
+		t.Errorf("expected configFile in Traefik YAML, got:\n%s", yamlOut)
+	}
+
+	// Traefik TOML
+	tomlOut := cfg.GenerateTraefikTOML()
+	if !strings.Contains(tomlOut, `configFile = "/etc/routewarden/shared.json"`) {
+		t.Errorf("expected configFile in Traefik TOML, got:\n%s", tomlOut)
+	}
+
+	// Traefik Labels
+	labelsOut := cfg.GenerateTraefikLabels()
+	if !strings.Contains(labelsOut, "traefik.http.middlewares.warden.plugin.routewarden.configFile=/etc/routewarden/shared.json") {
+		t.Errorf("expected configFile in Traefik Labels, got:\n%s", labelsOut)
+	}
+
+	// Caddyfile
+	caddyOut := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "config_file /etc/routewarden/shared.json") {
+		t.Errorf("expected config_file in Caddyfile, got:\n%s", caddyOut)
+	}
+
+	// Nginx Lua
+	nginxOut := cfg.GenerateNginxLua()
+	if !strings.Contains(nginxOut, `config_file = "/etc/routewarden/shared.json"`) {
+		t.Errorf("expected config_file in Nginx Lua, got:\n%s", nginxOut)
+	}
+}
+
+
 
 
 
