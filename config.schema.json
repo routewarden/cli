@@ -5,6 +5,14 @@
   "description": "JSON schema for RouteWarden HTTP security middleware (Traefik, Caddy, NGINX / OpenResty).",
   "type": "object",
   "properties": {
+    "configFile": {
+      "type": "string",
+      "description": "Path to a routewarden.json base configuration file. Inline options override file values."
+    },
+    "config_file": {
+      "type": "string",
+      "description": "Path to a routewarden.json base configuration file (snake_case alias). Inline options override file values."
+    },
     "enabled": {
       "type": "boolean",
       "default": true,

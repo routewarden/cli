@@ -1852,4 +1852,287 @@ func TestCLI_Test_URLAndInlineQueryParsing(t *testing.T) {
 	}
 }
 
+func TestCLI_Test_MethodFlagsAndBypass(t *testing.T) {
+	// 1. Default config inspects GET only; POST should be bypassed
+	stdout, stderr, code := runCLI(t, "test", "-X", "POST", "/.env")
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Result: ⏭️ BYPASSED") || !strings.Contains(stdout, "method_POST_not_inspected") {
+		t.Errorf("expected POST to be bypassed with default config, got:\n%s", stdout)
+	}
+
+	// 2. Custom config inspecting POST; should be blocked
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"methods":["GET","POST"],"enableDefaultPatterns":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout2, stderr2, code2 := runCLI(t, "test", "-c", cfgPath, "-X", "POST", "/.env")
+	if code2 != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code2, stderr2)
+	}
+	if !strings.Contains(stdout2, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected POST to be blocked when inspected in config, got:\n%s", stdout2)
+	}
+
+	// 3. Short flag -m for method
+	stdout3, stderr3, code3 := runCLI(t, "test", "-c", cfgPath, "-m", "POST", "/.env")
+	if code3 != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code3, stderr3)
+	}
+	if !strings.Contains(stdout3, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected -m POST to be blocked, got:\n%s", stdout3)
+	}
+}
+
+func TestCLI_Test_BodyFlagsAndInspection(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "body-config.json")
+	cfgContent := `{
+		"methods": ["GET", "POST"],
+		"checkBody": true,
+		"checkBodyPatterns": ["(?i)malicious_exploit"]
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Payload matching checkBodyPatterns is blocked
+	stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "-X", "POST", "--body", "contains malicious_exploit inside", "/api/v1")
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Result: 🛑 BLOCKED") || !strings.Contains(stdout, "body_blocked") {
+		t.Errorf("expected body_blocked result, got:\n%s", stdout)
+	}
+
+	// 2. Clean payload is allowed
+	stdout2, stderr2, code2 := runCLI(t, "test", "-c", cfgPath, "-X", "POST", "-b", "harmless payload", "/api/v1")
+	if code2 != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code2, stderr2)
+	}
+	if !strings.Contains(stdout2, "Result: ✅ ALLOWED") {
+		t.Errorf("expected clean body to be allowed, got:\n%s", stdout2)
+	}
+}
+
+func TestCLI_Test_MultipleHeadersInspection(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "headers-config.json")
+	cfgContent := `{
+		"blockPatterns": ["(?i)sqlmap"],
+		"checkHeaders": ["User-Agent"]
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, "test", "-c", cfgPath, "-H", "User-Agent: sqlmap/1.4", "-H", "X-Custom: safe", "/api/v1")
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Result: 🛑 BLOCKED") || !strings.Contains(stdout, "header_blocked") {
+		t.Errorf("expected header_blocked result for sqlmap User-Agent, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Validate_TCPWardenYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlPath := filepath.Join(tmpDir, "tcp-warden.yaml")
+	yamlContent := `version: "1.0"
+services:
+  ssh_bastion:
+    listen: ":2222"
+    upstream: "127.0.0.1:22"
+    protocol: "ssh"
+`
+	if err := os.WriteFile(yamlPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, "validate", yamlPath)
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "VALID (TCP Warden YAML format)") {
+		t.Errorf("expected TCP Warden YAML validation message, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Validate_InvalidRegexError(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "invalid-regex.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"blockPatterns": ["[a-z"`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, "validate", cfgPath)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for invalid regex, got 0. stdout: %s", stdout)
+	}
+	if !strings.Contains(stderr, "Error") && !strings.Contains(stdout, "FAILED") {
+		t.Errorf("expected failure message for invalid config, got stdout=%s stderr=%s", stdout, stderr)
+	}
+}
+
+func TestCLI_Generate_AllTargetsStdin(t *testing.T) {
+	inputJSON := `{
+		"enabled": true,
+		"enableDefaultPatterns": true,
+		"blockPatterns": ["(?i)^/admin"],
+		"allowedIps": ["10.0.0.0/8"],
+		"response": {
+			"mode": "json",
+			"statusCode": 403,
+			"body": "{\"error\":\"Access Denied\"}"
+		}
+	}`
+
+	targets := []struct {
+		target   string
+		expected string
+	}{
+		{"traefik-yaml", "routewarden:"},
+		{"traefik-toml", "[http.middlewares.routewarden.plugin.routewarden]"},
+		{"traefik-labels", "traefik.http.middlewares.warden.plugin.routewarden.enabled=true"},
+		{"caddy", "routewarden {"},
+		{"nginx", "local routewarden_config = {"},
+		{"tcp-warden", "version: \"1.0\""},
+	}
+
+	for _, tc := range targets {
+		t.Run(tc.target, func(t *testing.T) {
+			stdout, stderr, code := runCLIWithStdin(t, inputJSON, "generate", "--target", tc.target, "-")
+			if code != 0 {
+				t.Fatalf("generate %s failed with code %d. stderr: %s", tc.target, code, stderr)
+			}
+			if !strings.Contains(stdout, tc.expected) {
+				t.Errorf("expected target %s output to contain %q, got:\n%s", tc.target, tc.expected, stdout)
+			}
+		})
+	}
+}
+
+func TestCLI_Dashboard_ExportAndUnknownSubcommand(t *testing.T) {
+	// 1. Export dashboard stack to temporary directory
+	tmpDir := t.TempDir()
+	exportTarget := filepath.Join(tmpDir, "exported-observability")
+
+	stdout, stderr, code := runCLI(t, "dashboard", "export", exportTarget)
+	if code != 0 {
+		t.Fatalf("expected code 0 from dashboard export, got %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+		t.Errorf("expected success message from dashboard export, got:\n%s", stdout)
+	}
+
+	// Verify exported assets exist on disk
+	expectedFiles := []string{
+		filepath.Join(exportTarget, "docker-compose.yml"),
+		filepath.Join(exportTarget, "config.alloy"),
+		filepath.Join(exportTarget, "loki-config.yaml"),
+		filepath.Join(exportTarget, "routewarden.env"),
+		filepath.Join(exportTarget, "grafana/dashboards/routewarden-overview.json"),
+	}
+	for _, f := range expectedFiles {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("expected exported file %s to exist: %v", f, err)
+		}
+	}
+
+	// 2. Unknown dashboard subcommand should exit with code != 0
+	_, stderr2, code2 := runCLI(t, "dashboard", "unknown-subcommand")
+	if code2 == 0 {
+		t.Errorf("expected non-zero exit code for unknown dashboard subcommand, got 0")
+	}
+	if !strings.Contains(stderr2, "Unknown dashboard subcommand") {
+		t.Errorf("expected 'Unknown dashboard subcommand' in stderr, got: %s", stderr2)
+	}
+}
+
+func TestCLI_ConfigFile_ValidateAndGenerate(t *testing.T) {
+	tmpDir := t.TempDir()
+	basePath := filepath.Join(tmpDir, "base_policy.json")
+	baseContent := `{
+		"blockPatterns": ["(?i)^/admin(/.*)?$"],
+		"allowedIps": ["10.0.0.1"]
+	}`
+	if err := os.WriteFile(basePath, []byte(baseContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainConfig := fmt.Sprintf(`{
+		"configFile": "%s",
+		"methods": ["GET", "POST"]
+	}`, basePath)
+	mainConfigPath := filepath.Join(tmpDir, "service_config.json")
+	if err := os.WriteFile(mainConfigPath, []byte(mainConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Validate should succeed and report Base config file
+	stdout, stderr, code := runCLI(t, "validate", mainConfigPath)
+	if code != 0 {
+		t.Fatalf("expected validate to succeed, got code %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Base config file:") || !strings.Contains(stdout, basePath) {
+		t.Errorf("expected validate output to contain Base config file, got:\n%s", stdout)
+	}
+
+	// 2. Test command should block /admin based on base file
+	stdoutTest, stderrTest, codeTest := runCLI(t, "test", "-c", mainConfigPath, "/admin/dashboard")
+	if codeTest != 0 {
+		t.Fatalf("expected test command to succeed, got %d. stderr: %s", codeTest, stderrTest)
+	}
+	if !strings.Contains(stdoutTest, "Result: 🛑 BLOCKED") {
+		t.Errorf("expected test command to block /admin based on base config, got:\n%s", stdoutTest)
+	}
+
+	// 3. Generate caddy directive should output config_file
+	stdoutGen, stderrGen, codeGen := runCLI(t, "generate", "caddy", mainConfigPath)
+	if codeGen != 0 {
+		t.Fatalf("expected generate caddy to succeed, got %d. stderr: %s", codeGen, stderrGen)
+	}
+	if !strings.Contains(stdoutGen, "config_file "+basePath) {
+		t.Errorf("expected config_file directive in Caddyfile output, got:\n%s", stdoutGen)
+	}
+
+	// 4. Generate traefik-yaml should output configFile
+	stdoutYAML, stderrYAML, codeYAML := runCLI(t, "generate", "traefik-yaml", mainConfigPath)
+	if codeYAML != 0 {
+		t.Fatalf("expected generate traefik-yaml to succeed, got %d. stderr: %s", codeYAML, stderrYAML)
+	}
+	if !strings.Contains(stdoutYAML, "configFile: "+basePath) {
+		t.Errorf("expected configFile in traefik-yaml output, got:\n%s", stdoutYAML)
+	}
+}
+
+func TestCLI_Schema_HasConfigFile(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "schema")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("schema output is not valid JSON: %v", err)
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("schema missing properties object")
+	}
+
+	if _, exists := props["configFile"]; !exists {
+		t.Errorf("expected schema properties to contain 'configFile'")
+	}
+	if _, exists := props["config_file"]; !exists {
+		t.Errorf("expected schema properties to contain 'config_file'")
+	}
+}
+
+
+
 

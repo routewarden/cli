@@ -142,6 +142,8 @@ func ExtractLabelsFromCompose(composeContent string) []TraefikLabel {
 func normalizePropKey(prop string) string {
 	lower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(prop, "_", ""), "-", ""))
 	switch lower {
+	case "configfile":
+		return "configFile"
 	case "enabled":
 		return "enabled"
 	case "enabledefaultpatterns":
@@ -307,6 +309,11 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 		fmt.Fprintf(&b, "    %s:\n", name)
 		b.WriteString("      plugin:\n")
 		b.WriteString("        routewarden:\n")
+
+		// Write configFile if present
+		if val, ok := props["configFile"]; ok && val != "" {
+			fmt.Fprintf(&b, "          configFile: %s\n", val)
+		}
 
 		// Write common boolean properties as unquoted YAML booleans (%t)
 		enabled := true
