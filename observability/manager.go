@@ -346,7 +346,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	} else {
 		fmt.Println("🐳 Auto-Discovery:     Listening for containers with label 'routewarden=true'")
 	}
-	fmt.Printf("⚡ Memory Footprint:   ~15MB (Grafana/Loki/Alloy eliminated)\n")
+	fmt.Printf("⚡ Memory Footprint:   ~15MB\n")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
 

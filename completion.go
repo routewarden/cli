@@ -79,7 +79,11 @@ _rwarden_completions() {
                 return 0
             fi
             case "$prev" in
-                --port|--loki-port)
+                --port)
+                    return 0
+                    ;;
+                -f|--file)
+                    _filedir
                     return 0
                     ;;
                 export)
@@ -87,7 +91,7 @@ _rwarden_completions() {
                     return 0
                     ;;
             esac
-            COMPREPLY=( $(compgen -W "--port --loki-port --no-open --enable-alerting -e" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--port --file -f --container -c --label -l --no-open" -- "$cur") )
             return 0
             ;;
         audit)
@@ -174,7 +178,7 @@ _rwarden() {
         'audit:Perform static analysis and linting on policy file'
         'diff:Compare two policies and evaluate security posture impact'
         'sandbox:Spin up ephemeral Traefik, Caddy, or NGINX container'
-        'dashboard:Launch or manage Grafana, Loki, and Alloy stack'
+        'dashboard:Launch or manage the GoAccess real-time security dashboard'
         'monitor:Tail and colorize live reverse proxy security events'
         'tui:Launch interactive terminal simulator'
         'completion:Output shell autocompletion code'
@@ -218,10 +222,11 @@ _rwarden() {
                 dashboard)
                     _arguments \
                         '1:subcommand:(up down status export)' \
-                        '--port[Grafana HTTP port]:port:' \
-                        '--loki-port[Loki API port]:port:' \
-                        '--no-open[Do not auto-open browser]' \
-                        '--enable-alerting[Provision alert rules and contact points]'
+                        '--port[GoAccess HTTP port]:port:' \
+                        '(-f --file)'{-f,--file}'[Log file to monitor]:file:_files' \
+                        '(-c --container)'{-c,--container}'[Target container name]:container:' \
+                        '(-l --label)'{-l,--label}'[Docker label filter]:label:' \
+                        '--no-open[Do not auto-open browser]'
                     ;;
                 completion)
                     _arguments '1:shell:(bash zsh fish powershell)'
@@ -268,7 +273,7 @@ complete -c rwarden -n "__fish_use_subcommand" -a generate -d "Compile policy in
 complete -c rwarden -n "__fish_use_subcommand" -a audit -d "Lint configuration and check ReDoS vulnerabilities"
 complete -c rwarden -n "__fish_use_subcommand" -a diff -d "Compare two policies and evaluate security impact"
 complete -c rwarden -n "__fish_use_subcommand" -a sandbox -d "Launch ephemeral gateway Docker container"
-complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch Grafana, Loki, and Alloy stack"
+complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch GoAccess real-time security dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a monitor -d "Stream and colorize reverse proxy security events"
 complete -c rwarden -n "__fish_use_subcommand" -a tui -d "Interactive terminal path testing REPL"
 complete -c rwarden -n "__fish_use_subcommand" -a completion -d "Generate shell completion script"

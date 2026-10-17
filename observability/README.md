@@ -1,6 +1,6 @@
 # RouteWarden Lightweight Security Dashboard (GoAccess)
 
-Turnkey, real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. Replaces heavy multi-container monitoring stacks (Grafana + Loki + Alloy) with an instantaneous, in-memory dashboard consuming **~15MB of RAM**.
+Turnkey, real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. Provides an instantaneous, in-memory dashboard consuming **~15MB of RAM**.
 
 ## Quickstart
 

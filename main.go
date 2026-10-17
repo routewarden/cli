@@ -211,8 +211,8 @@ func handleDashboard(args []string) {
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
 		// Deprecated/legacy flags kept for backwards compatibility
-		_ = fs.Int("loki-port", 3100, "Deprecated (Grafana stack removed)")
-		_ = fs.Bool("enable-alerting", false, "Deprecated (Grafana stack removed)")
+		_ = fs.Int("loki-port", 3100, "Deprecated")
+		_ = fs.Bool("enable-alerting", false, "Deprecated")
 		_ = fs.Bool("alerting", false, "Deprecated")
 		var envList stringSlice
 		fs.Var(&envList, "env", "Environment variable (repeatable)")

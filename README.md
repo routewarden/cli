@@ -471,13 +471,13 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ### 6. Security Observability Dashboard (`dashboard`)
 
-RouteWarden provides a turnkey, ultra-lightweight real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. It replaces heavy multi-container monitoring stacks (Grafana + Loki + Alloy) with an instantaneous, in-memory dashboard consuming only **~15MB of RAM**.
+RouteWarden provides a turnkey, ultra-lightweight real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. It provides an instantaneous, in-memory dashboard consuming only **~15MB of RAM**.
 
 The dashboard automatically discovers Docker containers tagged with `routewarden=true` (or `routewarden.logs=true`), multiplexes their logs concurrently, and presents a live web UI with zero manual configuration.
 
 #### Architecture & Highlights
 
-- **Ultra-lightweight footprint**: Consumes ~15MB RAM (versus 500MB–1.2GB for Grafana/Loki/Alloy).
+- **Ultra-lightweight footprint**: Consumes ~15MB RAM with sub-second startup.
 - **Single URL**: Serves real-time HTML and WebSocket streaming directly on `http://localhost:7890`.
 - **Zero Configuration**: Auto-discovers containers labeled `routewarden=true` without writing configs.
 - **Threat Analytics**: Real-time HTTP 403 blocks, 429 tarpits, GeoIP offender locations, and top attack paths (`/.env`, `/.git`, `/wp-login.php`).
@@ -643,7 +643,7 @@ rwarden monitor --path "/.env" --ip "192.168.1."
 
 #### Lightweight Web Analytics with GoAccess
 
-Looking for a lightweight alternative to Grafana/Loki? Use `--raw` to emit unformatted log lines and pipe directly into [GoAccess](https://goaccess.io/):
+Use `--raw` to emit unformatted log lines and pipe directly into [GoAccess](https://goaccess.io/):
 
 ```bash
 # Terminal real-time viewer via GoAccess
