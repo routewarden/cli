@@ -68,13 +68,12 @@ Commands:
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
-  dashboard   Launch or manage the Grafana + Loki + Alloy security dashboard
+  dashboard   Launch or manage the GoAccess real-time security dashboard
                 e.g. rwarden dashboard
-                e.g. rwarden dashboard up --port 3000
-                e.g. rwarden dashboard up --enable-alerting
+                e.g. rwarden dashboard up --port 7890
                 e.g. rwarden dashboard down
                 e.g. rwarden dashboard status
-                e.g. rwarden dashboard export ./observability
+                e.g. rwarden dashboard export ./dashboard
   cleanup     Stop and remove any running RouteWarden sandbox containers
   completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
                 e.g. source <(rwarden completion bash)
@@ -162,36 +161,36 @@ func handleDashboard(args []string) {
 	switch subcmd {
 	case "export":
 		fs := flag.NewFlagSet("dashboard export", flag.ExitOnError)
-		dirFlag := fs.String("dir", "", "Directory to export observability stack files")
+		dirFlag := fs.String("dir", "", "Directory to export dashboard stack files")
 		_ = fs.Parse(remainingArgs)
 
-		targetDir := "./observability"
+		targetDir := "./dashboard"
 		if *dirFlag != "" {
 			targetDir = *dirFlag
 		} else if fs.NArg() > 0 {
 			targetDir = fs.Arg(0)
 		}
 		if err := observability.Export(targetDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error exporting observability stack: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error exporting dashboard stack: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("✅ Exported RouteWarden Observability Stack to %q\n", targetDir)
-		fmt.Println("   Includes: docker-compose.yml, config.alloy, loki-config.yaml, and grafana dashboards")
+		fmt.Printf("✅ Exported RouteWarden Security Dashboard to %q\n", targetDir)
+		fmt.Println("   Includes: docker-compose.yml, goaccess.conf, and README.md")
 		fmt.Printf("   Run: cd %s && docker compose up -d\n", targetDir)
 
 	case "down", "stop":
 		fs := flag.NewFlagSet("dashboard down", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
+		dir := fs.String("dir", "", "Directory containing dashboard stack (default: ~/.routewarden/dashboard)")
 		_ = fs.Parse(remainingArgs)
 
 		if err := observability.Down(ctx, *dir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error stopping observability stack: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error stopping dashboard stack: %v\n", err)
 			os.Exit(1)
 		}
 
 	case "status", "ps":
 		fs := flag.NewFlagSet("dashboard status", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
+		dir := fs.String("dir", "", "Directory containing dashboard stack (default: ~/.routewarden/dashboard)")
 		_ = fs.Parse(remainingArgs)
 
 		if err := observability.Status(ctx, *dir); err != nil {
@@ -201,34 +200,41 @@ func handleDashboard(args []string) {
 
 	case "up", "start":
 		fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-		port := fs.Int("port", 3000, "Port for Grafana dashboard UI (default: 3000)")
-		lokiPort := fs.Int("loki-port", 3100, "Port for Loki log engine (default: 3100)")
-		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
+		port := fs.Int("port", 7890, "Port for GoAccess dashboard UI (default: 7890)")
+		dir := fs.String("dir", "", "Directory to store dashboard configs (default: ~/.routewarden/dashboard)")
+		file := fs.String("file", "", "Log file to monitor (default: auto-discovered docker containers)")
+		fs.StringVar(file, "f", "", "Alias for --file")
+		container := fs.String("container", "", "Tail a specific Docker container by name or ID")
+		fs.StringVar(container, "c", "", "Alias for --container")
+		label := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
+		fs.StringVar(label, "l", "", "Alias for --label")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
-		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
-		enableAlerting := fs.Bool("enable-alerting", false, "Enable pre-configured Grafana threat alert rules and notification channels")
-		fs.BoolVar(enableAlerting, "alerting", false, "Alias for --enable-alerting")
+		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
+		// Deprecated/legacy flags kept for backwards compatibility
+		_ = fs.Int("loki-port", 3100, "Deprecated (Grafana stack removed)")
+		_ = fs.Bool("enable-alerting", false, "Deprecated (Grafana stack removed)")
+		_ = fs.Bool("alerting", false, "Deprecated")
 		var envList stringSlice
-		fs.Var(&envList, "env", "Environment variable to pass to dashboard stack (repeatable, e.g. --env GF_SECURITY_ADMIN_PASSWORD=secret)")
+		fs.Var(&envList, "env", "Environment variable (repeatable)")
 		fs.Var(&envList, "e", "Alias for --env (repeatable)")
 		_ = fs.Parse(remainingArgs)
 
 		if *exportOnly {
 			target := *dir
 			if target == "" {
-				target = "./observability"
+				target = "./dashboard"
 			}
 			if err := observability.Export(target); err != nil {
-				fmt.Fprintf(os.Stderr, "Error exporting observability assets: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error exporting dashboard assets: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("✅ Exported observability configuration to %s\n", target)
+			fmt.Printf("✅ Exported dashboard configuration to %s\n", target)
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, *enableAlerting, envList...); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, envList...); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
-			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
+			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)
 		}
 
@@ -236,7 +242,6 @@ func handleDashboard(args []string) {
 		// Unknown subcommand — if it looks like a flag, try running 'up' with all args;
 		// otherwise error clearly to avoid silently launching the stack.
 		if strings.HasPrefix(subcmd, "-") {
-			// subcmd was actually a flag, not a subcommand — re-parse as 'up' with all original args
 			handleDashboard(append([]string{"up"}, args...))
 			return
 		}

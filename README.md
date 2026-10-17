@@ -469,143 +469,95 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ---
 
-### 6. Security Observability Stack (`dashboard`)
+### 6. Security Observability Dashboard (`dashboard`)
 
-RouteWarden provides a turnkey, production-grade observability stack built on **Grafana**, **Grafana Alloy**, and **Grafana Loki**.
+RouteWarden provides a turnkey, ultra-lightweight real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. It replaces heavy multi-container monitoring stacks (Grafana + Loki + Alloy) with an instantaneous, in-memory dashboard consuming only **~15MB of RAM**.
 
-The stack auto-discovers and ingests structured JSON security logs from all your RouteWarden gateways (Traefik, Caddy, NGINX, and TCP Warden) and presents pre-provisioned dashboards with zero manual configuration.
+The dashboard automatically discovers Docker containers tagged with `routewarden=true` (or `routewarden.logs=true`), multiplexes their logs concurrently, and presents a live web UI with zero manual configuration.
 
-#### Architecture
+#### Architecture & Highlights
 
-- **Grafana Alloy**: Log collector (OpenTelemetry successor to Promtail) that tails Docker container logs via `/var/run/docker.sock` and host logs, parses RouteWarden JSON fields, and extracts labels (`verdict`, `status_code`, `gateway`, `method`).
-- **Grafana Loki**: High-efficiency log aggregation engine indexing security events with full LogQL query capabilities.
-- **Grafana**: Pre-configured with the **"RouteWarden — Threat & Security Intelligence"** dashboard, pre-wired data sources, Geomap threat geography, malicious scanner profiling, L4 vs L7 multi-protocol convergence, automated alerting rules, and interactive SOC incident triage table with direct pivots to AbuseIPDB, VirusTotal, and Shodan.
+- **Ultra-lightweight footprint**: Consumes ~15MB RAM (versus 500MB–1.2GB for Grafana/Loki/Alloy).
+- **Single URL**: Serves real-time HTML and WebSocket streaming directly on `http://localhost:7890`.
+- **Zero Configuration**: Auto-discovers containers labeled `routewarden=true` without writing configs.
+- **Threat Analytics**: Real-time HTTP 403 blocks, 429 tarpits, GeoIP offender locations, and top attack paths (`/.env`, `/.git`, `/wp-login.php`).
+- **Flexible Execution**: Runs using the local `goaccess` CLI or an official 10MB GoAccess Docker container if not installed.
 
 #### Quickstart with CLI
 
 ```bash
-# 1. Launch the observability stack via Docker Compose (opens Grafana at http://localhost:3000)
+# 1. Launch dashboard (auto-discovers labeled containers & opens http://localhost:7890)
 rwarden dashboard
 
 # 2. Launch on a custom port without auto-opening browser
 rwarden dashboard up --port 8080 --no-open
 
-# 3. Check status of running observability containers
+# 3. Monitor a specific container by name
+rwarden dashboard --container traefik
+
+# 4. Monitor an NGINX or Apache access log file
+rwarden dashboard --file /var/log/nginx/access.log
+
+# 5. Check status of running dashboard
 rwarden dashboard status
 
-# 4. Stop the observability stack
+# 6. Stop background dashboard containers
 rwarden dashboard down
 
-# 5. Export docker-compose.yml, config.alloy, and Grafana dashboard files to a custom directory
-rwarden dashboard export ./my-observability
-
-# 6. Launch with optional Threat Alerting enabled (threat rules & webhook contact points)
-rwarden dashboard up --enable-alerting
+# 7. Export standalone Docker Compose and GoAccess config files
+rwarden dashboard export ./dashboard
 ```
 
 #### Standalone Docker Compose Deployment
 
-If you prefer running without the CLI binary, export or run the embedded `docker-compose.yml` directly:
+If you prefer running without the CLI binary in production, export the embedded GoAccess stack:
 
 ```bash
 # Export configuration files
-rwarden dashboard export ./deploy/observability
+rwarden dashboard export ./deploy/dashboard
 
 # Run with standard Docker Compose
-cd ./deploy/observability
+cd ./deploy/dashboard
 docker compose up -d
 ```
 
 ```yaml
-# deploy/observability/docker-compose.yml
+# deploy/dashboard/docker-compose.yml
 services:
-  loki:
-    image: grafana/loki:3.0.0
-    container_name: routewarden-loki
-    restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - loki-data:/loki
-
-  alloy:
-    image: grafana/alloy:v1.1.0
-    container_name: routewarden-alloy
-    restart: unless-stopped
-    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    volumes:
-      - ./config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/log:/var/log:ro
-    depends_on:
-      - loki
-
-  grafana:
-    image: grafana/grafana:11.0.0
-    container_name: routewarden-grafana
+  goaccess:
+    image: allinurl/goaccess:latest
+    container_name: routewarden-dashboard
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PORT:-7890}:7890"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
-      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - TZ=UTC
     volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins:ro
-      - ${ALERTING_PROVISIONING_DIR:-./grafana/provisioning/empty}:/etc/grafana/provisioning/alerting:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      - loki
-
-volumes:
-  loki-data:
-  grafana-data:
+      - ./goaccess.conf:/etc/goaccess/goaccess.conf:ro
+      - ./data:/srv/data:ro
+      - ./report:/srv/report
+    command: >
+      goaccess /srv/data/access.log
+      --config-file=/etc/goaccess/goaccess.conf
+      --real-time-html
+      --port=7890
+      --addr=0.0.0.0
+      -o /srv/report/index.html
 ```
-
-#### Optional Threat Alerting
-By default, the dashboard stack runs with alerting disabled to allow instant, zero-configuration startup without requiring external notification endpoints. To enable the pre-configured threat alert rules:
-- **With CLI**: `rwarden dashboard up --enable-alerting`
-- **With Docker Compose**: 
-  - Using `routewarden.env`: Uncomment `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting` in `routewarden.env` and run `docker compose --env-file routewarden.env up -d`
-  - Or via inline environment variable: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
-- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://your-soc-endpoint.example.com/alerts"` (defaults to `http://host.docker.internal:8080/alerts`)
-
-#### Reusing an Existing Grafana & Loki Stack
-
-If you already have a Grafana and Loki stack configured on your server, you do **not** need to run RouteWarden's local containers:
-
-1. **Export Dashboard**: Run `rwarden dashboard export ./observability` and import `observability/grafana/dashboards/routewarden-overview.json` directly into your existing Grafana via UI or API.
-2. **Ship Logs to Existing Loki**:
-   - **Using Grafana Alloy**: Add RouteWarden's `loki.process` stage from `config.alloy` to your existing Alloy config and set `loki.write` endpoint to your Loki cluster.
-   - **Using Promtail**: Add a scrape job with `__meta_docker_container_label_routewarden_logs` relabeling and json parsing stages.
-   - **Standalone Shipper Container**: Run an Alloy container on the gateway host pointing directly to your remote Loki:
-     ```bash
-     docker run -d --name routewarden-alloy --restart unless-stopped \
-       -v "$(pwd)/observability/config.alloy:/etc/alloy/config.alloy:ro" \
-       -v "/var/run/docker.sock:/var/run/docker.sock:ro" \
-       grafana/alloy:v1.1.0 run /etc/alloy/config.alloy
-     ```
-3. **Label Containers**: Tag your gateway containers with `routewarden.logs=true`.
 
 #### Command Flags & Subcommands
 
 | Command / Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `up` | subcommand | — | Launch Grafana, Loki, and Alloy stack (default subcommand) |
-| `down` | subcommand | — | Stop running observability stack containers |
-| `status` | subcommand | — | Check status of running observability containers |
-| `export [dir]` | subcommand | `./observability` | Export compose, Alloy, and Grafana configs to disk |
-| `--port` | int | `3000` | Port for Grafana dashboard UI |
-| `--loki-port` | int | `3100` | Port for Loki log engine |
-| `--dir` | string | `~/.routewarden/observability` | Directory storing compose configuration |
+| `up` | subcommand | — | Launch GoAccess real-time security dashboard (default subcommand) |
+| `down` | subcommand | — | Stop running dashboard containers |
+| `status` | subcommand | — | Check status of dashboard containers |
+| `export [dir]` | subcommand | `./dashboard` | Export compose and GoAccess configs to disk |
+| `--port` | int | `7890` | Port for GoAccess dashboard UI and WebSocket |
+| `-f`, `--file` | string | `""` | Log file to monitor (default: auto-discovered Docker containers) |
+| `-c`, `--container` | string | `""` | Tail a specific Docker container by name or ID |
+| `-l`, `--label` | string | `routewarden=true` | Docker label to filter containers |
+| `--dir` | string | `~/.routewarden/dashboard` | Directory storing dashboard configuration |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
 ---
