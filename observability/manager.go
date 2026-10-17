@@ -31,20 +31,6 @@ func DefaultDir() string {
 	return filepath.Join(home, ".routewarden", "dashboard")
 }
 
-// FindDockerCompose checks whether 'docker compose' or 'docker-compose' is available.
-func FindDockerCompose() ([]string, error) {
-	cmd := exec.Command("docker", "compose", "version")
-	if err := cmd.Run(); err == nil {
-		return []string{"docker", "compose"}, nil
-	}
-
-	if _, err := exec.LookPath("docker-compose"); err == nil {
-		return []string{"docker-compose"}, nil
-	}
-
-	return nil, fmt.Errorf("neither 'docker compose' nor 'docker-compose' was found in PATH")
-}
-
 // FindGoAccess checks whether 'goaccess' binary is available in PATH.
 func FindGoAccess() (string, error) {
 	return exec.LookPath("goaccess")
@@ -184,7 +170,7 @@ func getFreePort() (int, error) {
 }
 
 // Up starts the GoAccess live dashboard and multiplexes logs from Docker containers or file.
-func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string, extraEnv ...string) error {
+func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string) error {
 	if dir == "" {
 		dir = DefaultDir()
 	}

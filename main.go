@@ -210,13 +210,6 @@ func handleDashboard(args []string) {
 		fs.StringVar(label, "l", "", "Alias for --label")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
-		// Deprecated/legacy flags kept for backwards compatibility
-		_ = fs.Int("loki-port", 3100, "Deprecated")
-		_ = fs.Bool("enable-alerting", false, "Deprecated")
-		_ = fs.Bool("alerting", false, "Deprecated")
-		var envList stringSlice
-		fs.Var(&envList, "env", "Environment variable (repeatable)")
-		fs.Var(&envList, "e", "Alias for --env (repeatable)")
 		_ = fs.Parse(remainingArgs)
 
 		if *exportOnly {
@@ -232,7 +225,7 @@ func handleDashboard(args []string) {
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, envList...); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)
