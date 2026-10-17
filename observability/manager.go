@@ -91,7 +91,7 @@ func toCombinedLog(line string) string {
 
 	// Try JSON format
 	var ev logEvent
-	if err := json.Unmarshal([]byte(line), &ev); err == nil && (ev.Path != "" || ev.PathAlt != "" || ev.ClientIP != "" || ev.ClientIPAlt != "") {
+	if err := json.Unmarshal([]byte(line), &ev); err == nil && (ev.Path != "" || ev.PathAlt != "" || ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.Verdict != "") {
 		ip := ev.ClientIP
 		if ip == "" {
 			ip = ev.ClientIPAlt
@@ -107,11 +107,13 @@ func toCombinedLog(line string) string {
 		if path == "" {
 			path = "/"
 		}
+		path = strings.ReplaceAll(path, `"`, "%22")
 
 		method := ev.Method
 		if method == "" {
 			method = "GET"
 		}
+		method = strings.ReplaceAll(method, `"`, "")
 
 		status := ev.StatusCode
 		if status == 0 {
@@ -147,13 +149,13 @@ func toCombinedLog(line string) string {
 		if rule == "" {
 			rule = "RouteWarden"
 		}
+		rule = strings.ReplaceAll(rule, `"`, `'`)
 
 		return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, rule)
 	}
 
-	// Fallback to basic combined log line
-	nowStr := time.Now().UTC().Format("02/Jan/2006:15:04:05 -0700")
-	return fmt.Sprintf("127.0.0.1 - - [%s] \"GET %s HTTP/1.1\" 200 0 \"-\" \"RouteWarden\"", nowStr, line)
+	// Drop arbitrary non-HTTP and debug log lines
+	return ""
 }
 
 func getFreePort() (int, error) {
@@ -192,6 +194,49 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	}
 	defer logFile.Close()
 
+	dashboardCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		cancel()
+	}()
+
+	// Discover container targets or tail file
+	var targets []containerTarget
+	if file != "" {
+		tailFileToLog(dashboardCtx, file, logFile)
+	} else if container != "" {
+		targets = []containerTarget{{ID: container, Name: container}}
+	} else {
+		discovered, err := discoverDockerContainers(label)
+		if err == nil && len(discovered) > 0 {
+			targets = discovered
+		}
+	}
+
+	// Prime access.log with initial logs from targets so GoAccess renders immediately
+	if len(targets) > 0 {
+		for _, target := range targets {
+			cmd := exec.Command("docker", "logs", "--tail", "100", target.ID)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				for _, l := range strings.Split(string(out), "\n") {
+					combined := toCombinedLog(l)
+					if combined != "" {
+						_, _ = logFile.WriteString(combined + "\n")
+					}
+				}
+				_ = logFile.Sync()
+			}
+		}
+	} else if file == "" {
+		initLine := toCombinedLog(`{"time":"` + time.Now().UTC().Format(time.RFC3339) + `","client_ip":"127.0.0.1","method":"GET","path":"/health","verdict":"ALLOW"}`)
+		_, _ = logFile.WriteString(initLine + "\n")
+		_ = logFile.Sync()
+	}
+
 	wsPort, err := getFreePort()
 	if err != nil {
 		wsPort = port + 1
@@ -203,16 +248,6 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	if errGoaccess != nil && errDocker != nil {
 		return fmt.Errorf("neither 'goaccess' nor 'docker' is installed. Please install GoAccess (brew install goaccess / apt install goaccess) or Docker")
 	}
-
-	dashboardCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		cancel()
-	}()
 
 	useDockerGoaccess := (errGoaccess != nil)
 	var goaccessCmd *exec.Cmd
@@ -231,7 +266,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		}
 		goaccessCmd = exec.CommandContext(dashboardCtx, goaccessBin, args...)
 	} else {
-		// Run GoAccess via Docker container
+		// Run GoAccess via Docker container (allinurl/goaccess:latest entrypoint is goaccess)
 		wsURL := fmt.Sprintf("ws://localhost:%d/ws", port)
 		_ = exec.Command("docker", "rm", "-f", "routewarden-dashboard").Run()
 
@@ -241,7 +276,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 			"-p", fmt.Sprintf("127.0.0.1:%d:7890", wsPort),
 			"-v", fmt.Sprintf("%s:/srv/report", dir),
 			"allinurl/goaccess:latest",
-			"goaccess", "/srv/report/access.log",
+			"/srv/report/access.log",
 			"--config-file=/srv/report/goaccess.conf",
 			"--real-time-html",
 			"--port=7890",
@@ -256,6 +291,13 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		return fmt.Errorf("start GoAccess engine: %w", err)
 	}
 
+	// Monitor GoAccess exit
+	go func() {
+		if err := goaccessCmd.Wait(); err != nil && dashboardCtx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "GoAccess process exited: %v\n", err)
+		}
+	}()
+
 	defer func() {
 		if goaccessCmd.Process != nil {
 			_ = goaccessCmd.Process.Kill()
@@ -265,23 +307,9 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		}
 	}()
 
-	// Stream logs into logFilePath
-	var targets []containerTarget
-	if file != "" {
-		go tailFileToLog(dashboardCtx, file, logFile)
-	} else if container != "" {
-		targets = []containerTarget{{ID: container, Name: container}}
+	// Continuously stream new logs from discovered containers
+	if len(targets) > 0 {
 		go streamContainersToLog(dashboardCtx, targets, logFile)
-	} else {
-		discovered, err := discoverDockerContainers(label)
-		if err == nil && len(discovered) > 0 {
-			targets = discovered
-			go streamContainersToLog(dashboardCtx, targets, logFile)
-		} else {
-			// Write sample line so GoAccess starts up cleanly
-			initLine := toCombinedLog(`{"time":"` + time.Now().UTC().Format(time.RFC3339) + `","client_ip":"127.0.0.1","method":"GET","path":"/health","verdict":"ALLOW"}`)
-			_, _ = logFile.WriteString(initLine + "\n")
-		}
 	}
 
 	// Setup ReverseProxy for WebSocket and HTTP Server
