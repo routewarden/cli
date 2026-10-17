@@ -1911,6 +1911,12 @@
           }
         },
         {
+          "id": "extractFields",
+          "options": {
+            "source": "labels"
+          }
+        },
+        {
           "id": "organize",
           "options": {
             "excludeByName": {
