@@ -209,7 +209,11 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	if file != "" {
 		tailFileToLog(dashboardCtx, file, logFile)
 	} else if container != "" {
-		targets = []containerTarget{{ID: container, Name: container}}
+		if found, err := findSpecificContainer(container); err == nil && len(found) > 0 {
+			targets = found
+		} else {
+			targets = []containerTarget{{ID: container, Name: container}}
+		}
 	} else {
 		discovered, err := discoverDockerContainers(label)
 		if err == nil && len(discovered) > 0 {
@@ -307,9 +311,9 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		}
 	}()
 
-	// Continuously stream new logs from discovered containers
-	if len(targets) > 0 {
-		go streamContainersToLog(dashboardCtx, targets, logFile)
+	// Continuously stream new logs from discovered containers and watch lifecycle
+	if file == "" {
+		go watchAndStreamContainers(dashboardCtx, label, container, targets, logFile)
 	}
 
 	// Setup ReverseProxy for WebSocket and HTTP Server
@@ -386,15 +390,62 @@ func min(a, b int) int {
 	return b
 }
 
-func streamContainersToLog(ctx context.Context, targets []containerTarget, out *os.File) {
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+func findSpecificContainer(nameOrID string) ([]containerTarget, error) {
+	cmd := exec.Command("docker", "ps", "--filter", "status=running", "--filter", "name="+nameOrID, "--format", "{{.ID}}\t{{.Names}}")
+	out, err := cmd.Output()
+	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			parts := strings.Split(line, "\t")
+			if len(parts) >= 1 {
+				name := parts[0]
+				if len(parts) >= 2 {
+					name = parts[1]
+				}
+				if name == nameOrID || strings.HasPrefix(parts[0], nameOrID) {
+					return []containerTarget{{ID: parts[0], Name: name}}, nil
+				}
+			}
+		}
+	}
 
-	for _, target := range targets {
-		wg.Add(1)
-		go func(c containerTarget) {
-			defer wg.Done()
-			cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", "50", c.ID)
+	cmd = exec.Command("docker", "ps", "--filter", "status=running", "--filter", "id="+nameOrID, "--format", "{{.ID}}\t{{.Names}}")
+	out, err = cmd.Output()
+	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		parts := strings.Split(strings.TrimSpace(string(out)), "\t")
+		name := parts[0]
+		if len(parts) >= 2 {
+			name = parts[1]
+		}
+		return []containerTarget{{ID: parts[0], Name: name}}, nil
+	}
+	return nil, fmt.Errorf("container %q not running", nameOrID)
+}
+
+func watchAndStreamContainers(ctx context.Context, label string, specificContainer string, initialTargets []containerTarget, out *os.File) {
+	var mu sync.Mutex
+	active := make(map[string]context.CancelFunc)
+
+	startStream := func(target containerTarget, tailLines string) {
+		mu.Lock()
+		if _, exists := active[target.ID]; exists {
+			mu.Unlock()
+			return
+		}
+		cCtx, cancel := context.WithCancel(ctx)
+		active[target.ID] = cancel
+		mu.Unlock()
+
+		go func() {
+			defer func() {
+				mu.Lock()
+				delete(active, target.ID)
+				mu.Unlock()
+				if ctx.Err() == nil {
+					fmt.Printf("🛑 [Docker] Container stopped: %s (%s)\n", target.Name, target.ID[:min(12, len(target.ID))])
+				}
+			}()
+
+			cmd := exec.CommandContext(cCtx, "docker", "logs", "-f", "--tail", tailLines, target.ID)
 			stdout, err := cmd.StdoutPipe()
 			if err != nil {
 				return
@@ -423,9 +474,49 @@ func streamContainersToLog(ctx context.Context, targets []containerTarget, out *
 			go readPipe(stdout)
 			readPipe(stderr)
 			_ = cmd.Wait()
-		}(target)
+		}()
 	}
-	wg.Wait()
+
+	for _, t := range initialTargets {
+		startStream(t, "50")
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			mu.Lock()
+			for _, cancel := range active {
+				cancel()
+			}
+			mu.Unlock()
+			return
+		case <-ticker.C:
+			var found []containerTarget
+			if specificContainer != "" {
+				if ct, err := findSpecificContainer(specificContainer); err == nil {
+					found = ct
+				}
+			} else {
+				if ct, err := discoverDockerContainers(label); err == nil {
+					found = ct
+				}
+			}
+
+			for _, c := range found {
+				mu.Lock()
+				_, isStreaming := active[c.ID]
+				mu.Unlock()
+
+				if !isStreaming {
+					fmt.Printf("🐳 [Docker] Attached to container: %s (%s)\n", c.Name, c.ID[:min(12, len(c.ID))])
+					startStream(c, "50")
+				}
+			}
+		}
+	}
 }
 
 func tailFileToLog(ctx context.Context, filePath string, out *os.File) {
