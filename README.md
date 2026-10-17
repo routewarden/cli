@@ -24,13 +24,37 @@ curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/b
 
 ---
 
-### 2. Pre-built Release Binaries
+### 2. Homebrew (macOS & Linux)
+
+```bash
+brew install routewarden/tap/rwarden
+```
+
+---
+
+### 3. Debian / Ubuntu (APT)
+
+Install the official `.deb` package directly using `apt`:
+
+```bash
+# Download and install with automatic dependency handling
+curl -fsSLO https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_amd64.deb
+sudo apt install ./rwarden_linux_amd64.deb
+
+# For ARM64 (e.g. Raspberry Pi / AWS Graviton):
+# curl -fsSLO https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_arm64.deb
+# sudo apt install ./rwarden_linux_arm64.deb
+```
+
+---
+
+### 4. Pre-built Release Binaries
 
 Download standalone binaries for **Linux** (`amd64`, `arm64`), **macOS** (Apple Silicon `arm64` & Intel `amd64`), and **Windows** directly from [GitHub Releases](https://github.com/routewarden/cli/releases/latest).
 
 ---
 
-### 3. Container Image (Docker / CI/CD)
+### 5. Container Image (Docker / CI/CD)
 
 Run `rwarden` via container without installing any local binaries:
 
@@ -44,7 +68,7 @@ docker run --rm ghcr.io/routewarden/cli:latest test --path "/.env"
 
 ---
 
-### 4. From Source (Go)
+### 6. From Source (Go)
 
 ```bash
 git clone https://github.com/routewarden/cli.git
@@ -56,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 4.5.3
+# rwarden version 5.0.0
 ```
 
 ---

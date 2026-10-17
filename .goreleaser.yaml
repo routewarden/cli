@@ -64,3 +64,23 @@ brews:
     license: "MIT"
     test: |
       system "#{bin}/rwarden version"
+
+nfpms:
+  - id: packages
+    package_name: rwarden
+    vendor: RouteWarden
+    homepage: "https://routewarden.github.io"
+    maintainer: "RouteWarden Contributors <bot@routewarden.dev>"
+    description: "Unified Edge & L4 Protocol Security Suite CLI"
+    license: "MIT"
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/local/bin
+    section: utils
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/rwarden/copyright
+      - src: README.md
+        dst: /usr/share/doc/rwarden/README.md
