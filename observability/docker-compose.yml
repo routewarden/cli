@@ -21,18 +21,23 @@ services:
     image: curlimages/curl:latest
     container_name: routewarden-geoip-init
     restart: "no"
+    user: "0:0"
     environment:
       - GEOIP_DB_URL=${GEOIP_DB_URL:-https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb}
     command:
       - sh
       - -c
       - |
-        if [ ! -s /home/curl_user/GeoLite2-Country.mmdb ]; then
-          echo "Downloading GeoLite2 Country database for RouteWarden GeoIP pipeline (non-root)..."
-          curl -sSL --connect-timeout 15 --retry 3 "$$GEOIP_DB_URL" -o /home/curl_user/GeoLite2-Country.mmdb || true
+        if [ ! -s /etc/alloy/geoip/GeoLite2-Country.mmdb ] || [ $$(wc -c < /etc/alloy/geoip/GeoLite2-Country.mmdb 2>/dev/null || echo 0) -lt 1000000 ]; then
+          echo "Downloading GeoLite2 Country database for RouteWarden GeoIP pipeline..."
+          curl -f -sSL --connect-timeout 20 --retry 3 "$$GEOIP_DB_URL" -o /etc/alloy/geoip/GeoLite2-Country.mmdb
+          chmod 644 /etc/alloy/geoip/GeoLite2-Country.mmdb
+          echo "GeoLite2 database ready: $$(ls -lh /etc/alloy/geoip/GeoLite2-Country.mmdb)"
+        else
+          echo "GeoLite2 database already exists and is valid ($$(ls -lh /etc/alloy/geoip/GeoLite2-Country.mmdb))."
         fi
     volumes:
-      - geoip-data:/home/curl_user
+      - geoip-data:/etc/alloy/geoip
     networks:
       - routewarden
 
