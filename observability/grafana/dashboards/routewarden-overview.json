@@ -1835,9 +1835,31 @@
           "options": {
             "excludeByName": {
               "Line": true,
+              "action": true,
               "app": true,
+              "bytes_in": true,
+              "bytes_out": true,
+              "country_name": true,
+              "duration_ms": true,
+              "effective_ip": true,
+              "flag_emoji": true,
               "id": true,
-              "labels": true
+              "ip": true,
+              "labels": true,
+              "latency_ms": true,
+              "level": true,
+              "matched_pattern": true,
+              "pattern": true,
+              "plugin": true,
+              "rule_id": true,
+              "service": true,
+              "status_code": true,
+              "time": true,
+              "timestamp": true,
+              "transport": true,
+              "ts": true,
+              "type": true,
+              "user_agent": true
             },
             "indexByName": {
               "Time": 0,
