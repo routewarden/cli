@@ -130,11 +130,14 @@ func TestDashboardGeoIPIntegration(t *testing.T) {
 		"Protocol Breakdown":                                                "piechart",
 		"Transport Split (TCP vs UDP)":                                      "bargauge",
 		"🎯 Threat Analysis & Attack Vector Profiling":                       "row",
-		"Top Attacked Endpoints":                                            "bargauge",
+		"Top Target Paths":                                                  "bargauge",
 		"Top Offender IP Addresses & GeoIP":                                 "bargauge",
 		"Top Triggered Rules / Signatures":                                  "bargauge",
 		"🤖 Malicious User-Agents & Attack Scanners":                         "bargauge",
 		"Attacked HTTP Methods & Verbs":                                     "piechart",
+		"🛡️ Defense Action Breakdown":                                       "piechart",
+		"🌐 Top Protected Virtual Hosts & Services":                          "bargauge",
+		"⏱️ Threat Inspection Latency & Tarpit Timing":                       "timeseries",
 		"📜 Live Security Event Feed & Incident Triage":                       "row",
 		"🚨 Interactive Threat Incident Triage Table (Click IP to Investigate)": "table",
 		"Real-Time Attack Log Stream":                                       "logs",
@@ -147,6 +150,37 @@ func TestDashboardGeoIPIntegration(t *testing.T) {
 		} else if actualType != expectedType {
 			t.Errorf("panel %q has type %q, expected %q", expectedTitle, actualType, expectedType)
 		}
+	}
+
+	// Verify GeoIP pipeline in config.alloy
+	alloyPath := filepath.Join(tempDir, "config.alloy")
+	alloyData, err := os.ReadFile(alloyPath)
+	if err != nil {
+		t.Fatalf("failed to read config.alloy: %v", err)
+	}
+	alloyContent := string(alloyData)
+	if !containsSubstring(alloyContent, "stage.geoip") {
+		t.Errorf("config.alloy missing stage.geoip block")
+	}
+	if !containsSubstring(alloyContent, "GeoLite2-Country.mmdb") {
+		t.Errorf("config.alloy missing GeoLite2-Country.mmdb database reference")
+	}
+	if !containsSubstring(alloyContent, "country_code") {
+		t.Errorf("config.alloy missing country_code template normalization")
+	}
+
+	// Verify GeoIP container and volume in docker-compose.yml
+	composePath := filepath.Join(tempDir, "docker-compose.yml")
+	composeData, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("failed to read docker-compose.yml: %v", err)
+	}
+	composeContent := string(composeData)
+	if !containsSubstring(composeContent, "geoip-init") {
+		t.Errorf("docker-compose.yml missing geoip-init service")
+	}
+	if !containsSubstring(composeContent, "geoip-data") {
+		t.Errorf("docker-compose.yml missing geoip-data volume")
 	}
 
 	// Verify synchronization with github/dashboards/routewarden-overview.json

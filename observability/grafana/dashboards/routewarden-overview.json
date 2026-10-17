@@ -1137,12 +1137,12 @@
             "uid": "Loki"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (path) (count_over_time({app=\"routewarden\", verdict=\"BLOCK\", gateway=~\"$gateway\"} | json [$__range])))",
+          "expr": "topk(10, sum by (path) (count_over_time({app=\"routewarden\", verdict=~\"$verdict\", gateway=~\"$gateway\"} | json [$__range])))",
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Top Attacked Endpoints",
+      "title": "Top Target Paths",
       "type": "bargauge"
     },
     {
@@ -1299,7 +1299,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 16,
+        "w": 8,
         "x": 0,
         "y": 42
       },
@@ -1329,7 +1329,7 @@
           "refId": "A"
         }
       ],
-      "title": "\ud83e\udd16 Malicious User-Agents & Attack Scanners",
+      "title": "🤖 Malicious User-Agents & Attack Scanners",
       "type": "bargauge"
     },
     {
@@ -1348,7 +1348,7 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 8,
         "y": 42
       },
       "id": 31,
@@ -1395,15 +1395,198 @@
       "type": "piechart"
     },
     {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "id": 32,
+      "options": {
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (response_mode) (count_over_time({app=\"routewarden\", verdict=~\"$verdict\", response_mode!=\"\", gateway=~\"$gateway\"} [$__range]))",
+          "legendFormat": "{{response_mode}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "🛡️ Defense Action Breakdown",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 0,
+        "y": 50
+      },
+      "id": 33,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (service) (count_over_time({app=\"routewarden\", verdict=~\"$verdict\", service!=\"\", gateway=~\"$gateway\"} [$__range])))",
+          "legendFormat": "{{service}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "🌐 Top Protected Virtual Hosts & Services",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 10,
+        "y": 50
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.95, {app=\"routewarden\", gateway=~\"$gateway\"} | json | unwrap duration_ms [$__interval])",
+          "legendFormat": "p95 Duration",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "Loki"
+          },
+          "editorMode": "code",
+          "expr": "avg_over_time({app=\"routewarden\", gateway=~\"$gateway\"} | json | unwrap duration_ms [$__interval])",
+          "legendFormat": "Avg Duration",
+          "queryType": "range",
+          "refId": "B"
+        }
+      ],
+      "title": "⏱️ Threat Inspection Latency & Tarpit Timing",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 58
       },
       "id": 103,
-      "title": "\ud83d\udcdc Live Security Event Feed & Incident Triage",
+      "title": "📜 Live Security Event Feed & Incident Triage",
       "type": "row"
     },
     {
@@ -1603,7 +1786,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 59
       },
       "id": 50,
       "options": {
@@ -1637,7 +1820,7 @@
           "refId": "A"
         }
       ],
-      "title": "\ud83d\udea8 Interactive Threat Incident Triage Table (Click IP to Investigate)",
+      "title": "🚨 Interactive Threat Incident Triage Table (Click IP to Investigate)",
       "transformations": [
         {
           "id": "extractFields",
@@ -1682,7 +1865,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 61
+        "y": 69
       },
       "id": 10,
       "options": {
