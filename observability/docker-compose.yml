@@ -27,12 +27,12 @@ services:
       - sh
       - -c
       - |
-        if [ ! -s /geoip/GeoLite2-Country.mmdb ]; then
-          echo "Downloading GeoLite2 Country database for RouteWarden GeoIP pipeline..."
-          curl -sSL --connect-timeout 15 --retry 3 "$$GEOIP_DB_URL" -o /geoip/GeoLite2-Country.mmdb || true
+        if [ ! -s /home/curl_user/GeoLite2-Country.mmdb ]; then
+          echo "Downloading GeoLite2 Country database for RouteWarden GeoIP pipeline (non-root)..."
+          curl -sSL --connect-timeout 15 --retry 3 "$$GEOIP_DB_URL" -o /home/curl_user/GeoLite2-Country.mmdb || true
         fi
     volumes:
-      - geoip-data:/geoip
+      - geoip-data:/home/curl_user
     networks:
       - routewarden
 
