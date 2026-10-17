@@ -652,23 +652,56 @@ rwarden diff --exit-code prod.json candidate.json
 
 ### 9. Live Terminal Threat Monitoring (`monitor`)
 
-Tail and colorize live reverse proxy security events directly in the terminal from Docker logs, NGINX access logs, or standard input:
+Tail, multiplex, and colorize live reverse proxy security events directly in the terminal from Docker containers, log files, or standard input.
+
+#### Automatic Docker Discovery via Labels
+
+If no file or stdin pipe is provided, `rwarden monitor` automatically discovers running Docker containers tagged with the label `routewarden=true` (or `routewarden.logs=true`) and streams them concurrently with container attribution tags (`[traefik]`, `[nginx]`, etc.):
+
+```yaml
+# docker-compose.yaml
+services:
+  traefik:
+    image: traefik:v3.1
+    labels:
+      - "routewarden=true"
+  nginx:
+    image: openresty/openresty:alpine
+    labels:
+      - "routewarden=true"
+```
 
 ```bash
-# Stream from live Docker container
-docker logs -f traefik | rwarden monitor
+# Auto-discover and multiplex all containers with routewarden=true label
+rwarden monitor
+
+# Tail a specific container by name or ID
+rwarden monitor --container traefik
+
+# Filter by custom Docker label
+rwarden monitor --label "env=production"
 
 # Tail an NGINX or Apache access log file
 rwarden monitor --file /var/log/nginx/access.log
 
-# Filter exclusively for blocked threats
+# Filter exclusively for blocked threats or specific IP / path
 rwarden monitor --verdict BLOCK
-
-# Filter by target path or offender IP
 rwarden monitor --path "/.env" --ip "192.168.1."
 ```
 
-Press `Ctrl+C` at any time to output an aggregate threat summary report.
+#### Lightweight Web Analytics with GoAccess
+
+Looking for a lightweight alternative to Grafana/Loki? Use `--raw` to emit unformatted log lines and pipe directly into [GoAccess](https://goaccess.io/):
+
+```bash
+# Terminal real-time viewer via GoAccess
+rwarden monitor --raw | goaccess --log-format=COMBINED -
+
+# Generate a live real-time HTML dashboard on port 7890 (no heavy stack required)
+rwarden monitor --raw | goaccess -o /var/www/html/security.html --real-time-html --port=7890 -
+```
+
+Press `Ctrl+C` at any time to output an aggregate threat summary report (total requests, block rate, traffic per container, and top targeted attack paths).
 
 ---
 
