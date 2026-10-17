@@ -81,6 +81,48 @@ func (e *logEvent) getLatency() float64 {
 	return e.DurationMsAlt
 }
 
+func (e *logEvent) toCombinedLog() string {
+	ip := e.getIP()
+	if ip == "-" || ip == "" {
+		ip = "127.0.0.1"
+	}
+	path := e.getPath()
+	method := e.Method
+	if method == "" {
+		method = "GET"
+	}
+	status := e.StatusCode
+	if status == 0 {
+		status = e.StatusCodeAlt
+	}
+	if status == 0 {
+		switch e.getVerdict() {
+		case "BLOCK":
+			status = 403
+		case "TARPIT":
+			status = 429
+		default:
+			status = 200
+		}
+	}
+	t := time.Now().UTC()
+	if e.Timestamp != "" {
+		if parsed, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+			t = parsed
+		}
+	} else if e.TimestampAlt != "" {
+		if parsed, err := time.Parse(time.RFC3339, e.TimestampAlt); err == nil {
+			t = parsed
+		}
+	}
+	timeStr := t.Format("02/Jan/2006:15:04:05 -0700")
+	rule := e.getPattern()
+	if rule == "" {
+		rule = "RouteWarden"
+	}
+	return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, rule)
+}
+
 type containerTarget struct {
 	ID   string
 	Name string
@@ -98,6 +140,8 @@ func handleMonitor(args []string) {
 	fs := flag.NewFlagSet("monitor", flag.ExitOnError)
 	file := fs.String("file", "", "Log file to read from (default: stdin or auto-discovered docker)")
 	fs.StringVar(file, "f", "", "Alias for --file")
+	outPath := fs.String("out", "", "Output file to write/append monitored events to (Combined log format)")
+	fs.StringVar(outPath, "o", "", "Alias for --out")
 	dockerMode := fs.Bool("docker", false, "Auto-discover and tail Docker containers with label 'routewarden=true'")
 	containerName := fs.String("container", "", "Tail a specific Docker container by name or ID")
 	fs.StringVar(containerName, "c", "", "Alias for --container")
@@ -105,10 +149,16 @@ func handleMonitor(args []string) {
 	fs.StringVar(customLabel, "l", "", "Alias for --label")
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s)")
 	rawOutput := fs.Bool("raw", false, "Output raw unformatted log lines (ideal for piping into GoAccess or jq)")
+	waitContainers := fs.Bool("wait", false, "Wait and retry if no matching containers are running initially")
+	fs.BoolVar(waitContainers, "w", false, "Alias for --wait")
 	verdictFilter := fs.String("verdict", "", "Filter events by verdict (BLOCK, ALLOW, TARPIT)")
 	ipFilter := fs.String("ip", "", "Filter events by client IP substring")
 	pathFilter := fs.String("path", "", "Filter events by request path substring")
 	_ = parseFlagsLenient(fs, args)
+
+	if !*waitContainers && os.Getenv("RWARDEN_MONITOR_WAIT") == "true" {
+		*waitContainers = true
+	}
 
 	// Determine execution mode: file, stdin pipe, or docker auto-discovery
 	stat, err := os.Stdin.Stat()
@@ -117,7 +167,7 @@ func handleMonitor(args []string) {
 	useDocker := *dockerMode || *containerName != "" || (*file == "" && !isStdinPipe)
 
 	if useDocker && *file == "" && !isStdinPipe {
-		runDockerMonitor(*containerName, *customLabel, *tailLines, *verdictFilter, *ipFilter, *pathFilter, *rawOutput)
+		runDockerMonitor(*containerName, *customLabel, *tailLines, *verdictFilter, *ipFilter, *pathFilter, *outPath, *rawOutput, *waitContainers)
 		return
 	}
 
@@ -150,42 +200,58 @@ func handleMonitor(args []string) {
 		close(msgChan)
 	}()
 
-	processLogStream(msgChan, *verdictFilter, *ipFilter, *pathFilter, *rawOutput)
+	processLogStream(msgChan, *verdictFilter, *ipFilter, *pathFilter, *outPath, *rawOutput)
 }
 
-func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFilter, pathFilter string, rawOutput bool) {
+func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFilter, pathFilter, outPath string, rawOutput, waitMode bool) {
 	var targets []containerTarget
 
 	if containerName != "" {
-		t, err := findDockerContainer(containerName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
-		}
-		targets = append(targets, *t)
-	} else {
-		discovered, err := discoverDockerContainers(customLabel)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to query Docker daemon: %v\n", err)
-			fmt.Fprintln(os.Stderr, "   Ensure the Docker daemon is running and /var/run/docker.sock is accessible.")
-			os.Exit(1)
-		}
-		if len(discovered) == 0 {
-			labelName := "routewarden=true"
-			if customLabel != "" {
-				labelName = customLabel
+		for {
+			t, err := findDockerContainer(containerName)
+			if err != nil {
+				if waitMode {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+				os.Exit(1)
 			}
-			fmt.Fprintf(os.Stderr, "🔍 No running Docker containers found with label %q\n\n", labelName)
-			fmt.Fprintln(os.Stderr, "To enable auto-monitoring, add the label to your services in docker-compose.yaml:")
-			fmt.Fprintln(os.Stderr, "  services:")
-			fmt.Fprintln(os.Stderr, "    traefik:")
-			fmt.Fprintln(os.Stderr, "      labels:")
-			fmt.Fprintln(os.Stderr, "        - \"routewarden=true\"")
-			fmt.Fprintln(os.Stderr, "\nOr monitor a specific container by name:")
-			fmt.Fprintln(os.Stderr, "  rwarden monitor --container <container-name>")
-			os.Exit(1)
+			targets = append(targets, *t)
+			break
 		}
-		targets = discovered
+	} else {
+		for {
+			discovered, err := discoverDockerContainers(customLabel)
+			if err != nil {
+				if waitMode {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "❌ Failed to query Docker daemon: %v\n", err)
+				fmt.Fprintln(os.Stderr, "   Ensure the Docker daemon is running and /var/run/docker.sock is accessible.")
+				os.Exit(1)
+			}
+			if len(discovered) > 0 {
+				targets = discovered
+				break
+			}
+			if !waitMode {
+				labelName := "routewarden=true"
+				if customLabel != "" {
+					labelName = customLabel
+				}
+				fmt.Fprintf(os.Stderr, "🔍 No running Docker containers found with label %q\n\n", labelName)
+				fmt.Fprintln(os.Stderr, "To enable auto-monitoring, add the label to your services in docker-compose.yaml:")
+				fmt.Fprintln(os.Stderr, "  services:")
+				fmt.Fprintln(os.Stderr, "    traefik:")
+				fmt.Fprintln(os.Stderr, "      labels:")
+				fmt.Fprintln(os.Stderr, "        - \"routewarden=true\"")
+				fmt.Fprintln(os.Stderr, "\nOr monitor a specific container by name:")
+				fmt.Fprintln(os.Stderr, "  rwarden monitor --container <container-name>")
+				os.Exit(1)
+			}
+		}
 	}
 
 	if !rawOutput {
@@ -216,7 +282,7 @@ func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFi
 		close(msgChan)
 	}()
 
-	processLogStream(msgChan, verdictFilter, ipFilter, pathFilter, rawOutput)
+	processLogStream(msgChan, verdictFilter, ipFilter, pathFilter, outPath, rawOutput)
 }
 
 func streamContainerLogs(ctx context.Context, target containerTarget, tailLines string, out chan<- streamMsg) {
@@ -329,7 +395,18 @@ func printFilterNotice(verdictFilter, ipFilter, pathFilter string) {
 	fmt.Println(strings.Repeat("─", 80))
 }
 
-func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFilter string, rawOutput bool) {
+func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFilter, outPath string, rawOutput bool) {
+	var outWriter *os.File
+	if outPath != "" {
+		f, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening output file %s: %v\n", outPath, err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		outWriter = f
+	}
+
 	totalEvents := 0
 	blockedEvents := 0
 	allowedEvents := 0
@@ -393,6 +470,10 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 			if rawOutput {
 				fmt.Println(line)
 			}
+			if outWriter != nil {
+				_, _ = outWriter.WriteString(line + "\n")
+				_ = outWriter.Sync()
+			}
 			continue
 		}
 
@@ -411,10 +492,27 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 			continue
 		}
 
-		// In raw output mode (for GoAccess / piping), emit the raw log line directly
+		// In raw output mode (for GoAccess / piping), emit standard Combined log line
 		if rawOutput {
-			fmt.Println(line)
+			outLine := line
+			if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+				outLine = ev.toCombinedLog()
+			}
+			fmt.Println(outLine)
+			if outWriter != nil {
+				_, _ = outWriter.WriteString(outLine + "\n")
+				_ = outWriter.Sync()
+			}
 			continue
+		}
+
+		if outWriter != nil {
+			outLine := line
+			if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+				outLine = ev.toCombinedLog()
+			}
+			_, _ = outWriter.WriteString(outLine + "\n")
+			_ = outWriter.Sync()
 		}
 
 		// Update metrics

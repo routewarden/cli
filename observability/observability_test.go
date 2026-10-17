@@ -47,6 +47,15 @@ func TestExportObservabilityAssets(t *testing.T) {
 	if !strings.Contains(composeStr, "allinurl/goaccess") {
 		t.Errorf("expected allinurl/goaccess image in docker-compose.yml, got:\n%s", composeStr)
 	}
+	if !strings.Contains(composeStr, "monitor:") {
+		t.Errorf("expected monitor service in docker-compose.yml, got:\n%s", composeStr)
+	}
+	if !strings.Contains(composeStr, "ghcr.io/routewarden/cli") {
+		t.Errorf("expected ghcr.io/routewarden/cli image in docker-compose.yml, got:\n%s", composeStr)
+	}
+	if !strings.Contains(composeStr, "profiles:") || !strings.Contains(composeStr, "monitor") {
+		t.Errorf("expected monitor profile in docker-compose.yml, got:\n%s", composeStr)
+	}
 
 	// Verify goaccess.conf contains expected configuration directives
 	confData, err := os.ReadFile(filepath.Join(tempDir, "goaccess.conf"))

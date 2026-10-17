@@ -21,10 +21,13 @@ Open your browser to:
 ```bash
 # Export configuration
 rwarden dashboard export ./dashboard
-
-# Launch container
 cd ./dashboard
+
+# Option A: Launch dashboard with existing log file
 docker compose up -d
+
+# Option B: Launch dashboard AND auto-fetch logs from Docker containers
+docker compose --profile monitor up -d
 ```
 
 ### 3. Piping Directly from CLI

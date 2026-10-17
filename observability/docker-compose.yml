@@ -10,12 +10,37 @@ services:
       - TZ=UTC
     volumes:
       - ./goaccess.conf:/etc/goaccess/goaccess.conf:ro
-      - ./data:/srv/data:ro
+      - ./data:/srv/data
       - ./report:/srv/report
-    command: >
-      goaccess /srv/data/access.log
-      --config-file=/etc/goaccess/goaccess.conf
-      --real-time-html
-      --port=7890
-      --addr=0.0.0.0
-      -o /srv/report/index.html
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /srv/data
+        touch /srv/data/access.log
+        exec goaccess /srv/data/access.log \
+          --config-file=/etc/goaccess/goaccess.conf \
+          --real-time-html \
+          --port=7890 \
+          --addr=0.0.0.0 \
+          -o /srv/report/index.html
+
+  # Optional companion service: automatically discovers and tails reverse proxy containers labeled 'routewarden=true'
+  # Usage: docker compose --profile monitor up -d
+  # Or:    COMPOSE_PROFILES=monitor docker compose up -d
+  monitor:
+    image: ghcr.io/routewarden/cli:latest
+    container_name: routewarden-monitor
+    restart: unless-stopped
+    profiles:
+      - monitor
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/data
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /data
+        touch /data/access.log
+        exec rwarden monitor --raw --wait --out=/data/access.log

@@ -143,7 +143,7 @@ _rwarden_completions() {
             ;;
         monitor)
             case "$prev" in
-                -f|--file)
+                -f|--file|-o|--out)
                     _filedir
                     return 0
                     ;;
@@ -153,7 +153,7 @@ _rwarden_completions() {
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--file -f --verdict --ip --path --help -h" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--file -f --out -o --wait -w --raw --docker --container -c --label -l --verdict --ip --path --help -h" -- "$cur") )
                 return 0
             fi
             ;;
@@ -243,6 +243,11 @@ _rwarden() {
                 monitor)
                     _arguments \
                         '(-f --file)'{-f,--file}'[Log file to tail]:file:_files' \
+                        '(-o --out)'{-o,--out}'[Output file to append logs to]:file:_files' \
+                        '(-w --wait)'{-w,--wait}'[Wait and retry for running containers]' \
+                        '--raw[Output raw/Combined log lines]' \
+                        '(-c --container)'{-c,--container}'[Target container name]:container:' \
+                        '(-l --label)'{-l,--label}'[Docker label filter]:label:' \
                         '--verdict[Filter by verdict]:verdict:(BLOCK ALLOW TARPIT)' \
                         '--ip[Filter by IP]:ip:' \
                         '--path[Filter by path]:path:'
