@@ -47,3 +47,20 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+brews:
+  - name: rwarden
+    repository:
+      owner: routewarden
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: routewarden-bot
+      email: bot@routewarden.dev
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Formula
+    homepage: "https://routewarden.github.io"
+    description: "Unified Edge & L4 Protocol Security Suite CLI"
+    license: "MIT"
+    test: |
+      system "#{bin}/rwarden version"
