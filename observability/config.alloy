@@ -111,6 +111,25 @@ loki.process "routewarden" {
     template = "{{ if .client_ip }}{{ .client_ip }}{{ else if .ip }}{{ .ip }}{{ else if .effective_ip }}{{ .effective_ip }}{{ end }}"
   }
 
+  // GeoIP enrichment: Resolve client_ip to country_code and country_name using MaxMind MMDB
+  stage.geoip {
+    source  = "client_ip"
+    db      = "/etc/alloy/geoip/GeoLite2-Country.mmdb"
+    db_type = "country"
+  }
+
+  // Populate country_code: preserve log value if present, fallback to GeoIP, fallback to LAN
+  stage.template {
+    source   = "country_code"
+    template = "{{ if .country_code }}{{ .country_code }}{{ else if .geoip_country_code }}{{ .geoip_country_code }}{{ else if or (eq .client_ip \"127.0.0.1\") (eq .client_ip \"::1\") (hasPrefix \"10.\" .client_ip) (hasPrefix \"192.168.\" .client_ip) (hasPrefix \"172.16.\" .client_ip) (hasPrefix \"172.17.\" .client_ip) (hasPrefix \"172.18.\" .client_ip) (hasPrefix \"172.19.\" .client_ip) (hasPrefix \"172.2\" .client_ip) (hasPrefix \"172.30.\" .client_ip) (hasPrefix \"172.31.\" .client_ip) }}LAN{{ end }}"
+  }
+
+  // Populate human-readable country_name
+  stage.template {
+    source   = "country_name"
+    template = "{{ if .country_name }}{{ .country_name }}{{ else if .geoip_country_name }}{{ .geoip_country_name }}{{ else if eq .country_code \"LAN\" }}Local Network{{ end }}"
+  }
+
   // Normalize matched_pattern (fall back to pattern if matched_pattern is empty)
   stage.template {
     source   = "matched_pattern"
