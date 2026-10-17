@@ -610,7 +610,124 @@ If you already have a Grafana and Loki stack configured on your server, you do *
 
 ---
 
-### 7. Cleanup Sandboxes (`cleanup`)
+### 7. Policy Static Analyzer & Linter (`audit`)
+
+Perform deep static analysis on a RouteWarden policy file to catch ReDoS vulnerabilities, unescaped dots, universal wildcard traps, and header spoofing risks before deployment:
+
+```bash
+# Audit default routewarden.json
+rwarden audit
+
+# Audit custom configuration file
+rwarden audit ./config/routewarden.json
+
+# Fail on warnings as well as critical errors (ideal for CI/CD)
+rwarden audit --strict routewarden.json
+
+# Output as JSON
+rwarden audit --format json routewarden.json
+
+# Output in OASIS SARIF v2.1.0 format for GitHub Code Scanning
+rwarden audit --format sarif routewarden.json > results.sarif
+```
+
+---
+
+### 8. Policy Diffing (`diff`)
+
+Compare two RouteWarden policies and assess the delta on your production security posture:
+
+```bash
+# Compare production policy against candidate update
+rwarden diff prod.json candidate.json
+
+# Output diff as machine-readable JSON
+rwarden diff --format json prod.json candidate.json
+
+# Fail with exit code 1 if differences exist, or code 2 if security posture is relaxed
+rwarden diff --exit-code prod.json candidate.json
+```
+
+---
+
+### 9. Live Terminal Threat Monitoring (`monitor`)
+
+Tail and colorize live reverse proxy security events directly in the terminal from Docker logs, NGINX access logs, or standard input:
+
+```bash
+# Stream from live Docker container
+docker logs -f traefik | rwarden monitor
+
+# Tail an NGINX or Apache access log file
+rwarden monitor --file /var/log/nginx/access.log
+
+# Filter exclusively for blocked threats
+rwarden monitor --verdict BLOCK
+
+# Filter by target path or offender IP
+rwarden monitor --path "/.env" --ip "192.168.1."
+```
+
+Press `Ctrl+C` at any time to output an aggregate threat summary report.
+
+---
+
+### 10. Interactive Terminal REPL (`tui`)
+
+Launch an interactive terminal simulator to experiment with paths, query strings, headers, and client IPs in real time:
+
+```bash
+# Launch interactive REPL
+rwarden tui
+
+# Or with an alias
+rwarden interactive
+
+# Launch with pre-loaded configuration
+rwarden tui ./routewarden.json
+```
+
+Inside the TUI:
+- Type any path (e.g. `/.env`, `/%252e%252e/.env`, `/admin;p=1/config`) for instant candidate path normalization & verdict analysis.
+- Use `:method POST`, `:ip 10.0.0.1`, `:query key=val`, `:header Key: Val`, `:load <file>`, `:status`, or `:help`.
+
+---
+
+### 11. Shell Autocompletion (`completion`)
+
+Generate autocompletion scripts for subcommands, flags, and targets:
+
+```bash
+# Bash
+source <(rwarden completion bash)
+
+# Zsh
+rwarden completion zsh > ~/.zsh/completion/_rwarden
+
+# Fish
+rwarden completion fish | source
+
+# PowerShell
+rwarden completion powershell | Out-String | Invoke-Expression
+```
+
+---
+
+### 12. System Manpage (`man`)
+
+Output the standard system manual page formatted in roff/troff:
+
+```bash
+# View manpage directly
+rwarden man | man -l -
+
+# Save to system man directory
+sudo rwarden man -o /usr/share/man/man1/rwarden.1
+```
+
+---
+
+### 13. Cleanup Sandboxes (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -629,7 +746,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 8. Check CLI Version (`version`)
+### 14. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 

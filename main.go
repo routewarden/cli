@@ -52,9 +52,19 @@ Commands:
                 e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
   validate    Validate a RouteWarden configuration file (JSON)
                 e.g. rwarden validate [routewarden.json]
+  audit       Perform static analysis and linting on a policy file (alias: lint)
+                e.g. rwarden audit [routewarden.json]
+                e.g. rwarden audit --format sarif > results.sarif
+  diff        Compare two policies and evaluate security posture impact
+                e.g. rwarden diff prod.json candidate.json
   generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden)
                 e.g. rwarden generate caddy [routewarden.json]
                 e.g. rwarden generate tcp-warden [routewarden.json]
+  monitor     Tail and colorize live reverse proxy security events
+                e.g. docker logs -f traefik | rwarden monitor
+                e.g. rwarden monitor --file /var/log/nginx/access.log
+  tui         Launch interactive terminal REPL for real-time testing (alias: interactive)
+                e.g. rwarden tui
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
@@ -66,6 +76,10 @@ Commands:
                 e.g. rwarden dashboard status
                 e.g. rwarden dashboard export ./observability
   cleanup     Stop and remove any running RouteWarden sandbox containers
+  completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
+                e.g. source <(rwarden completion bash)
+  man         Output system roff manual page (rwarden.1)
+                e.g. rwarden man | man -l -
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
 
@@ -89,8 +103,26 @@ func main() {
 	case "validate":
 		handleValidate(os.Args[2:])
 
+	case "audit", "lint":
+		handleAudit(os.Args[2:])
+
+	case "diff":
+		handleDiff(os.Args[2:])
+
 	case "generate":
 		handleGenerate(os.Args[2:])
+
+	case "monitor":
+		handleMonitor(os.Args[2:])
+
+	case "tui", "interactive":
+		handleTUI(os.Args[2:])
+
+	case "completion":
+		handleCompletion(os.Args[2:])
+
+	case "man":
+		handleMan(os.Args[2:])
 
 	case "sandbox":
 		handleSandbox(os.Args[2:])
