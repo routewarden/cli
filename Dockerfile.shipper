@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+# Dedicated lightweight container for RouteWarden Remote Shipper (rwarden push)
+#
+# Build-time args injected by docker buildx / goreleaser:
+#   BUILDPLATFORM  – native platform of the builder host  (e.g. linux/amd64)
+#   TARGETOS       – target OS                            (e.g. linux)
+#   TARGETARCH     – target CPU arch                      (e.g. arm64)
+#   VERSION        – binary version string                (e.g. v5.0.0)
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1: Build binary
+# ──────────────────────────────────────────────────────────────────────────────
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} \
+    GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath \
+      -ldflags="-s -w -X main.version=${VERSION}" \
+      -o /bin/rwarden ./cmd/shipper
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2: Minimal runtime image for log shipping
+# ──────────────────────────────────────────────────────────────────────────────
+FROM alpine:3.20
+RUN apk --no-cache add ca-certificates tzdata docker-cli
+COPY --from=builder /bin/rwarden /usr/local/bin/rwarden
+
+WORKDIR /
+ENTRYPOINT ["/usr/local/bin/rwarden", "push"]
+CMD ["--docker"]

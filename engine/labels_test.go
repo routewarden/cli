@@ -379,7 +379,3 @@ traefik.http.middlewares.cfg-shield.plugin.routewarden.config_file=/etc/routewar
 		t.Errorf("expected configFile in YAML for snake_case label, got:\n%s", yamlOut2)
 	}
 }
-
-
-
-

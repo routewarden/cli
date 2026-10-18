@@ -24,13 +24,37 @@ curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/b
 
 ---
 
-### 2. Pre-built Release Binaries
+### 2. Homebrew (macOS & Linux)
+
+```bash
+brew install routewarden/tap/rwarden
+```
+
+---
+
+### 3. Debian / Ubuntu (APT)
+
+Install the official `.deb` package directly using `apt`:
+
+```bash
+# Download and install with automatic dependency handling
+curl -fsSLO https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_amd64.deb
+sudo apt install ./rwarden_linux_amd64.deb
+
+# For ARM64 (e.g. Raspberry Pi / AWS Graviton):
+# curl -fsSLO https://github.com/routewarden/cli/releases/latest/download/rwarden_linux_arm64.deb
+# sudo apt install ./rwarden_linux_arm64.deb
+```
+
+---
+
+### 4. Pre-built Release Binaries
 
 Download standalone binaries for **Linux** (`amd64`, `arm64`), **macOS** (Apple Silicon `arm64` & Intel `amd64`), and **Windows** directly from [GitHub Releases](https://github.com/routewarden/cli/releases/latest).
 
 ---
 
-### 3. Container Image (Docker / CI/CD)
+### 5. Container Image (Docker / CI/CD)
 
 Run `rwarden` via container without installing any local binaries:
 
@@ -44,7 +68,7 @@ docker run --rm ghcr.io/routewarden/cli:latest test --path "/.env"
 
 ---
 
-### 4. From Source (Go)
+### 6. From Source (Go)
 
 ```bash
 git clone https://github.com/routewarden/cli.git
@@ -56,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 4.5.3
+# rwarden version 5.0.0
 ```
 
 ---
@@ -80,8 +104,23 @@ curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/b
 If using the containerized client, pull the latest image tag:
 
 ```bash
+# Full CLI Toolkit (Policy engine, AST linter, Diff, Sandbox, Dashboard, Shipper)
 docker pull ghcr.io/routewarden/cli:latest
+
+# Dedicated Minimal Edge Shipper (Lightweight companion for remote reverse proxies)
+docker pull ghcr.io/routewarden/shipper:latest
+
+# Dedicated SOC Security Dashboard (Standalone telemetry server)
+docker pull ghcr.io/routewarden/dashboard:latest
 ```
+
+### Official Container Images
+
+| Image | Description | Default Entrypoint |
+| :--- | :--- | :--- |
+| **`ghcr.io/routewarden/cli`** | Full-featured CLI container with Docker CLI tools | `rwarden` |
+| **`ghcr.io/routewarden/shipper`** | Minimal, dedicated log shipper companion for edge nodes | `rwarden push` |
+| **`ghcr.io/routewarden/dashboard`** | Dedicated standalone SOC security dashboard server | `rwarden dashboard --no-open` |
 
 ### 3. Upgrading From Source (Go)
 Pull the latest commits and rebuild:
@@ -445,148 +484,261 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ---
 
-### 6. Security Observability Stack (`dashboard`)
+### 6. Security Observability Dashboard (`dashboard`)
 
-RouteWarden provides a turnkey, production-grade observability stack built on **Grafana**, **Grafana Alloy**, and **Grafana Loki**.
+RouteWarden includes a turnkey, ultra-lightweight real-time security dashboard powered by RouteWarden's embedded Go server and SQLite persistence. It provides an instantaneous, live executive SOC dashboard consuming only **~8MB of RAM** with zero external dependencies.
 
-The stack auto-discovers and ingests structured JSON security logs from all your RouteWarden gateways (Traefik, Caddy, NGINX, and TCP Warden) and presents pre-provisioned dashboards with zero manual configuration.
+The dashboard automatically discovers Docker containers tagged with `routewarden=true` (or `routewarden.logs=true`), multiplexes their logs concurrently, and presents a live terminal-styled web UI with zero manual configuration.
 
-#### Architecture
+#### Architecture & Highlights
 
-- **Grafana Alloy**: Log collector (OpenTelemetry successor to Promtail) that tails Docker container logs via `/var/run/docker.sock` and host logs, parses RouteWarden JSON fields, and extracts labels (`verdict`, `status_code`, `gateway`, `method`).
-- **Grafana Loki**: High-efficiency log aggregation engine indexing security events with full LogQL query capabilities.
-- **Grafana**: Pre-configured with the **"RouteWarden — Threat & Security Intelligence"** dashboard, pre-wired data sources, Geomap threat geography, malicious scanner profiling, L4 vs L7 multi-protocol convergence, automated alerting rules, and interactive SOC incident triage table with direct pivots to AbuseIPDB, VirusTotal, and Shodan.
+- **Ultra-lightweight footprint**: Consumes ~8MB RAM with sub-second startup and zero external dependencies.
+- **Embedded SQLite Persistence**: Long-term log retention (`~/.routewarden/dashboard/events.db`) using high-throughput WAL mode and asynchronous batch writing. Telemetry survives restarts with automatic 30-day pruning.
+- **Live SOC Stream & Stream Controls**: Real-time Server-Sent Events (SSE) feed with instant filter tabs (`ALL`, `BLOCK` 🛑, `TARPIT` ⏳, `ALLOW` 🛡️).
+- **Connected Node & Source Filtering**: Filter events by specific Docker container, remote push agent, or local log file using the `📡 All Nodes` matrix dropdown or interactive badges in the `🌐 MONITORED NODES` ribbon.
+- **Server-Backed Pagination**: Configurable page sizes (`25`, `50`, `100`, `250`), direct page jump, First / Prev / Next / Last buttons, and keyboard controls (<kbd>[</kbd> / <kbd>]</kbd> or Left/Right arrows).
+- **Optional HTTP Basic Auth & API Protection**: Secure the UI and `/api/*` endpoints with `--auth <user:password>` or `RW_DASHBOARD_AUTH`. Whitelists static assets (`/favicon.ico`, `/icon.svg`) and agent push encryption (`/api/v1/*`).
+- **Stream Freeze / Resume**: Click **⏸ Pause** or hit <kbd>Space</kbd> to freeze the log table for forensic inspection. Incoming logs are buffered with a counter badge (`⏸ PAUSED (+N new)`).
+- **Time Window Filtering**: Rapid rolling time ranges (`1m`, `5m`, `15m`, `30m`, `1h`, `6h`, `24h`, `Custom Date Range`) querying SQLite directly via `GET /api/logs`.
+- **Threat Intelligence & IP Modal**: Top Attacking Client IPs with breakdown ratios. Click any IP to inspect autonomous systems (ASN), reverse DNS, origin country, CIDR prefix, and AbuseIPDB records.
+- **Global Threat Geography**: Interactive world map visualizing attack origins using RouteWarden's autonomous country engine (built-in CIDR & RIR + MaxMind GeoLite2 discovery).
+- **Theme Switching**: Built-in Auto (system preference), Light, and Dark terminal themes (<kbd>T</kbd>).
+- **Encrypted Remote Ingest**: Accepts logs from remote edge nodes via `rwarden push` using **X25519 + ChaCha20-Poly1305** zero-knowledge encryption (`/api/v1/events`).
 
 #### Quickstart with CLI
 
 ```bash
-# 1. Launch the observability stack via Docker Compose (opens Grafana at http://localhost:3000)
+# 1. Launch dashboard (auto-discovers labeled containers & opens http://localhost:7890)
 rwarden dashboard
 
-# 2. Launch on a custom port without auto-opening browser
-rwarden dashboard up --port 8080 --no-open
+# 2. Launch with optional HTTP Basic Auth protection
+rwarden dashboard up --auth admin:supersecret
 
-# 3. Check status of running observability containers
+# 3. Launch in detached background mode
+rwarden dashboard -d
+# or: rwarden dashboard up --port 7890 --auth admin:secret --detach
+
+# 4. Launch on a custom port and bind to localhost only without opening browser
+rwarden dashboard up --port 8080 --host 127.0.0.1 --no-open
+
+# 5. Monitor a specific container by name
+rwarden dashboard --container traefik
+
+# 6. Monitor an NGINX or Apache access log file
+rwarden dashboard --file /var/log/nginx/access.log
+
+# 7. Check status of running dashboard
 rwarden dashboard status
+# or global: rwarden status
 
-# 4. Stop the observability stack
-rwarden dashboard down
+# 8. Stop background dashboard
+rwarden dashboard stop
+# or: rwarden dashboard down
+# or global: rwarden stop
 
-# 5. Export docker-compose.yml, config.alloy, and Grafana dashboard files to a custom directory
-rwarden dashboard export ./my-observability
-
-# 6. Launch with optional Threat Alerting enabled (threat rules & webhook contact points)
-rwarden dashboard up --enable-alerting
+# 9. Export standalone Docker Compose and configuration files
+rwarden dashboard export ./dashboard
 ```
 
 #### Standalone Docker Compose Deployment
 
-If you prefer running without the CLI binary, export or run the embedded `docker-compose.yml` directly:
+If you prefer running without the CLI binary in production, export the embedded stack:
 
 ```bash
 # Export configuration files
-rwarden dashboard export ./deploy/observability
+rwarden dashboard export ./deploy/dashboard
 
 # Run with standard Docker Compose
-cd ./deploy/observability
+cd ./deploy/dashboard
 docker compose up -d
 ```
 
 ```yaml
-# deploy/observability/docker-compose.yml
+# deploy/dashboard/docker-compose.yml
 services:
-  loki:
-    image: grafana/loki:3.0.0
-    container_name: routewarden-loki
+  dashboard:
+    image: ghcr.io/routewarden/cli:latest
+    container_name: routewarden-dashboard
     restart: unless-stopped
-    command: -config.file=/etc/loki/loki-config.yaml
+    command: dashboard --port 7890 --no-open
     ports:
-      - "3100:3100"
+      - "${PORT:-7890}:7890"
     volumes:
-      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - loki-data:/loki
-
-  alloy:
-    image: grafana/alloy:v1.1.0
-    container_name: routewarden-alloy
-    restart: unless-stopped
-    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    volumes:
-      - ./config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/log:/var/log:ro
-    depends_on:
-      - loki
-
-  grafana:
-    image: grafana/grafana:11.0.0
-    container_name: routewarden-grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+      - ~/.routewarden/dashboard:/root/.routewarden/dashboard
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
-      - GF_SECURITY_ALLOW_EMBEDDING=true
-    volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins:ro
-      - ${ALERTING_PROVISIONING_DIR:-./grafana/provisioning/empty}:/etc/grafana/provisioning/alerting:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      - loki
-
-volumes:
-  loki-data:
-  grafana-data:
+      - TZ=UTC
 ```
-
-#### Optional Threat Alerting
-By default, the dashboard stack runs with alerting disabled to allow instant, zero-configuration startup without requiring external notification endpoints. To enable the pre-configured threat alert rules:
-- **With CLI**: `rwarden dashboard up --enable-alerting`
-- **With Docker Compose**: 
-  - Using `routewarden.env`: Uncomment `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting` in `routewarden.env` and run `docker compose --env-file routewarden.env up -d`
-  - Or via inline environment variable: `ALERTING_PROVISIONING_DIR=./grafana/provisioning/alerting docker compose up -d`
-- **Custom Webhook Destination**: Export `ALERT_WEBHOOK_URL="https://your-soc-endpoint.example.com/alerts"` (defaults to `http://host.docker.internal:8080/alerts`)
-
-#### Reusing an Existing Grafana & Loki Stack
-
-If you already have a Grafana and Loki stack configured on your server, you do **not** need to run RouteWarden's local containers:
-
-1. **Export Dashboard**: Run `rwarden dashboard export ./observability` and import `observability/grafana/dashboards/routewarden-overview.json` directly into your existing Grafana via UI or API.
-2. **Ship Logs to Existing Loki**:
-   - **Using Grafana Alloy**: Add RouteWarden's `loki.process` stage from `config.alloy` to your existing Alloy config and set `loki.write` endpoint to your Loki cluster.
-   - **Using Promtail**: Add a scrape job with `__meta_docker_container_label_routewarden_logs` relabeling and json parsing stages.
-   - **Standalone Shipper Container**: Run an Alloy container on the gateway host pointing directly to your remote Loki:
-     ```bash
-     docker run -d --name routewarden-alloy --restart unless-stopped \
-       -v "$(pwd)/observability/config.alloy:/etc/alloy/config.alloy:ro" \
-       -v "/var/run/docker.sock:/var/run/docker.sock:ro" \
-       grafana/alloy:v1.1.0 run /etc/alloy/config.alloy
-     ```
-3. **Label Containers**: Tag your gateway containers with `routewarden.logs=true`.
 
 #### Command Flags & Subcommands
 
 | Command / Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `up` | subcommand | — | Launch Grafana, Loki, and Alloy stack (default subcommand) |
-| `down` | subcommand | — | Stop running observability stack containers |
-| `status` | subcommand | — | Check status of running observability containers |
-| `export [dir]` | subcommand | `./observability` | Export compose, Alloy, and Grafana configs to disk |
-| `--port` | int | `3000` | Port for Grafana dashboard UI |
-| `--loki-port` | int | `3100` | Port for Loki log engine |
-| `--dir` | string | `~/.routewarden/observability` | Directory storing compose configuration |
+| `up` | subcommand | — | Launch real-time SOC security dashboard (default subcommand) |
+| `down` | subcommand | — | Stop running dashboard containers |
+| `status` | subcommand | — | Check status of dashboard containers |
+| `export [dir]` | subcommand | `./dashboard` | Export compose and configuration assets to disk |
+| `-a`, `--auth` | string | `""` | Optional HTTP Basic Auth credentials (`user:password` or `RW_DASHBOARD_AUTH`) |
+| `--user` | string | `""` | Optional Basic Auth username (used with `--password`) |
+| `--password` | string | `""` | Optional Basic Auth password (used with `--user`) |
+| `--host` | string | `""` | Host IP interface to bind (e.g. `127.0.0.1` or `0.0.0.0`, default: all interfaces) |
+| `--port` | int | `7890` | Port for dashboard web UI and SSE stream |
+| `-f`, `--file` | string | `""` | Log file to monitor (default: auto-discovered Docker containers) |
+| `-c`, `--container` | string | `""` | Tail a specific Docker container by name or ID |
+| `-l`, `--label` | string | `routewarden=true` | Docker label to filter containers |
+| `--dir` | string | `~/.routewarden/dashboard` | Working directory storing SQLite `events.db` and keys |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
 ---
 
-### 7. Cleanup Sandboxes (`cleanup`)
+### 7. Policy Static Analyzer & Linter (`audit`)
+
+Perform deep static analysis on a RouteWarden policy file to catch ReDoS vulnerabilities, unescaped dots, universal wildcard traps, and header spoofing risks before deployment:
+
+```bash
+# Audit default routewarden.json
+rwarden audit
+
+# Audit custom configuration file
+rwarden audit ./config/routewarden.json
+
+# Fail on warnings as well as critical errors (ideal for CI/CD)
+rwarden audit --strict routewarden.json
+
+# Output as JSON
+rwarden audit --format json routewarden.json
+
+# Output in OASIS SARIF v2.1.0 format for GitHub Code Scanning
+rwarden audit --format sarif routewarden.json > results.sarif
+```
+
+---
+
+### 8. Policy Diffing (`diff`)
+
+Compare two RouteWarden policies and assess the delta on your production security posture:
+
+```bash
+# Compare production policy against candidate update
+rwarden diff prod.json candidate.json
+
+# Output diff as machine-readable JSON
+rwarden diff --format json prod.json candidate.json
+
+# Fail with exit code 1 if differences exist, or code 2 if security posture is relaxed
+rwarden diff --exit-code prod.json candidate.json
+```
+
+---
+
+### 9. Live Terminal Threat Monitoring (`monitor`)
+
+Tail, multiplex, and colorize live reverse proxy security events directly in the terminal from Docker containers, log files, or standard input.
+
+#### Automatic Docker Discovery via Labels
+
+If no file or stdin pipe is provided, `rwarden monitor` automatically discovers running Docker containers tagged with the label `routewarden=true` (or `routewarden.logs=true`) and streams them concurrently with container attribution tags (`[traefik]`, `[nginx]`, etc.):
+
+```yaml
+# docker-compose.yaml
+services:
+  traefik:
+    image: traefik:v3.1
+    labels:
+      - "routewarden=true"
+  nginx:
+    image: openresty/openresty:alpine
+    labels:
+      - "routewarden=true"
+```
+
+```bash
+# Auto-discover and multiplex all containers with routewarden=true label
+rwarden monitor
+
+# Tail a specific container by name or ID
+rwarden monitor --container traefik
+
+# Filter by custom Docker label
+rwarden monitor --label "env=production"
+
+# Tail an NGINX or Apache access log file
+rwarden monitor --file /var/log/nginx/access.log
+
+# Filter exclusively for blocked threats or specific IP / path
+rwarden monitor --verdict BLOCK
+rwarden monitor --path "/.env" --ip "192.168.1."
+```
+
+#### Piping Raw Logs to External Analyzers
+
+Use `--raw` to emit unformatted log lines and pipe directly into external log visualizers, jq, or SIEM pipelines:
+
+```bash
+# Stream unformatted raw log lines into analyzers or jq
+rwarden monitor --raw | jq .
+```
+
+Press `Ctrl+C` at any time to output an aggregate threat summary report (total requests, block rate, traffic per container, and top targeted attack paths).
+
+---
+
+### 10. Interactive Terminal REPL (`tui`)
+
+Launch an interactive terminal simulator to experiment with paths, query strings, headers, and client IPs in real time:
+
+```bash
+# Launch interactive REPL
+rwarden tui
+
+# Or with an alias
+rwarden interactive
+
+# Launch with pre-loaded configuration
+rwarden tui ./routewarden.json
+```
+
+Inside the TUI:
+- Type any path (e.g. `/.env`, `/%252e%252e/.env`, `/admin;p=1/config`) for instant candidate path normalization & verdict analysis.
+- Use `:method POST`, `:ip 10.0.0.1`, `:query key=val`, `:header Key: Val`, `:load <file>`, `:status`, or `:help`.
+
+---
+
+### 11. Shell Autocompletion (`completion`)
+
+Generate autocompletion scripts for subcommands, flags, and targets:
+
+```bash
+# Bash
+source <(rwarden completion bash)
+
+# Zsh
+rwarden completion zsh > ~/.zsh/completion/_rwarden
+
+# Fish
+rwarden completion fish | source
+
+# PowerShell
+rwarden completion powershell | Out-String | Invoke-Expression
+```
+
+---
+
+### 12. System Manpage (`man`)
+
+Output the standard system manual page formatted in roff/troff:
+
+```bash
+# View manpage directly
+rwarden man | man -l -
+
+# Save to system man directory
+sudo rwarden man -o /usr/share/man/man1/rwarden.1
+```
+
+---
+
+### 13. Cleanup Sandboxes (`cleanup`)
 
 Stop and remove all running or detached RouteWarden sandbox containers:
 
@@ -605,7 +757,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/routewarden
 
 ---
 
-### 8. Check CLI Version (`version`)
+### 14. Check CLI Version (`version`)
 
 Display the current RouteWarden CLI version:
 

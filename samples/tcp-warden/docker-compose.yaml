@@ -5,12 +5,12 @@
 #
 #   docker compose up -d
 #
-# Launch the RouteWarden Security Observability Stack (Grafana + Loki + Alloy):
+# Launch the RouteWarden Security Dashboard:
 #
 #   rwarden dashboard
 #
-# Access Grafana dashboard at:
-#   http://localhost:3000
+# Access live dashboard at:
+#   http://localhost:7890
 # ==============================================================================
 
 services:

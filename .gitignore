@@ -2,12 +2,16 @@
 bin/
 /dist/
 rwarden
+cli
 
 # Test coverage & tooling
 coverage.out
 .DS_Store
 
-# Logs and scratch
+# Logs, PIDs, and scratch
 *.log
+*.pid
+*.db
 *.out
+*.test
 .chrome-temp-data/

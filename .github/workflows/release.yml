@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.1'
+          go-version: '1.26.x'
           cache: true
 
       - name: Run GoReleaser
@@ -33,6 +33,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
   docker:
     name: Build & Publish Container Image
@@ -55,8 +56,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
+      # ── 1. Full CLI Container ───────────────────────────────────────────────
+      - name: Extract Docker metadata (CLI)
+        id: meta-cli
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -66,12 +68,56 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
-      - name: Build and push Docker image
+      - name: Build and push CLI Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-cli.outputs.tags }}
+          labels: ${{ steps.meta-cli.outputs.labels }}
+
+      # ── 2. Dedicated Shipper Container ──────────────────────────────────────
+      - name: Extract Docker metadata (Shipper)
+        id: meta-shipper
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/shipper
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Shipper Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.shipper
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-shipper.outputs.tags }}
+          labels: ${{ steps.meta-shipper.outputs.labels }}
+
+      # ── 3. Dedicated Dashboard Container ────────────────────────────────────
+      - name: Extract Docker metadata (Dashboard)
+        id: meta-dashboard
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dashboard
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Dashboard Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.dashboard
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-dashboard.outputs.tags }}
+          labels: ${{ steps.meta-dashboard.outputs.labels }}
