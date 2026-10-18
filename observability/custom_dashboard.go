@@ -134,9 +134,9 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 	ev.ID = s.nextID
 	if ev.TimeStr == "" {
 		if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
-			ev.TimeStr = t.Format("15:04:05")
+			ev.TimeStr = t.Local().Format("15:04:05")
 		} else {
-			ev.TimeStr = time.Now().UTC().Format("15:04:05")
+			ev.TimeStr = time.Now().Format("15:04:05")
 		}
 	}
 
@@ -157,7 +157,7 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 	}
 
 	// Timeline bucket (HH:MM)
-	bucketKey := time.Now().UTC().Format("15:04")
+	bucketKey := time.Now().Format("15:04")
 	tb, exists := s.timeline[bucketKey]
 	if !exists {
 		tb = &TimelinePoint{Time: bucketKey}
@@ -285,8 +285,8 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 	}
 
 	ev := &SecurityEvent{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		TimeStr:   time.Now().UTC().Format("15:04:05"),
+		Timestamp: time.Now().Format(time.RFC3339),
+		TimeStr:   time.Now().Format("15:04:05"),
 		Source:    source,
 	}
 
@@ -474,7 +474,7 @@ func (s *EventStore) GetStats() DashboardStats {
 		}
 	}
 	if len(timelineList) == 0 {
-		nowKey := time.Now().UTC().Format("15:04")
+		nowKey := time.Now().Format("15:04")
 		timelineList = append(timelineList, TimelinePoint{
 			Time:    nowKey,
 			Total:   total,
@@ -2407,7 +2407,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <span id="stream-status" style="color:var(--green); font-weight:600;">LIVE STREAM</span>
     </div>
     <span style="color:var(--line-hi);">|</span>
-    <span id="utc-clock">00:00:00 UTC</span>
+    <span id="utc-clock">00:00:00</span>
   </div>
   <div class="bar-right">
     <button class="tui-btn" id="btn-toggle-theme" onclick="toggleTheme()" title="Toggle Theme (System / Light / Dark)">
@@ -2912,17 +2912,36 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   } catch(e) {}
   applyTheme(savedTheme);
 
-  // Live UTC Clock
+  // Live System Timezone Clock
   function updateClock() {
     var now = new Date();
-    var h = String(now.getUTCHours()).padStart(2, '0');
-    var m = String(now.getUTCMinutes()).padStart(2, '0');
-    var s = String(now.getUTCSeconds()).padStart(2, '0');
+    var h = String(now.getHours()).padStart(2, '0');
+    var m = String(now.getMinutes()).padStart(2, '0');
+    var s = String(now.getSeconds()).padStart(2, '0');
+    var tz = '';
+    try {
+      var parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(now);
+      var tzPart = parts.find(function(p) { return p.type === 'timeZoneName'; });
+      if (tzPart) tz = ' ' + tzPart.value;
+    } catch(e) {}
     var el = document.getElementById('utc-clock');
-    if (el) el.textContent = h + ':' + m + ':' + s + ' UTC';
+    if (el) el.textContent = h + ':' + m + ':' + s + tz;
   }
   setInterval(updateClock, 1000);
   updateClock();
+
+  function formatLocalTime(ev) {
+    if (ev && ev.timestamp) {
+      var d = new Date(ev.timestamp);
+      if (!isNaN(d.getTime())) {
+        var h = String(d.getHours()).padStart(2, '0');
+        var m = String(d.getMinutes()).padStart(2, '0');
+        var s = String(d.getSeconds()).padStart(2, '0');
+        return h + ':' + m + ':' + s;
+      }
+    }
+    return (ev && ev.time_str) || '';
+  }
 
   // Legend Toggles
   function setupLegendToggle(id, key) {
@@ -3170,7 +3189,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var countryTitle = ev.country ? (flag + ' ' + ev.country) : 'Client IP';
 
       rowsHTML += '<tr onclick="inspectEvent(' + ev.id + ')">' +
-        '<td>' + (ev.time_str || '') + '</td>' +
+        '<td>' + formatLocalTime(ev) + '</td>' +
         '<td><span class="bracket-badge ' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
         '<td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
@@ -3812,7 +3831,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       var d = closest.data;
       var rate = d.total > 0 ? ((d.blocked / d.total) * 100).toFixed(1) + '%' : '0.0%';
-      var toolHTML = '<span style="color:var(--teal); font-weight:700;">⏱ ' + d.time + ' UTC</span> &nbsp;|&nbsp; ' +
+      var toolHTML = '<span style="color:var(--teal); font-weight:700;">⏱ ' + d.time + '</span> &nbsp;|&nbsp; ' +
         '<span style="color:var(--text-hi);">Total: <b>' + d.total + '</b></span> &nbsp;|&nbsp; ' +
         '<span style="color:var(--green);">Clean: <b>' + d.clean + '</b></span> &nbsp;|&nbsp; ' +
         '<span style="color:var(--pink);">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></span> &nbsp;|&nbsp; ' +
@@ -3901,7 +3920,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (ev.rule) rulesSet[ev.rule] = true;
       if (ev.path) pathsSet[ev.path] = true;
       if (sampleLines.length < 6) {
-        sampleLines.push('[' + (ev.time_str || ev.timestamp || 'N/A') + '] ' + ev.method + ' ' + ev.path + ' -> HTTP ' + ev.status + ' (' + ev.verdict + (ev.rule ? ' - Rule: ' + ev.rule : '') + ')');
+        sampleLines.push('[' + formatLocalTime(ev) + '] ' + ev.method + ' ' + ev.path + ' -> HTTP ' + ev.status + ' (' + ev.verdict + (ev.rule ? ' - Rule: ' + ev.rule : '') + ')');
       }
     });
 
@@ -3913,7 +3932,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       '  * Offending IP: ' + ip + '\n' +
       '  * Network Provider: ' + isp + ' (' + as + ')\n' +
       '  * Origin Location: ' + loc + '\n' +
-      '  * Reported At (UTC): ' + now + '\n' +
+      '  * Reported At: ' + new Date().toLocaleString() + '\n' +
       '  * Attack Categories: ' + rulesList + '\n' +
       '  * Target Gateway: RouteWarden SOC Protected Ingress\n\n' +
       'Incident Summary:\n' +
