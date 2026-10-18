@@ -1,11 +1,14 @@
 .git
 .github
 rwarden
+cli
 bin/
 /dist/
 coverage.out
 .DS_Store
 *.log
+*.pid
+*.db
 *.test
 *.out
 .chrome-temp-data/

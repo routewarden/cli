@@ -104,8 +104,23 @@ curl -fsSL https://routewarden.github.io/install.sh | INSTALL_DIR=$HOME/.local/b
 If using the containerized client, pull the latest image tag:
 
 ```bash
+# Full CLI Toolkit (Policy engine, AST linter, Diff, Sandbox, Dashboard, Shipper)
 docker pull ghcr.io/routewarden/cli:latest
+
+# Dedicated Minimal Edge Shipper (Lightweight companion for remote reverse proxies)
+docker pull ghcr.io/routewarden/shipper:latest
+
+# Dedicated SOC Security Dashboard (Standalone telemetry server)
+docker pull ghcr.io/routewarden/dashboard:latest
 ```
+
+### Official Container Images
+
+| Image | Description | Default Entrypoint |
+| :--- | :--- | :--- |
+| **`ghcr.io/routewarden/cli`** | Full-featured CLI container with Docker CLI tools | `rwarden` |
+| **`ghcr.io/routewarden/shipper`** | Minimal, dedicated log shipper companion for edge nodes | `rwarden push` |
+| **`ghcr.io/routewarden/dashboard`** | Dedicated standalone SOC security dashboard server | `rwarden dashboard --no-open` |
 
 ### 3. Upgrading From Source (Go)
 Pull the latest commits and rebuild:
@@ -479,9 +494,12 @@ The dashboard automatically discovers Docker containers tagged with `routewarden
 
 - **Ultra-lightweight footprint**: Consumes ~8MB RAM with sub-second startup and zero external dependencies.
 - **Embedded SQLite Persistence**: Long-term log retention (`~/.routewarden/dashboard/events.db`) using high-throughput WAL mode and asynchronous batch writing. Telemetry survives restarts with automatic 30-day pruning.
-- **Live SOC Stream (`stream.audit.live`)**: Real-time Server-Sent Events (SSE) feed with instant filter tabs (`ALL`, `BLOCK` 🛑, `TARPIT` ⏳, `ALLOW` 🛡️).
+- **Live SOC Stream & Stream Controls**: Real-time Server-Sent Events (SSE) feed with instant filter tabs (`ALL`, `BLOCK` 🛑, `TARPIT` ⏳, `ALLOW` 🛡️).
+- **Connected Node & Source Filtering**: Filter events by specific Docker container, remote push agent, or local log file using the `📡 All Nodes` matrix dropdown or interactive badges in the `🌐 MONITORED NODES` ribbon.
+- **Server-Backed Pagination**: Configurable page sizes (`25`, `50`, `100`, `250`), direct page jump, First / Prev / Next / Last buttons, and keyboard controls (<kbd>[</kbd> / <kbd>]</kbd> or Left/Right arrows).
+- **Optional HTTP Basic Auth & API Protection**: Secure the UI and `/api/*` endpoints with `--auth <user:password>` or `RW_DASHBOARD_AUTH`. Whitelists static assets (`/favicon.ico`, `/icon.svg`) and agent push encryption (`/api/v1/*`).
 - **Stream Freeze / Resume**: Click **⏸ Pause** or hit <kbd>Space</kbd> to freeze the log table for forensic inspection. Incoming logs are buffered with a counter badge (`⏸ PAUSED (+N new)`).
-- **Time Window Filtering**: Rapid rolling time ranges (`1m`, `5m`, `15m`, `30m`, `Custom Date Range`) querying SQLite directly via `GET /api/logs`.
+- **Time Window Filtering**: Rapid rolling time ranges (`1m`, `5m`, `15m`, `30m`, `1h`, `6h`, `24h`, `Custom Date Range`) querying SQLite directly via `GET /api/logs`.
 - **Threat Intelligence & IP Modal**: Top Attacking Client IPs with breakdown ratios. Click any IP to inspect autonomous systems (ASN), reverse DNS, origin country, CIDR prefix, and AbuseIPDB records.
 - **Global Threat Geography**: Interactive world map visualizing attack origins using RouteWarden's autonomous country engine (built-in CIDR & RIR + MaxMind GeoLite2 discovery).
 - **Theme Switching**: Built-in Auto (system preference), Light, and Dark terminal themes (<kbd>T</kbd>).
@@ -493,22 +511,32 @@ The dashboard automatically discovers Docker containers tagged with `routewarden
 # 1. Launch dashboard (auto-discovers labeled containers & opens http://localhost:7890)
 rwarden dashboard
 
-# 2. Launch on a custom port without auto-opening browser
-rwarden dashboard up --port 8080 --no-open
+# 2. Launch with optional HTTP Basic Auth protection
+rwarden dashboard up --auth admin:supersecret
 
-# 3. Monitor a specific container by name
+# 3. Launch in detached background mode
+rwarden dashboard -d
+# or: rwarden dashboard up --port 7890 --auth admin:secret --detach
+
+# 4. Launch on a custom port and bind to localhost only without opening browser
+rwarden dashboard up --port 8080 --host 127.0.0.1 --no-open
+
+# 5. Monitor a specific container by name
 rwarden dashboard --container traefik
 
-# 4. Monitor an NGINX or Apache access log file
+# 6. Monitor an NGINX or Apache access log file
 rwarden dashboard --file /var/log/nginx/access.log
 
-# 5. Check status of running dashboard
+# 7. Check status of running dashboard
 rwarden dashboard status
+# or global: rwarden status
 
-# 6. Stop background dashboard containers
-rwarden dashboard down
+# 8. Stop background dashboard
+rwarden dashboard stop
+# or: rwarden dashboard down
+# or global: rwarden stop
 
-# 7. Export standalone Docker Compose and configuration files
+# 9. Export standalone Docker Compose and configuration files
 rwarden dashboard export ./dashboard
 ```
 
@@ -528,25 +556,18 @@ docker compose up -d
 ```yaml
 # deploy/dashboard/docker-compose.yml
 services:
-  goaccess:
-    image: allinurl/goaccess:latest
+  dashboard:
+    image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
+    command: dashboard --port 7890 --no-open
     ports:
       - "${PORT:-7890}:7890"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ~/.routewarden/dashboard:/root/.routewarden/dashboard
     environment:
       - TZ=UTC
-    volumes:
-      - ./goaccess.conf:/etc/goaccess/goaccess.conf:ro
-      - ./data:/srv/data:ro
-      - ./report:/srv/report
-    command: >
-      goaccess /srv/data/access.log
-      --config-file=/etc/goaccess/goaccess.conf
-      --real-time-html
-      --port=7890
-      --addr=0.0.0.0
-      -o /srv/report/index.html
 ```
 
 #### Command Flags & Subcommands
@@ -557,6 +578,10 @@ services:
 | `down` | subcommand | — | Stop running dashboard containers |
 | `status` | subcommand | — | Check status of dashboard containers |
 | `export [dir]` | subcommand | `./dashboard` | Export compose and configuration assets to disk |
+| `-a`, `--auth` | string | `""` | Optional HTTP Basic Auth credentials (`user:password` or `RW_DASHBOARD_AUTH`) |
+| `--user` | string | `""` | Optional Basic Auth username (used with `--password`) |
+| `--password` | string | `""` | Optional Basic Auth password (used with `--user`) |
+| `--host` | string | `""` | Host IP interface to bind (e.g. `127.0.0.1` or `0.0.0.0`, default: all interfaces) |
 | `--port` | int | `7890` | Port for dashboard web UI and SSE stream |
 | `-f`, `--file` | string | `""` | Log file to monitor (default: auto-discovered Docker containers) |
 | `-c`, `--container` | string | `""` | Tail a specific Docker container by name or ID |
@@ -645,16 +670,13 @@ rwarden monitor --verdict BLOCK
 rwarden monitor --path "/.env" --ip "192.168.1."
 ```
 
-#### Lightweight Web Analytics with GoAccess
+#### Piping Raw Logs to External Analyzers
 
-Use `--raw` to emit unformatted log lines and pipe directly into [GoAccess](https://goaccess.io/):
+Use `--raw` to emit unformatted log lines and pipe directly into external log visualizers, jq, or SIEM pipelines:
 
 ```bash
-# Terminal real-time viewer via GoAccess
-rwarden monitor --raw | goaccess --log-format=COMBINED -
-
-# Generate a live real-time HTML dashboard on port 7890 (no heavy stack required)
-rwarden monitor --raw | goaccess -o /var/www/html/security.html --real-time-html --port=7890 -
+# Stream unformatted raw log lines into analyzers or jq
+rwarden monitor --raw | jq .
 ```
 
 Press `Ctrl+C` at any time to output an aggregate threat summary report (total requests, block rate, traffic per container, and top targeted attack paths).

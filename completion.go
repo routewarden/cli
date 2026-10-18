@@ -42,10 +42,10 @@ _rwarden_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="test validate generate audit diff sandbox dashboard keys register push monitor tui completion man cleanup schema version help"
+    local commands="test validate generate audit diff sandbox dashboard keys register push monitor tui status stop completion man cleanup schema version help"
     local generate_targets="traefik-yaml traefik-toml traefik-labels caddy nginx tcp-warden"
-    local dashboard_cmds="up down status export"
-    local keys_cmds="create list revoke"
+    local dashboard_cmds="up down status stop export"
+    local push_cmds="status stop"
     local formats="text json sarif"
     local methods="GET POST PUT DELETE PATCH HEAD OPTIONS"
 
@@ -92,7 +92,15 @@ _rwarden_completions() {
                     return 0
                     ;;
             esac
-            COMPREPLY=( $(compgen -W "--port --file -f --container -c --label -l --no-open" -- "$cur") )
+            COMPREPLY=( $(compgen -W "--port --file -f --container -c --label -l --no-open --detach -d" -- "$cur") )
+            return 0
+            ;;
+        push)
+            if [ "$cword" -eq 2 ]; then
+                COMPREPLY=( $(compgen -W "$push_cmds" -- "$cur") )
+                return 0
+            fi
+            COMPREPLY=( $(compgen -W "--url -u --key -k --config --docker --container -c --file -f --label -l --tail --batch-size --flush-interval --detach -d" -- "$cur") )
             return 0
             ;;
         audit)
@@ -179,12 +187,14 @@ _rwarden() {
         'audit:Perform static analysis and linting on policy file'
         'diff:Compare two policies and evaluate security posture impact'
         'sandbox:Spin up ephemeral Traefik, Caddy, or NGINX container'
-        'dashboard:Launch or manage the GoAccess real-time security dashboard'
+        'dashboard:Launch or manage the real-time SOC security dashboard'
         'keys:Manage API authentication keys for remote log streaming'
         'register:Enroll remote server with a central RouteWarden dashboard'
         'push:Stream encrypted logs from a remote node to central dashboard'
         'monitor:Tail and colorize live reverse proxy security events'
         'tui:Launch interactive terminal simulator'
+        'status:Show running status of background dashboard and shipper daemons'
+        'stop:Stop running background dashboard and/or shipper daemons'
         'completion:Output shell autocompletion code'
         'man:Generate roff manual page'
         'cleanup:Stop and remove sandbox containers'
@@ -225,12 +235,25 @@ _rwarden() {
                     ;;
                 dashboard)
                     _arguments \
-                        '1:subcommand:(up down status export)' \
-                        '--port[GoAccess HTTP port]:port:' \
+                        '1:subcommand:(up down status stop export)' \
+                        '--port[SOC dashboard HTTP port]:port:' \
                         '(-f --file)'{-f,--file}'[Log file to monitor]:file:_files' \
                         '(-c --container)'{-c,--container}'[Target container name]:container:' \
                         '(-l --label)'{-l,--label}'[Docker label filter]:label:' \
-                        '--no-open[Do not auto-open browser]'
+                        '--no-open[Do not auto-open browser]' \
+                        '(-d --detach)'{-d,--detach}'[Run in background detached mode]'
+                    ;;
+                push)
+                    _arguments \
+                        '1:subcommand:(status stop)' \
+                        '(-u --url)'{-u,--url}'[Dashboard URL]:url:' \
+                        '(-k --key)'{-k,--key}'[Agent key]:key:' \
+                        '--config[Config file path]:file:_files -g "*.json"' \
+                        '--docker[Auto-discover Docker containers]' \
+                        '(-c --container)'{-c,--container}'[Target container name]:container:' \
+                        '(-f --file)'{-f,--file}'[Log file to tail]:file:_files' \
+                        '(-l --label)'{-l,--label}'[Docker label filter]:label:' \
+                        '(-d --detach)'{-d,--detach}'[Run in background detached mode]'
                     ;;
                 completion)
                     _arguments '1:shell:(bash zsh fish powershell)'
@@ -282,12 +305,14 @@ complete -c rwarden -n "__fish_use_subcommand" -a generate -d "Compile policy in
 complete -c rwarden -n "__fish_use_subcommand" -a audit -d "Lint configuration and check ReDoS vulnerabilities"
 complete -c rwarden -n "__fish_use_subcommand" -a diff -d "Compare two policies and evaluate security impact"
 complete -c rwarden -n "__fish_use_subcommand" -a sandbox -d "Launch ephemeral gateway Docker container"
-complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch GoAccess real-time security dashboard"
+complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch real-time SOC security dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a keys -d "Manage API keys for remote log streaming"
 complete -c rwarden -n "__fish_use_subcommand" -a register -d "Enroll remote server with central dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a push -d "Stream encrypted logs to central dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a monitor -d "Stream and colorize reverse proxy security events"
 complete -c rwarden -n "__fish_use_subcommand" -a tui -d "Interactive terminal path testing REPL"
+complete -c rwarden -n "__fish_use_subcommand" -a status -d "Show running status of background daemons"
+complete -c rwarden -n "__fish_use_subcommand" -a stop -d "Stop running background daemons"
 complete -c rwarden -n "__fish_use_subcommand" -a completion -d "Generate shell completion script"
 complete -c rwarden -n "__fish_use_subcommand" -a man -d "Generate roff manual page"
 complete -c rwarden -n "__fish_use_subcommand" -a cleanup -d "Remove running sandbox containers"
@@ -302,7 +327,8 @@ complete -c rwarden -n "__fish_seen_subcommand_from audit" -s f -l format -a "te
 complete -c rwarden -n "__fish_seen_subcommand_from audit" -s s -l strict -d "Fail on warnings"
 
 # Subcommands for dashboard
-complete -c rwarden -n "__fish_seen_subcommand_from dashboard" -a "up down status export"
+complete -c rwarden -n "__fish_seen_subcommand_from dashboard" -a "up down status stop export"
+complete -c rwarden -n "__fish_seen_subcommand_from push" -a "status stop"
 
 # Completion shells
 complete -c rwarden -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell"
@@ -316,7 +342,7 @@ func generatePowerShellCompletion() string {
 Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'completion', 'man', 'cleanup', 'schema', 'version')
+    $commands = @('test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'status', 'stop', 'completion', 'man', 'cleanup', 'schema', 'version')
     $elements = $commandAst.Elements
 
     if ($elements.Count -eq 2) {
@@ -335,7 +361,13 @@ Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
                 }
         }
         'dashboard' {
-            @('up', 'down', 'status', 'export') |
+            @('up', 'down', 'status', 'stop', 'export') |
+                Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+        }
+        'push' {
+            @('status', 'stop') |
                 Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }

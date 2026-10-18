@@ -1,6 +1,6 @@
 # TCP Warden Security Dashboard Integration Sample
 
-This sample demonstrates how to run **TCP Warden** (Layer 4 proxy & firewall daemon) and visualize security events, blocked connections, and threat metrics in the **RouteWarden Security Dashboard** (GoAccess).
+This sample demonstrates how to run **TCP Warden** (Layer 4 proxy & firewall daemon) and visualize security events, blocked connections, and threat metrics in the **RouteWarden Security Dashboard**.
 
 ---
 
@@ -20,7 +20,7 @@ In your terminal, launch the dashboard:
 rwarden dashboard
 ```
 
-Open `http://localhost:7890` in your browser. The live GoAccess dashboard displays:
+Open `http://localhost:7890` in your browser. The live SOC dashboard displays:
 - **L4 Security Events**: Blocked connections, brute force attempts, port sweeps, and rate limit triggers.
 - **Service Breakdown**: Multi-protocol correlation for SSH, PostgreSQL, SMTP, DNS, and generic TCP/UDP.
 - **Top Offender IPs**: Top hostile client IPs attempting to breach your Layer 4 bastions, enriched with GeoIP flags.

@@ -101,7 +101,28 @@ func TestSQLiteStore_CRUDAndQuery(t *testing.T) {
 		t.Errorf("expected 1 BLOCK event for 203.0.113.88, got %+v", blocked)
 	}
 
-	// 5. Query with Search filter
+	// 5. Query with Source filter
+	sourceRes, err := store.Query(observability.LogQueryFilter{Source: "gateway-1"})
+	if err != nil {
+		t.Fatalf("failed to query by source: %v", err)
+	}
+	if len(sourceRes) != 2 {
+		t.Errorf("expected 2 events for source 'gateway-1', got %d", len(sourceRes))
+	}
+	if count := store.CountFiltered(observability.LogQueryFilter{Source: "gateway-1"}); count != 2 {
+		t.Errorf("expected filtered count 2 for source 'gateway-1', got %d", count)
+	}
+
+	// 6. Query with Search filter matching source
+	searchSourceRes, err := store.Query(observability.LogQueryFilter{Search: "gateway-2"})
+	if err != nil {
+		t.Fatalf("failed to query by search on source: %v", err)
+	}
+	if len(searchSourceRes) != 1 || searchSourceRes[0].Source != "gateway-2" {
+		t.Errorf("expected 1 result for search matching source 'gateway-2', got %+v", searchSourceRes)
+	}
+
+	// 7. Query with Search filter
 	searchRes, err := store.Query(observability.LogQueryFilter{Search: "wp-admin"})
 	if err != nil {
 		t.Fatalf("failed to query by search: %v", err)
@@ -110,7 +131,7 @@ func TestSQLiteStore_CRUDAndQuery(t *testing.T) {
 		t.Errorf("expected 1 result for search 'wp-admin', got %+v", searchRes)
 	}
 
-	// 6. Query with Method and Status filter
+	// 8. Query with Method and Status filter
 	statusRes, err := store.Query(observability.LogQueryFilter{Method: "POST", Status: 403})
 	if err != nil {
 		t.Fatalf("failed to query by status: %v", err)
@@ -119,7 +140,7 @@ func TestSQLiteStore_CRUDAndQuery(t *testing.T) {
 		t.Errorf("expected 1 POST 403 event, got %+v", statusRes)
 	}
 
-	// 7. Prune Max Rows
+	// 9. Prune Max Rows
 	if _, err := store.PruneMaxRows(2); err != nil {
 		t.Fatalf("failed to prune max rows: %v", err)
 	}
@@ -194,6 +215,10 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 	defer sq.Close()
 
 	for i := 1; i <= 5; i++ {
+		sourceName := "node-a"
+		if i > 3 {
+			sourceName = "node-b"
+		}
 		sq.Insert(&observability.SecurityEvent{
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			ClientIP:  fmt.Sprintf("192.0.2.%d", i),
@@ -201,6 +226,7 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 			Path:      fmt.Sprintf("/resource/%d", i),
 			Status:    200,
 			Verdict:   "ALLOW",
+			Source:    sourceName,
 		})
 	}
 	sq.Flush()
@@ -221,9 +247,12 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 	}
 
 	var resp struct {
-		Events []*observability.SecurityEvent `json:"events"`
-		Total  int64                          `json:"total"`
-		Count  int                            `json:"count"`
+		Events        []*observability.SecurityEvent `json:"events"`
+		Total         int64                          `json:"total"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+		Limit         int                            `json:"limit"`
+		Offset        int                            `json:"offset"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode /api/logs JSON: %v", err)
@@ -232,11 +261,17 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 	if resp.Total != 5 {
 		t.Errorf("expected total 5, got %d", resp.Total)
 	}
+	if resp.FilteredTotal != 5 {
+		t.Errorf("expected filtered_total 5, got %d", resp.FilteredTotal)
+	}
 	if resp.Count != 3 || len(resp.Events) != 3 {
 		t.Errorf("expected 3 returned events, got %d", resp.Count)
 	}
+	if resp.Limit != 3 || resp.Offset != 0 {
+		t.Errorf("expected limit 3 and offset 0, got limit %d offset %d", resp.Limit, resp.Offset)
+	}
 
-	// 2. Query /api/logs with IP search
+	// 2. Query /api/logs with IP search and verify filtered_total
 	reqSearch := httptest.NewRequest("GET", "/api/logs?ip=192.0.2.3", nil)
 	rrSearch := httptest.NewRecorder()
 	handler.ServeHTTP(rrSearch, reqSearch)
@@ -246,15 +281,109 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 	}
 
 	var respSearch struct {
-		Events []*observability.SecurityEvent `json:"events"`
-		Total  int64                          `json:"total"`
-		Count  int                            `json:"count"`
+		Events        []*observability.SecurityEvent `json:"events"`
+		Total         int64                          `json:"total"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
 	}
 	if err := json.Unmarshal(rrSearch.Body.Bytes(), &respSearch); err != nil {
 		t.Fatalf("failed to decode search JSON: %v", err)
 	}
 
+	if respSearch.Total != 5 || respSearch.FilteredTotal != 1 {
+		t.Errorf("expected total 5 and filtered_total 1, got total %d filtered_total %d", respSearch.Total, respSearch.FilteredTotal)
+	}
 	if respSearch.Count != 1 || respSearch.Events[0].ClientIP != "192.0.2.3" {
 		t.Errorf("expected 1 result for IP 192.0.2.3, got %+v", respSearch)
+	}
+
+	// 3. Query /api/logs with pagination offset
+	reqOffset := httptest.NewRequest("GET", "/api/logs?limit=2&offset=2", nil)
+	rrOffset := httptest.NewRecorder()
+	handler.ServeHTTP(rrOffset, reqOffset)
+
+	var respOffset struct {
+		Events []*observability.SecurityEvent `json:"events"`
+		Total  int64                          `json:"total"`
+		Count  int                            `json:"count"`
+		Offset int                            `json:"offset"`
+	}
+	if err := json.Unmarshal(rrOffset.Body.Bytes(), &respOffset); err != nil {
+		t.Fatalf("failed to decode offset JSON: %v", err)
+	}
+	if respOffset.Count != 2 || respOffset.Offset != 2 {
+		t.Errorf("expected 2 events at offset 2, got count %d offset %d", respOffset.Count, respOffset.Offset)
+	}
+
+	// 4. Query /api/logs with status group "2xx" and pagination
+	reqStatus := httptest.NewRequest("GET", "/api/logs?status=2xx&limit=2&offset=1", nil)
+	rrStatus := httptest.NewRecorder()
+	handler.ServeHTTP(rrStatus, reqStatus)
+
+	var respStatus struct {
+		Events        []*observability.SecurityEvent `json:"events"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+	}
+	if err := json.Unmarshal(rrStatus.Body.Bytes(), &respStatus); err != nil {
+		t.Fatalf("failed to decode status 2xx JSON: %v", err)
+	}
+	if respStatus.FilteredTotal != 5 || respStatus.Count != 2 {
+		t.Errorf("expected filtered_total 5 and count 2 for 2xx status, got total %d count %d", respStatus.FilteredTotal, respStatus.Count)
+	}
+
+	// 5. Query /api/logs with node filter
+	reqNode := httptest.NewRequest("GET", "/api/logs?node=node-a&limit=10", nil)
+	rrNode := httptest.NewRecorder()
+	handler.ServeHTTP(rrNode, reqNode)
+
+	var respNode struct {
+		Events        []*observability.SecurityEvent `json:"events"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+	}
+	if err := json.Unmarshal(rrNode.Body.Bytes(), &respNode); err != nil {
+		t.Fatalf("failed to decode node query JSON: %v", err)
+	}
+	if respNode.FilteredTotal != 3 || respNode.Count != 3 {
+		t.Errorf("expected filtered_total 3 and count 3 for node-a, got total %d count %d", respNode.FilteredTotal, respNode.Count)
+	}
+
+	// 6. Query /api/logs with source alias filter
+	reqSource := httptest.NewRequest("GET", "/api/logs?source=node-b&limit=10", nil)
+	rrSource := httptest.NewRecorder()
+	handler.ServeHTTP(rrSource, reqSource)
+
+	var respSource struct {
+		Events        []*observability.SecurityEvent `json:"events"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+	}
+	if err := json.Unmarshal(rrSource.Body.Bytes(), &respSource); err != nil {
+		t.Fatalf("failed to decode source query JSON: %v", err)
+	}
+	if respSource.FilteredTotal != 2 || respSource.Count != 2 {
+		t.Errorf("expected filtered_total 2 and count 2 for node-b, got total %d count %d", respSource.FilteredTotal, respSource.Count)
+	}
+
+	// 7. In-Memory fallback pagination and node filtering when sq == nil
+	store.AttachSQLite(nil)
+	reqMem := httptest.NewRequest("GET", "/api/logs?node=node-a&limit=10&offset=0", nil)
+	rrMem := httptest.NewRecorder()
+	handler.ServeHTTP(rrMem, reqMem)
+
+	var respMem struct {
+		Events        []*observability.SecurityEvent `json:"events"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+	}
+	if err := json.Unmarshal(rrMem.Body.Bytes(), &respMem); err != nil {
+		t.Fatalf("failed to decode in-memory JSON: %v", err)
+	}
+	if rrMem.Code != http.StatusOK {
+		t.Errorf("expected 200 OK from in-memory fallback, got %d", rrMem.Code)
+	}
+	if respMem.FilteredTotal != 3 {
+		t.Errorf("expected in-memory filtered_total 3 for node-a, got %d", respMem.FilteredTotal)
 	}
 }

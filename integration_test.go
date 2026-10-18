@@ -631,5 +631,3 @@ collectLoop:
 		t.Fatalf("expected %d entries in central log, got %d:\n%s", expectedTotal, len(serverLogLines), string(logBytes))
 	}
 }
-
-

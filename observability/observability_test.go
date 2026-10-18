@@ -22,7 +22,6 @@ func TestExportObservabilityAssets(t *testing.T) {
 
 	requiredFiles := []string{
 		"docker-compose.yml",
-		"goaccess.conf",
 		"README.md",
 	}
 
@@ -38,39 +37,20 @@ func TestExportObservabilityAssets(t *testing.T) {
 		}
 	}
 
-	// Verify docker-compose.yml references GoAccess image
+	// Verify docker-compose.yml references RouteWarden CLI dashboard image
 	composeData, err := os.ReadFile(filepath.Join(tempDir, "docker-compose.yml"))
 	if err != nil {
 		t.Fatalf("failed to read exported docker-compose.yml: %v", err)
 	}
 	composeStr := string(composeData)
-	if !strings.Contains(composeStr, "allinurl/goaccess") {
-		t.Errorf("expected allinurl/goaccess image in docker-compose.yml, got:\n%s", composeStr)
-	}
-	if !strings.Contains(composeStr, "monitor:") {
-		t.Errorf("expected monitor service in docker-compose.yml, got:\n%s", composeStr)
-	}
 	if !strings.Contains(composeStr, "ghcr.io/routewarden/cli") {
 		t.Errorf("expected ghcr.io/routewarden/cli image in docker-compose.yml, got:\n%s", composeStr)
 	}
-	if !strings.Contains(composeStr, "profiles:") || !strings.Contains(composeStr, "monitor") {
-		t.Errorf("expected monitor profile in docker-compose.yml, got:\n%s", composeStr)
+	if !strings.Contains(composeStr, "dashboard --port 7890 --no-open") {
+		t.Errorf("expected dashboard command in docker-compose.yml, got:\n%s", composeStr)
 	}
-
-	// Verify goaccess.conf contains expected configuration directives
-	confData, err := os.ReadFile(filepath.Join(tempDir, "goaccess.conf"))
-	if err != nil {
-		t.Fatalf("failed to read exported goaccess.conf: %v", err)
-	}
-	confStr := string(confData)
-	if !strings.Contains(confStr, "real-time-html true") {
-		t.Errorf("expected real-time-html true in goaccess.conf")
-	}
-	if !strings.Contains(confStr, "log-format COMBINED") {
-		t.Errorf("expected log-format COMBINED in goaccess.conf")
-	}
-	if !strings.Contains(confStr, "RouteWarden — Threat & Security Intelligence") {
-		t.Errorf("expected title in goaccess.conf")
+	if !strings.Contains(composeStr, "routewarden-dashboard") {
+		t.Errorf("expected routewarden-dashboard container_name in docker-compose.yml, got:\n%s", composeStr)
 	}
 }
 

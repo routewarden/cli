@@ -68,11 +68,12 @@ Commands:
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
-  dashboard   Launch or manage the GoAccess real-time security dashboard
+  dashboard   Launch or manage the real-time SOC security dashboard
                 e.g. rwarden dashboard
-                e.g. rwarden dashboard up --port 7890
-                e.g. rwarden dashboard down
+                e.g. rwarden dashboard -d
+                e.g. rwarden dashboard up --port 7890 --auth admin:secret --detach
                 e.g. rwarden dashboard status
+                e.g. rwarden dashboard stop
                 e.g. rwarden dashboard export ./dashboard
   keys        Manage API keys for distributed remote log shipping
                 e.g. rwarden keys create prod-us-east
@@ -82,9 +83,20 @@ Commands:
                 e.g. rwarden register --url http://198.51.100.10:7890 --key <token>
   push        Stream encrypted logs from a remote node to the central dashboard
                 e.g. rwarden push
-                e.g. rwarden push --docker
+                e.g. rwarden push -d
+                e.g. rwarden push --docker --detach
                 e.g. rwarden push -f /var/log/nginx/access.log -f /var/log/caddy/access.log
                 e.g. rwarden push --docker -f /var/log/nginx/*.log -c custom-gateway
+                e.g. rwarden push status
+                e.g. rwarden push stop
+  status      Show running status of background dashboard and shipper daemons
+                e.g. rwarden status
+                e.g. rwarden status dashboard
+                e.g. rwarden status push
+  stop        Stop running background dashboard and/or shipper daemons
+                e.g. rwarden stop
+                e.g. rwarden stop dashboard
+                e.g. rwarden stop push
   cleanup     Stop and remove any running RouteWarden sandbox containers
   completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
                 e.g. source <(rwarden completion bash)
@@ -149,6 +161,12 @@ func main() {
 	case "push", "agent":
 		handlePush(os.Args[2:])
 
+	case "status", "ps":
+		handleGlobalStatus(os.Args[2:])
+
+	case "stop", "down":
+		handleGlobalStop(os.Args[2:])
+
 	case "cleanup":
 		handleCleanup(os.Args[2:])
 
@@ -182,7 +200,7 @@ func handleDashboard(args []string) {
 	case "export":
 		fs := flag.NewFlagSet("dashboard export", flag.ExitOnError)
 		dirFlag := fs.String("dir", "", "Directory to export dashboard stack files")
-		_ = fs.Parse(remainingArgs)
+		_ = parseFlagsLenient(fs, remainingArgs)
 
 		targetDir := "./dashboard"
 		if *dirFlag != "" {
@@ -195,32 +213,18 @@ func handleDashboard(args []string) {
 			os.Exit(1)
 		}
 		fmt.Printf("✅ Exported RouteWarden Security Dashboard to %q\n", targetDir)
-		fmt.Println("   Includes: docker-compose.yml, goaccess.conf, and README.md")
+		fmt.Println("   Includes: docker-compose.yml and README.md")
 		fmt.Printf("   Run: cd %s && docker compose up -d\n", targetDir)
 
 	case "down", "stop":
-		fs := flag.NewFlagSet("dashboard down", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing dashboard stack (default: ~/.routewarden/dashboard)")
-		_ = fs.Parse(remainingArgs)
-
-		if err := observability.Down(ctx, *dir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error stopping dashboard stack: %v\n", err)
-			os.Exit(1)
-		}
+		_, _ = stopDaemon("dashboard", "RouteWarden Dashboard")
 
 	case "status", "ps":
-		fs := flag.NewFlagSet("dashboard status", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing dashboard stack (default: ~/.routewarden/dashboard)")
-		_ = fs.Parse(remainingArgs)
-
-		if err := observability.Status(ctx, *dir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error checking status: %v\n", err)
-			os.Exit(1)
-		}
+		checkDaemonStatus("dashboard", "RouteWarden Dashboard")
 
 	case "up", "start":
 		fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-		port := fs.Int("port", 7890, "Port for GoAccess dashboard UI (default: 7890)")
+		port := fs.Int("port", 7890, "Port for SOC dashboard UI (default: 7890)")
 		dir := fs.String("dir", "", "Directory to store dashboard configs (default: ~/.routewarden/dashboard)")
 		file := fs.String("file", "", "Log file to monitor (default: auto-discovered docker containers)")
 		fs.StringVar(file, "f", "", "Alias for --file")
@@ -229,10 +233,35 @@ func handleDashboard(args []string) {
 		label := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
 		fs.StringVar(label, "l", "", "Alias for --label")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
+		detach := fs.Bool("detach", false, "Run dashboard in background (detached) mode")
+		fs.BoolVar(detach, "d", false, "Alias for --detach")
 		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
 		geoipDB := fs.String("geoip-db", "", "Path to MaxMind GeoLite2-Country.mmdb or GeoLite2-City.mmdb database (or set GEOIP_DB / MAXMIND_DB)")
 		fs.StringVar(geoipDB, "maxmind", "", "Alias for --geoip-db")
-		_ = fs.Parse(remainingArgs)
+		auth := fs.String("auth", "", "Optional HTTP Basic Auth credentials (format: 'user:password', or set RW_DASHBOARD_AUTH)")
+		fs.StringVar(auth, "a", "", "Alias for --auth")
+		user := fs.String("user", "", "Optional HTTP Basic Auth username (used with --password)")
+		pass := fs.String("password", "", "Optional HTTP Basic Auth password (used with --user)")
+		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, default: all interfaces)")
+		_ = parseFlagsLenient(fs, remainingArgs)
+
+		if *detach && os.Getenv("_RW_DETACHED") != "1" {
+			bindHost := *host
+			if bindHost == "" {
+				bindHost = "127.0.0.1"
+			}
+			targetURL := fmt.Sprintf("http://%s:%d", bindHost, *port)
+			_ = spawnDetached("dashboard", "RouteWarden Dashboard", append([]string{"dashboard", "up"}, remainingArgs...), *port, targetURL)
+			return
+		}
+
+		if os.Getenv("_RW_DETACHED") == "1" {
+			defer removePID("dashboard")
+		}
+
+		if *file == "" && fs.NArg() > 0 && !strings.HasPrefix(fs.Arg(0), "-") {
+			*file = fs.Arg(0)
+		}
 
 		if *geoipDB != "" {
 			if err := observability.InitMaxMind(*geoipDB); err != nil {
@@ -253,7 +282,12 @@ func handleDashboard(args []string) {
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label); err != nil {
+		authStr := *auth
+		if authStr == "" && *user != "" {
+			authStr = *user + ":" + *pass
+		}
+
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)

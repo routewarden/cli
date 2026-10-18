@@ -68,10 +68,22 @@ echo "🔄 Synchronizing RouteWarden CLI version: ${TARGET_VERSION} (${SEMVER_NO
 
 UPDATED_COUNT=0
 
-# 1. Update main.go (var version = "X.Y.Z")
+# 1. Update main.go, cmd/shipper/main.go, and cmd/dashboard/main.go (var version = "X.Y.Z")
 if [ -f "${ROOT_DIR}/main.go" ]; then
   sed_inplace "s|(var[[:space:]]+version[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/main.go"
   echo "  ✓ Synchronized main.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+if [ -f "${ROOT_DIR}/cmd/shipper/main.go" ]; then
+  sed_inplace "s|(var[[:space:]]+version[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/cmd/shipper/main.go"
+  echo "  ✓ Synchronized cmd/shipper/main.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+if [ -f "${ROOT_DIR}/cmd/dashboard/main.go" ]; then
+  sed_inplace "s|(var[[:space:]]+version[[:space:]]*=[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/cmd/dashboard/main.go"
+  echo "  ✓ Synchronized cmd/dashboard/main.go"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 

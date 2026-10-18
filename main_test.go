@@ -1561,22 +1561,11 @@ func TestCLI_DashboardCommands(t *testing.T) {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
 		} else {
 			composeStr := string(composeBytes)
-			if !strings.Contains(composeStr, "allinurl/goaccess") {
-				t.Errorf("expected allinurl/goaccess in exported docker-compose.yml")
+			if !strings.Contains(composeStr, "ghcr.io/routewarden/cli") {
+				t.Errorf("expected ghcr.io/routewarden/cli in exported docker-compose.yml")
 			}
-		}
-
-		confPath := filepath.Join(exportDir, "goaccess.conf")
-		confBytes, err := os.ReadFile(confPath)
-		if err != nil {
-			t.Errorf("goaccess.conf was not exported: %v", err)
-		} else {
-			confStr := string(confBytes)
-			if !strings.Contains(confStr, "real-time-html true") {
-				t.Errorf("expected real-time-html true in exported goaccess.conf")
-			}
-			if !strings.Contains(confStr, "log-format COMBINED") {
-				t.Errorf("expected log-format COMBINED in exported goaccess.conf")
+			if !strings.Contains(composeStr, "dashboard --port 7890 --no-open") {
+				t.Errorf("expected dashboard command in exported docker-compose.yml")
 			}
 		}
 
@@ -1599,9 +1588,6 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(exportDir, "goaccess.conf")); err != nil {
-			t.Errorf("goaccess.conf was not exported: %v", err)
-		}
 	})
 
 	t.Run("dashboard up with export", func(t *testing.T) {
@@ -1616,9 +1602,6 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(exportDir, "goaccess.conf")); err != nil {
-			t.Errorf("goaccess.conf was not exported: %v", err)
 		}
 	})
 
@@ -2001,7 +1984,6 @@ func TestCLI_Dashboard_ExportAndUnknownSubcommand(t *testing.T) {
 	// Verify exported assets exist on disk
 	expectedFiles := []string{
 		filepath.Join(exportTarget, "docker-compose.yml"),
-		filepath.Join(exportTarget, "goaccess.conf"),
 		filepath.Join(exportTarget, "README.md"),
 	}
 	for _, f := range expectedFiles {

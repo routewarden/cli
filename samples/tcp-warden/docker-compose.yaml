@@ -5,7 +5,7 @@
 #
 #   docker compose up -d
 #
-# Launch the RouteWarden Security Dashboard (GoAccess):
+# Launch the RouteWarden Security Dashboard:
 #
 #   rwarden dashboard
 #

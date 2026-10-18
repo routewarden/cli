@@ -418,4 +418,3 @@ func TestSendBatchWithRetry_ClientErrorNonRetryable(t *testing.T) {
 		t.Errorf("expected 401 in error string, got: %v", err)
 	}
 }
-

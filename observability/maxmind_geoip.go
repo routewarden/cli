@@ -211,7 +211,7 @@ func newMMDBReader(data []byte) (*mmdbReader, error) {
 	}
 
 	r.nodeOffsetMult = uint32(r.recordSize) / 4
-	r.dataSection = (r.nodeCount * uint32(r.recordSize) * 2) / 8 + 16
+	r.dataSection = (r.nodeCount*uint32(r.recordSize)*2)/8 + 16
 
 	return r, nil
 }

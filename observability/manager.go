@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/ecdh"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,17 +36,12 @@ func DefaultDir() string {
 	return filepath.Join(home, ".routewarden", "dashboard")
 }
 
-// FindGoAccess checks whether 'goaccess' binary is available in PATH.
-func FindGoAccess() (string, error) {
-	return exec.LookPath("goaccess")
-}
-
 // FindDocker checks whether 'docker' CLI is available in PATH.
 func FindDocker() (string, error) {
 	return exec.LookPath("docker")
 }
 
-// EnsureStackPrepared unpacks embedded GoAccess assets to dir if not already present.
+// EnsureStackPrepared unpacks embedded dashboard assets to dir if not already present.
 func EnsureStackPrepared(dir string) error {
 	composeFile := filepath.Join(dir, "docker-compose.yml")
 	if _, err := os.Stat(composeFile); err == nil {
@@ -205,8 +202,6 @@ func toCombinedLog(line string) string {
 	}
 	// Already combined format
 	if match := combinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
-		statusCode, _ := strconv.Atoi(match[5])
-		recordMetric(statusCode, "")
 		return line
 	}
 
@@ -263,8 +258,6 @@ func toCombinedLog(line string) string {
 			}
 		}
 
-		recordMetric(status, ev.Verdict)
-
 		t := time.Now().UTC()
 		if ev.Timestamp != "" {
 			if parsed, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
@@ -318,8 +311,34 @@ func getFreePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-// Up starts the GoAccess live dashboard and multiplexes logs from Docker containers or file.
-func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string) error {
+// Up starts the live SOC security dashboard and multiplexes logs from Docker containers or file.
+// Optional auth ("user:pass") and host interface ("127.0.0.1" or "0.0.0.0") can be provided in options.
+func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string, options ...string) error {
+	var authStr string
+	var hostStr string
+	if len(options) > 0 {
+		authStr = strings.TrimSpace(options[0])
+	}
+	if len(options) > 1 {
+		hostStr = strings.TrimSpace(options[1])
+	}
+	if authStr == "" {
+		authStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_AUTH"))
+	}
+	if authStr == "" {
+		u := strings.TrimSpace(os.Getenv("RW_DASHBOARD_USER"))
+		p := strings.TrimSpace(os.Getenv("RW_DASHBOARD_PASS"))
+		if p == "" {
+			p = strings.TrimSpace(os.Getenv("RW_DASHBOARD_PASSWORD"))
+		}
+		if u != "" {
+			authStr = u + ":" + p
+		}
+	}
+	if hostStr == "" {
+		hostStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_HOST"))
+	}
+
 	if dir == "" {
 		dir = DefaultDir()
 	}
@@ -375,6 +394,8 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		globalStore.AttachSQLite(sqStore)
 		_, _ = sqStore.PruneOlderThan(30) // 30-day retention
 		defer sqStore.Close()
+	} else {
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: SQLite persistence failed to initialize: %v\n", err)
 	}
 
 	// Prime access.log and globalStore with initial logs from targets
@@ -408,10 +429,15 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	}
 	serverPubStr := crypto.EncodePublicKey(serverPub)
 
-	mux := NewDashboardHandler(dir, serverPriv, serverPubStr, logFile, nil, "")
+	mux := NewDashboardHandlerWithAuth(dir, serverPriv, serverPubStr, logFile, nil, "", authStr)
+
+	listenAddr := fmt.Sprintf(":%d", port)
+	if hostStr != "" {
+		listenAddr = fmt.Sprintf("%s:%d", hostStr, port)
+	}
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    listenAddr,
 		Handler: mux,
 	}
 
@@ -422,10 +448,21 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	dashboardURL := fmt.Sprintf("http://localhost:%d", port)
+	dashboardHost := "localhost"
+	if hostStr != "" && hostStr != "0.0.0.0" && hostStr != "::" {
+		dashboardHost = hostStr
+	}
+	dashboardURL := fmt.Sprintf("http://%s:%d", dashboardHost, port)
 	fmt.Println("🚀 RouteWarden Native SOC Security Dashboard is running!")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("📊 Live Dashboard:     %s\n", dashboardURL)
+	if authStr != "" {
+		parts := strings.SplitN(authStr, ":", 2)
+		fmt.Printf("🔒 Authentication:    Enabled (Basic Auth for user '%s')\n", parts[0])
+		fmt.Println("🔒 Protected APIs:     /, /api/logs, /api/stream, /api/stats, /api/sources, /api/ip-lookup")
+	} else {
+		fmt.Println("🔓 Authentication:    None (Open - use --auth <user:pass> to protect)")
+	}
 	fmt.Printf("🔒 Encrypted Ingest:   %s/api/v1/events\n", dashboardURL)
 	fmt.Printf("📡 Live SSE Stream:    %s/api/stream\n", dashboardURL)
 	if len(targets) > 0 {
@@ -734,8 +771,13 @@ func extractClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// NewDashboardHandler constructs the HTTP handler for the dashboard, API endpoints, and GoAccess proxy.
+// NewDashboardHandler constructs the HTTP handler for the dashboard and API endpoints.
 func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr string, logFile *os.File, wsProxy http.Handler, reportPath string) http.Handler {
+	return NewDashboardHandlerWithAuth(dir, serverPriv, serverPubStr, logFile, wsProxy, reportPath, "")
+}
+
+// NewDashboardHandlerWithAuth constructs the HTTP handler for the dashboard and API endpoints with optional Basic Auth.
+func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, serverPubStr string, logFile *os.File, wsProxy http.Handler, reportPath string, authStr string) http.Handler {
 	var logMu sync.Mutex
 
 	mux := http.NewServeMux()
@@ -750,6 +792,11 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		stats := globalStore.GetStats()
 		stats.Sources = getSourceInfo()
+		if authStr != "" {
+			stats.AuthEnabled = true
+			parts := strings.SplitN(authStr, ":", 2)
+			stats.AuthUser = parts[0]
+		}
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 
@@ -757,18 +804,7 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
-		sq := globalStore.SQLite()
-		if sq == nil {
-			stats := globalStore.GetStats()
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"events": stats.RecentEvents,
-				"total":  len(stats.RecentEvents),
-				"count":  len(stats.RecentEvents),
-			})
-			return
-		}
-
-		limit := 250
+		limit := 50
 		if lStr := r.URL.Query().Get("limit"); lStr != "" {
 			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
 				limit = l
@@ -782,22 +818,132 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 			}
 		}
 
+		timeParam := strings.TrimSpace(r.URL.Query().Get("time"))
+		startTime := strings.TrimSpace(r.URL.Query().Get("start"))
+		endTime := strings.TrimSpace(r.URL.Query().Get("end"))
+		if startTime == "" && timeParam != "" && timeParam != "ALL" {
+			var dur time.Duration
+			switch timeParam {
+			case "1m":
+				dur = 1 * time.Minute
+			case "5m":
+				dur = 5 * time.Minute
+			case "15m":
+				dur = 15 * time.Minute
+			case "30m":
+				dur = 30 * time.Minute
+			case "1h":
+				dur = 1 * time.Hour
+			case "6h":
+				dur = 6 * time.Hour
+			case "24h":
+				dur = 24 * time.Hour
+			}
+			if dur > 0 {
+				startTime = time.Now().Add(-dur).UTC().Format(time.RFC3339)
+			}
+		}
+
+		nodeParam := strings.TrimSpace(r.URL.Query().Get("node"))
+		if nodeParam == "" {
+			nodeParam = strings.TrimSpace(r.URL.Query().Get("source"))
+		}
+
 		filter := LogQueryFilter{
-			StartTime: strings.TrimSpace(r.URL.Query().Get("start")),
-			EndTime:   strings.TrimSpace(r.URL.Query().Get("end")),
+			StartTime: startTime,
+			EndTime:   endTime,
 			Verdict:   strings.TrimSpace(r.URL.Query().Get("verdict")),
 			ClientIP:  strings.TrimSpace(r.URL.Query().Get("ip")),
 			Country:   strings.TrimSpace(r.URL.Query().Get("country")),
 			Method:    strings.TrimSpace(r.URL.Query().Get("method")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
+			Source:    nodeParam,
 			Rule:      strings.TrimSpace(r.URL.Query().Get("rule")),
 			Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+			StatusStr: strings.TrimSpace(r.URL.Query().Get("status")),
 			Limit:     limit,
 			Offset:    offset,
 		}
-		if sStr := r.URL.Query().Get("status"); sStr != "" {
-			if st, err := strconv.Atoi(sStr); err == nil {
+		if filter.StatusStr != "" {
+			if st, err := strconv.Atoi(filter.StatusStr); err == nil {
 				filter.Status = st
 			}
+		}
+
+		sq := globalStore.SQLite()
+		if sq == nil {
+			stats := globalStore.GetStats()
+			var matched []*SecurityEvent
+			for _, ev := range stats.RecentEvents {
+				if filter.Verdict != "" && filter.Verdict != "ALL" && !strings.EqualFold(ev.Verdict, filter.Verdict) {
+					continue
+				}
+				if filter.ClientIP != "" && ev.ClientIP != filter.ClientIP {
+					continue
+				}
+				if filter.Country != "" && filter.Country != "ALL" && !strings.EqualFold(ev.Country, filter.Country) && !strings.EqualFold(ev.CountryCode, filter.Country) {
+					continue
+				}
+				if filter.Method != "" && filter.Method != "ALL" && !strings.EqualFold(ev.Method, filter.Method) {
+					continue
+				}
+				if filter.Path != "" && ev.Path != filter.Path {
+					continue
+				}
+				if filter.Source != "" && filter.Source != "ALL" && !strings.EqualFold(ev.Source, filter.Source) {
+					continue
+				}
+				if filter.Rule != "" && filter.Rule != "ALL" && !strings.EqualFold(ev.Rule, filter.Rule) {
+					continue
+				}
+				if filter.StatusStr != "" && filter.StatusStr != "ALL" {
+					switch strings.ToLower(filter.StatusStr) {
+					case "2xx":
+						if ev.Status < 200 || ev.Status >= 300 {
+							continue
+						}
+					case "4xx":
+						if ev.Status < 400 || ev.Status >= 500 {
+							continue
+						}
+					case "5xx":
+						if ev.Status < 500 || ev.Status >= 600 {
+							continue
+						}
+					default:
+						if filter.Status > 0 && ev.Status != filter.Status {
+							continue
+						}
+					}
+				}
+				if filter.Search != "" {
+					searchLower := strings.ToLower(filter.Search)
+					haystack := strings.ToLower(ev.ClientIP + " " + ev.Path + " " + ev.Rule + " " + ev.Country + " " + ev.Source)
+					if !strings.Contains(haystack, searchLower) {
+						continue
+					}
+				}
+				matched = append(matched, ev)
+			}
+			filteredTotal := len(matched)
+			startIdx := offset
+			if startIdx > filteredTotal {
+				startIdx = filteredTotal
+			}
+			endIdx := startIdx + limit
+			if endIdx > filteredTotal {
+				endIdx = filteredTotal
+			}
+			paged := matched[startIdx:endIdx]
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"events":         paged,
+				"total":          len(stats.RecentEvents),
+				"filtered_total": filteredTotal,
+				"count":          len(paged),
+				"limit":          limit,
+				"offset":         offset,
+			})
+			return
 		}
 
 		events, err := sq.Query(filter)
@@ -808,9 +954,12 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		}
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"events": events,
-			"total":  sq.Count(),
-			"count":  len(events),
+			"events":         events,
+			"total":          sq.Count(),
+			"filtered_total": sq.CountFiltered(filter),
+			"count":          len(events),
+			"limit":          limit,
+			"offset":         offset,
 		})
 	})
 
@@ -830,6 +979,18 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		}
 		info := LookupIP(ip)
 		_ = json.NewEncoder(w).Encode(info)
+	})
+
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/x-icon")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(FaviconICO)
+	})
+
+	mux.HandleFunc("/icon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(FaviconSVG)
 	})
 
 	mux.HandleFunc("/api/v1/pubkey", func(w http.ResponseWriter, r *http.Request) {
@@ -1014,5 +1175,236 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		http.NotFound(w, r)
 	})
 
-	return mux
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(CustomAuthScreenHTML))
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "routewarden_auth",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			Expires:  time.Unix(0, 0),
+			SameSite: http.SameSiteLaxMode,
+		})
+		http.Redirect(w, r, "/login", http.StatusFound)
+	})
+
+	mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "routewarden_auth",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			Expires:  time.Unix(0, 0),
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "logged_out"})
+	})
+
+	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var creds struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request format"})
+			return
+		}
+
+		if authStr == "" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "user": creds.Username})
+			return
+		}
+
+		var userMatch, passMatch bool
+		expUser := authStr
+		if strings.Contains(authStr, ":") {
+			parts := strings.SplitN(authStr, ":", 2)
+			expUser = parts[0]
+			expPass := parts[1]
+			userMatch = subtle.ConstantTimeCompare([]byte(creds.Username), []byte(expUser)) == 1
+			passMatch = subtle.ConstantTimeCompare([]byte(creds.Password), []byte(expPass)) == 1
+		} else {
+			// Single token auth: user can supply the token in username or password field
+			userMatch = subtle.ConstantTimeCompare([]byte(creds.Username), []byte(authStr)) == 1 ||
+				subtle.ConstantTimeCompare([]byte(creds.Password), []byte(authStr)) == 1
+			passMatch = true
+		}
+
+		if !userMatch || !passMatch {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid username or access key"})
+			return
+		}
+
+		token := base64.StdEncoding.EncodeToString([]byte(authStr))
+		http.SetCookie(w, &http.Cookie{
+			Name:     "routewarden_auth",
+			Value:    token,
+			Path:     "/",
+			MaxAge:   86400 * 30, // 30 days
+			SameSite: http.SameSiteLaxMode,
+			HttpOnly: false,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ok",
+			"user":   expUser,
+			"token":  token,
+		})
+	})
+
+	if authStr == "" {
+		return mux
+	}
+
+	parts := strings.SplitN(authStr, ":", 2)
+	expectedUser := parts[0]
+	expectedPass := ""
+	if len(parts) > 1 {
+		expectedPass = parts[1]
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Whitelist static branding, agent ingestion APIs, and auth endpoints
+		if path == "/favicon.ico" || path == "/icon.svg" ||
+			strings.HasPrefix(path, "/api/v1/") ||
+			path == "/api/auth/login" || path == "/api/auth/logout" ||
+			path == "/logout" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		isAuthed := validateDashboardAuth(r, expectedUser, expectedPass, authStr)
+
+		// Handle /login route
+		if path == "/login" {
+			if isAuthed {
+				dest := r.URL.Query().Get("redirect")
+				if dest == "" {
+					dest = "/"
+				}
+				http.Redirect(w, r, dest, http.StatusFound)
+				return
+			}
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		if isAuthed {
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		// Unauthenticated handling:
+		// If it's a browser requesting HTML at / or /index.html, redirect to /login
+		isBrowserHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
+		if isBrowserHTML && (path == "/" || path == "/index.html") {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+
+		// Unauthorized response for API / curl / test clients
+		w.Header().Set("WWW-Authenticate", `Basic realm="RouteWarden SOC Security Dashboard"`)
+		if strings.HasPrefix(path, "/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "unauthorized: valid dashboard credentials required",
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("401 Unauthorized: RouteWarden SOC Dashboard requires authentication\n"))
+	})
+}
+
+// validateDashboardAuth verifies request credentials via Basic Auth, cookie, query token, or Bearer header.
+func validateDashboardAuth(r *http.Request, expectedUser, expectedPass, authStr string) bool {
+	hasColon := strings.Contains(authStr, ":")
+
+	// 1. Check HTTP Basic Auth header
+	u, p, ok := r.BasicAuth()
+	if ok {
+		if hasColon {
+			if subtle.ConstantTimeCompare([]byte(u), []byte(expectedUser)) == 1 &&
+				subtle.ConstantTimeCompare([]byte(p), []byte(expectedPass)) == 1 {
+				return true
+			}
+		} else {
+			if subtle.ConstantTimeCompare([]byte(u), []byte(authStr)) == 1 ||
+				subtle.ConstantTimeCompare([]byte(p), []byte(authStr)) == 1 {
+				return true
+			}
+		}
+	}
+
+	// 2. Check Cookie (routewarden_auth or rw_auth)
+	for _, cookieName := range []string{"routewarden_auth", "rw_auth"} {
+		if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
+			if raw, err := base64.StdEncoding.DecodeString(c.Value); err == nil {
+				parts := strings.SplitN(string(raw), ":", 2)
+				u := parts[0]
+				p := ""
+				if len(parts) > 1 {
+					p = parts[1]
+				}
+				if hasColon {
+					if subtle.ConstantTimeCompare([]byte(u), []byte(expectedUser)) == 1 &&
+						subtle.ConstantTimeCompare([]byte(p), []byte(expectedPass)) == 1 {
+						return true
+					}
+				} else {
+					if subtle.ConstantTimeCompare([]byte(u), []byte(authStr)) == 1 ||
+						subtle.ConstantTimeCompare([]byte(p), []byte(authStr)) == 1 {
+						return true
+					}
+				}
+			} else if subtle.ConstantTimeCompare([]byte(c.Value), []byte(authStr)) == 1 ||
+				(expectedPass != "" && subtle.ConstantTimeCompare([]byte(c.Value), []byte(expectedPass)) == 1) {
+				return true
+			}
+		}
+	}
+
+	// 3. Check query parameter ?auth=user:pass or ?token=pass
+	qAuth := r.URL.Query().Get("auth")
+	if qAuth == "" {
+		qAuth = r.URL.Query().Get("token")
+	}
+	if qAuth != "" {
+		if subtle.ConstantTimeCompare([]byte(qAuth), []byte(authStr)) == 1 ||
+			(expectedPass != "" && subtle.ConstantTimeCompare([]byte(qAuth), []byte(expectedPass)) == 1) {
+			return true
+		}
+	}
+
+	// 4. Check Bearer token header
+	bearer := extractAuthToken(r)
+	if bearer != "" {
+		if subtle.ConstantTimeCompare([]byte(bearer), []byte(authStr)) == 1 ||
+			(expectedPass != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(expectedPass)) == 1) {
+			return true
+		}
+	}
+
+	return false
 }

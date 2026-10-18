@@ -148,13 +148,17 @@ func handleMonitor(args []string) {
 	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
 	fs.StringVar(customLabel, "l", "", "Alias for --label")
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s)")
-	rawOutput := fs.Bool("raw", false, "Output raw unformatted log lines (ideal for piping into GoAccess or jq)")
+	rawOutput := fs.Bool("raw", false, "Output raw unformatted log lines (ideal for piping into external analyzers or jq)")
 	waitContainers := fs.Bool("wait", false, "Wait and retry if no matching containers are running initially")
 	fs.BoolVar(waitContainers, "w", false, "Alias for --wait")
 	verdictFilter := fs.String("verdict", "", "Filter events by verdict (BLOCK, ALLOW, TARPIT)")
 	ipFilter := fs.String("ip", "", "Filter events by client IP substring")
 	pathFilter := fs.String("path", "", "Filter events by request path substring")
 	_ = parseFlagsLenient(fs, args)
+
+	if *file == "" && fs.NArg() > 0 && !strings.HasPrefix(fs.Arg(0), "-") {
+		*file = fs.Arg(0)
+	}
 
 	if !*waitContainers && os.Getenv("RWARDEN_MONITOR_WAIT") == "true" {
 		*waitContainers = true
@@ -498,7 +502,7 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 			continue
 		}
 
-		// In raw output mode (for GoAccess / piping), emit standard Combined log line
+		// In raw output mode (for external analyzers / piping), emit standard Combined log line
 		if rawOutput {
 			outLine := line
 			if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {

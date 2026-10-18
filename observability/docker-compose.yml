@@ -1,46 +1,20 @@
-# RouteWarden Lightweight Security Dashboard (GoAccess)
+# RouteWarden Real-Time SOC Security Dashboard
 services:
-  goaccess:
-    image: allinurl/goaccess:latest
+  dashboard:
+    image: ghcr.io/routewarden/cli:latest
     container_name: routewarden-dashboard
     restart: unless-stopped
+    command: dashboard --port 7890 --no-open
     ports:
       - "${PORT:-7890}:7890"
+    volumes:
+      # Mount Docker socket for automatic reverse proxy log discovery
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persist SQLite telemetry database across container restarts
+      - routewarden-data:/root/.routewarden/dashboard
     environment:
       - TZ=UTC
-    volumes:
-      - ./goaccess.conf:/etc/goaccess/goaccess.conf:ro
-      - ./data:/srv/data
-      - ./report:/srv/report
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        mkdir -p /srv/data
-        touch /srv/data/access.log
-        exec goaccess /srv/data/access.log \
-          --config-file=/etc/goaccess/goaccess.conf \
-          --real-time-html \
-          --port=7890 \
-          --addr=0.0.0.0 \
-          -o /srv/report/index.html
 
-  # Optional companion service: automatically discovers and tails reverse proxy containers labeled 'routewarden=true'
-  # Usage: docker compose --profile monitor up -d
-  # Or:    COMPOSE_PROFILES=monitor docker compose up -d
-  monitor:
-    image: ghcr.io/routewarden/cli:latest
-    container_name: routewarden-monitor
-    restart: unless-stopped
-    profiles:
-      - monitor
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./data:/data
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        mkdir -p /data
-        touch /data/access.log
-        exec rwarden monitor --raw --wait --out=/data/access.log
+volumes:
+  routewarden-data:
+    name: routewarden-dashboard-data

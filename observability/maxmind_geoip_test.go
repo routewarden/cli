@@ -12,18 +12,18 @@ import (
 
 func TestCountryCodeToName(t *testing.T) {
 	cases := map[string]string{
-		"US": "United States",
-		"DE": "Germany",
-		"FR": "France",
-		"GB": "United Kingdom",
-		"IN": "India",
-		"JP": "Japan",
-		"CN": "China",
-		"CA": "Canada",
-		"BR": "Brazil",
-		"AU": "Australia",
-		"SG": "Singapore",
-		"NL": "Netherlands",
+		"US":      "United States",
+		"DE":      "Germany",
+		"FR":      "France",
+		"GB":      "United Kingdom",
+		"IN":      "India",
+		"JP":      "Japan",
+		"CN":      "China",
+		"CA":      "Canada",
+		"BR":      "Brazil",
+		"AU":      "Australia",
+		"SG":      "Singapore",
+		"NL":      "Netherlands",
 		"UNKNOWN": "UNKNOWN",
 	}
 

@@ -29,6 +29,17 @@ type pushPayload struct {
 }
 
 func handlePush(args []string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch strings.ToLower(args[0]) {
+		case "status", "ps":
+			checkDaemonStatus("push", "RouteWarden Remote Shipper")
+			return
+		case "stop", "down":
+			_, _ = stopDaemon("push", "RouteWarden Remote Shipper")
+			return
+		}
+	}
+
 	fs := flag.NewFlagSet("push", flag.ExitOnError)
 	urlFlag := fs.String("url", "", "RouteWarden dashboard URL (overrides registered config)")
 	fs.StringVar(urlFlag, "u", "", "Alias for --url")
@@ -36,7 +47,8 @@ func handlePush(args []string) {
 	fs.StringVar(keyFlag, "k", "", "Alias for --key")
 	configPath := fs.String("config", "", "Custom path to agent configuration (default: ~/.routewarden/agent.json)")
 	dockerMode := fs.Bool("docker", false, "Auto-discover and tail Docker containers with label 'routewarden=true'")
-	fs.BoolVar(dockerMode, "d", false, "Alias for --docker")
+	detachMode := fs.Bool("detach", false, "Run remote shipper in background (detached) mode")
+	fs.BoolVar(detachMode, "d", false, "Alias for --detach")
 	var containerFlags stringSlice
 	fs.Var(&containerFlags, "container", "Tail specific Docker container(s) by name or ID (repeatable or comma-separated)")
 	fs.Var(&containerFlags, "c", "Alias for --container")
@@ -49,6 +61,15 @@ func handlePush(args []string) {
 	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
 	_ = parseFlagsLenient(fs, args)
+
+	if *detachMode && os.Getenv("_RW_DETACHED") != "1" {
+		_ = spawnDetached("push", "RouteWarden Remote Shipper", append([]string{"push"}, args...), 0, "")
+		return
+	}
+
+	if os.Getenv("_RW_DETACHED") == "1" {
+		defer removePID("push")
+	}
 
 	filesToMonitor := resolveFileList(fileFlags, fs.Args())
 	containersToTail := resolveContainerList(containerFlags)
@@ -224,6 +245,9 @@ func tailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	if err := cmd.Start(); err != nil {
 		return
 	}
+	defer func() {
+		_ = cmd.Wait()
+	}()
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		select {
@@ -235,7 +259,6 @@ func tailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	if err := scanner.Err(); err != nil {
 		_ = err
 	}
-	_ = cmd.Wait()
 }
 
 func tailContainerToChan(ctx context.Context, containerName, tailLines string, out chan<- string) {
@@ -266,8 +289,17 @@ func tailContainerToChan(ctx context.Context, containerName, tailLines string, o
 		}
 	}
 
-	go readPipe(stdout)
-	readPipe(stderr)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		readPipe(stdout)
+	}()
+	go func() {
+		defer wg.Done()
+		readPipe(stderr)
+	}()
+	wg.Wait()
 	_ = cmd.Wait()
 }
 
@@ -465,4 +497,3 @@ func resolveContainerList(flags []string) []string {
 	}
 	return results
 }
-

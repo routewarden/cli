@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,6 +30,35 @@ type SecurityEvent struct {
 	Rule        string  `json:"rule"`    // e.g. "path-traversal", "scanner", "sql-injection"
 	LatencyMs   float64 `json:"latency_ms"`
 	Source      string  `json:"source,omitempty"`
+	Hash        string  `json:"hash,omitempty"`
+}
+
+// ComputeHash computes a deterministic SHA-256 fingerprint from the event's immutable fields.
+func (ev *SecurityEvent) ComputeHash() string {
+	if ev == nil {
+		return ""
+	}
+	ts := strings.TrimSpace(ev.Timestamp)
+	ip := strings.TrimSpace(ev.ClientIP)
+	m := strings.ToUpper(strings.TrimSpace(ev.Method))
+	p := strings.TrimSpace(ev.Path)
+	v := strings.ToUpper(strings.TrimSpace(ev.Verdict))
+	r := strings.TrimSpace(ev.Rule)
+	s := strings.TrimSpace(ev.Source)
+	raw := fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s|%s", ts, ip, m, p, ev.Status, v, r, s)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// EnsureHash ensures ev.Hash is populated, computing it if missing.
+func (ev *SecurityEvent) EnsureHash() string {
+	if ev == nil {
+		return ""
+	}
+	if ev.Hash == "" {
+		ev.Hash = ev.ComputeHash()
+	}
+	return ev.Hash
 }
 
 // TimelinePoint represents aggregated events for a time bucket.
@@ -86,6 +117,10 @@ type EventStore struct {
 	timelineKeys  []string
 	startTime     time.Time
 	sqlite        *SQLiteStore
+	totalEvents   int64
+	blockedCount  int64
+	tarpitCount   int64
+	seenHashes    map[string]struct{}
 }
 
 var globalStore = NewEventStore()
@@ -103,6 +138,7 @@ func NewEventStore() *EventStore {
 		timeline:      make(map[string]*TimelinePoint),
 		timelineKeys:  make([]string, 0),
 		startTime:     time.Now(),
+		seenHashes:    make(map[string]struct{}),
 	}
 }
 
@@ -161,6 +197,26 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 	}
 	s.mu.Lock()
 
+	// Verify event hash to eliminate duplicate ingestion upon stream restart
+	h := ev.EnsureHash()
+	if h != "" {
+		if _, exists := s.seenHashes[h]; exists {
+			s.mu.Unlock()
+			return
+		}
+		s.seenHashes[h] = struct{}{}
+		if len(s.seenHashes) > 50000 {
+			pruned := 0
+			for k := range s.seenHashes {
+				delete(s.seenHashes, k)
+				pruned++
+				if pruned >= 25000 {
+					break
+				}
+			}
+		}
+	}
+
 	if ev.ID <= 0 {
 		s.nextID++
 		ev.ID = s.nextID
@@ -183,13 +239,22 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 	}
 
 	// Update atomic counters
-	atomic.AddInt64(&totalEvents, 1)
+	atomic.AddInt64(&s.totalEvents, 1)
 	isBlocked := ev.Verdict == "BLOCK" || ev.Status == 403
 	isTarpit := ev.Verdict == "TARPIT" || ev.Status == 429
 	if isBlocked {
-		atomic.AddInt64(&blockedCount, 1)
+		atomic.AddInt64(&s.blockedCount, 1)
 	} else if isTarpit {
-		atomic.AddInt64(&tarpitCount, 1)
+		atomic.AddInt64(&s.tarpitCount, 1)
+	}
+
+	if s == globalStore {
+		atomic.AddInt64(&totalEvents, 1)
+		if isBlocked {
+			atomic.AddInt64(&blockedCount, 1)
+		} else if isTarpit {
+			atomic.AddInt64(&tarpitCount, 1)
+		}
 	}
 
 	// Timeline bucket (HH:MM)
@@ -379,12 +444,12 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 		ev.Verdict = strings.ToUpper(le.Verdict)
 		if ev.Verdict == "" {
 			switch ev.Status {
-        case 403:
-          ev.Verdict = "BLOCK"
-        case 429:
-          ev.Verdict = "TARPIT"
-        default:
-          ev.Verdict = "ALLOW"
+			case 403:
+				ev.Verdict = "BLOCK"
+			case 429:
+				ev.Verdict = "TARPIT"
+			default:
+				ev.Verdict = "ALLOW"
 			}
 		}
 		if ev.Status == 0 {
@@ -428,6 +493,18 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 	// Try Combined Apache/Nginx format
 	if match := combinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
 		ev.ClientIP = match[1]
+		if len(match) > 2 && match[2] != "" {
+			if t, err := time.Parse("02/Jan/2006:15:04:05 -0700", match[2]); err == nil {
+				ev.Timestamp = t.Format(time.RFC3339)
+				ev.TimeStr = t.Local().Format("15:04:05")
+			} else if t, err := time.Parse("02/Jan/2006:15:04:05", match[2]); err == nil {
+				ev.Timestamp = t.Format(time.RFC3339)
+				ev.TimeStr = t.Local().Format("15:04:05")
+			} else if t, err := time.Parse(time.RFC3339, match[2]); err == nil {
+				ev.Timestamp = t.Format(time.RFC3339)
+				ev.TimeStr = t.Local().Format("15:04:05")
+			}
+		}
 		ev.Method = match[3]
 		ev.Path = match[4]
 		fmt.Sscanf(match[5], "%d", &ev.Status)
@@ -457,7 +534,7 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 				}
 			}
 			switch ev.Status {
-case 403:
+			case 403:
 				ev.Verdict = "BLOCK"
 			case 429:
 				ev.Verdict = "TARPIT"
@@ -466,7 +543,7 @@ case 403:
 			}
 		} else {
 			switch ev.Status {
-      case 403:
+			case 403:
 				ev.Verdict = "BLOCK"
 			case 429:
 				ev.Verdict = "TARPIT"
@@ -493,9 +570,17 @@ func (s *EventStore) GetStats() DashboardStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	total := atomic.LoadInt64(&totalEvents)
-	blocked := atomic.LoadInt64(&blockedCount)
-	tarpit := atomic.LoadInt64(&tarpitCount)
+	total := atomic.LoadInt64(&s.totalEvents)
+	blocked := atomic.LoadInt64(&s.blockedCount)
+	tarpit := atomic.LoadInt64(&s.tarpitCount)
+	if s == globalStore {
+		gTotal := atomic.LoadInt64(&totalEvents)
+		if gTotal > total {
+			total = gTotal
+			blocked = atomic.LoadInt64(&blockedCount)
+			tarpit = atomic.LoadInt64(&tarpitCount)
+		}
+	}
 	clean := total - blocked - tarpit
 	if clean < 0 {
 		clean = 0
@@ -5067,6 +5152,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     updateWorldMap(stats);
   }
 
+  function scrollToLiveLog() {
+    var sec = document.getElementById('sec-stream');
+    if (sec) {
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
   window.filterByCountry = function(country) {
     if (filters.country === country) {
       filters.country = 'ALL';
@@ -5078,18 +5170,21 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderActiveChips();
     renderTable();
     if (latestStats) updateWorldMap(latestStats);
+    scrollToLiveLog();
   };
 
   window.filterByIP = function(ip) {
     filters.ip = ip;
     renderActiveChips();
     renderTable();
+    scrollToLiveLog();
   };
 
   window.filterByPath = function(path) {
     filters.path = path;
     renderActiveChips();
     renderTable();
+    scrollToLiveLog();
   };
 
   // Precise GPS coordinates (latitude, longitude) for countries worldwide
@@ -5647,6 +5742,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderActiveChips();
     renderTable();
     if (lastSources) renderSources(lastSources);
+    scrollToLiveLog();
   };
 
   // IP Intelligence & Abuse Hub
@@ -5840,7 +5936,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '</div>' +
         '</div>' +
         '<div class="ip-header-actions">' +
-          '<button class="tui-btn" onclick="filterAndCloseIP(\'' + ip + '\')" title="Show only requests from this IP in live log">🔍 Show in Request Log</button>' +
+          '<button class="tui-btn" onclick="filterAndCloseIP(\'' + ip + '\')" title="Filter request logs by this IP and scroll to results">🔍 Filter Logs</button>' +
         '</div>' +
       '</div>' +
 
@@ -5954,6 +6050,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   window.filterAndCloseIP = function(ip) {
     document.getElementById('ip-modal').style.display = 'none';
     filterByIP(ip);
+    setTimeout(scrollToLiveLog, 50);
   };
 
   window.copyText = function(text, btn) {

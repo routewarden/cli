@@ -497,5 +497,3 @@ func TestDashboard_Authentication(t *testing.T) {
 		t.Errorf("expected 200 OK for open handler without auth, got %d", rrOpen.Code)
 	}
 }
-
-

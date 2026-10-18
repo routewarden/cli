@@ -49,7 +49,7 @@ Emit system roff/troff manual page.
 Spin up an ephemeral, isolated Traefik, Caddy, or NGINX container in Docker to test live request traffic against policies.
 .TP
 \fBdashboard\fR [\fIup\fR|\fIdown\fR|\fIstatus\fR|\fIexport\fR]
-Launch and manage the lightweight real-time GoAccess security dashboard.
+Launch and manage the lightweight real-time SOC security dashboard.
 .TP
 \fBcleanup\fR
 Stop and remove all running RouteWarden ephemeral sandbox containers.

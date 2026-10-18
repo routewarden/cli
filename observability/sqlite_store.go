@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,7 +22,10 @@ type LogQueryFilter struct {
 	ClientIP  string
 	Country   string
 	Method    string
+	Path      string
+	Source    string // connected node or agent name
 	Status    int
+	StatusStr string // e.g. "2xx", "403", "429", "4xx", "5xx"
 	Rule      string
 	Search    string
 	Limit     int
@@ -38,6 +42,8 @@ type SQLiteStore struct {
 	done       chan struct{}
 	wg         sync.WaitGroup
 	closed     int32
+	seenMu     sync.RWMutex
+	seenHashes map[string]struct{}
 }
 
 // NewSQLiteStore initializes a SQLite database at dbPath with WAL mode and schema migration.
@@ -81,12 +87,74 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("migrate sqlite schema: %w", err)
 	}
 
+	// Ensure hash column exists in pre-migration databases
+	_, _ = db.Exec("ALTER TABLE security_events ADD COLUMN hash TEXT")
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_events_hash ON security_events(hash)")
+
+	seenHashes := make(map[string]struct{})
+
+	// Backfill missing hashes for legacy rows so deduplication works on historical data
+	if rows, err := db.Query("SELECT id, timestamp, client_ip, method, path, status, verdict, rule, source FROM security_events WHERE hash IS NULL OR hash = ''"); err == nil {
+		type legacyRow struct {
+			id   int64
+			hash string
+		}
+		var toUpdate []legacyRow
+		for rows.Next() {
+			var id int64
+			var ts, ip, method, path, verdict, rule, source sql.NullString
+			var status sql.NullInt64
+			if err := rows.Scan(&id, &ts, &ip, &method, &path, &status, &verdict, &rule, &source); err == nil {
+				ev := &SecurityEvent{
+					Timestamp: ts.String,
+					ClientIP:  ip.String,
+					Method:    method.String,
+					Path:      path.String,
+					Status:    int(status.Int64),
+					Verdict:   verdict.String,
+					Rule:      rule.String,
+					Source:    source.String,
+				}
+				h := ev.ComputeHash()
+				toUpdate = append(toUpdate, legacyRow{id: id, hash: h})
+			}
+		}
+		_ = rows.Err()
+		_ = rows.Close()
+
+		if len(toUpdate) > 0 {
+			if tx, err := db.Begin(); err == nil {
+				if stmt, err := tx.Prepare("UPDATE security_events SET hash = ? WHERE id = ?"); err == nil {
+					for _, r := range toUpdate {
+						_, _ = stmt.Exec(r.hash, r.id)
+						seenHashes[r.hash] = struct{}{}
+					}
+					_ = stmt.Close()
+				}
+				_ = tx.Commit()
+			}
+		}
+	}
+
+	// Pre-populate deduplication cache from existing events in DB
+	if rows, err := db.Query("SELECT hash FROM security_events WHERE hash IS NOT NULL AND hash != '' ORDER BY id DESC LIMIT 10000"); err == nil {
+		for rows.Next() {
+			var h string
+			if err := rows.Scan(&h); err == nil && h != "" {
+				seenHashes[h] = struct{}{}
+			}
+		}
+		_ = rows.Err()
+		_ = rows.Close()
+	}
+
 	store := &SQLiteStore{
 		dbPath:     dbPath,
 		db:         db,
 		insertChan: make(chan *SecurityEvent, 5000),
 		flushChan:  make(chan chan struct{}),
 		done:       make(chan struct{}),
+		seenHashes: seenHashes,
 	}
 
 	store.wg.Add(1)
@@ -100,14 +168,67 @@ func (s *SQLiteStore) DBPath() string {
 	return s.dbPath
 }
 
-// Insert queues a security event for asynchronous batched persistence.
+// HasHash checks if an event hash already exists in memory cache or database.
+func (s *SQLiteStore) HasHash(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	s.seenMu.RLock()
+	_, exists := s.seenHashes[hash]
+	s.seenMu.RUnlock()
+	if exists {
+		return true
+	}
+
+	var count int
+	row := s.db.QueryRow("SELECT COUNT(1) FROM security_events WHERE hash = ?", hash)
+	if err := row.Scan(&count); err == nil && count > 0 {
+		s.seenMu.Lock()
+		s.seenHashes[hash] = struct{}{}
+		s.seenMu.Unlock()
+		return true
+	}
+	return false
+}
+
+// MarkHash adds an event hash to the local deduplication cache.
+func (s *SQLiteStore) MarkHash(hash string) {
+	if hash == "" {
+		return
+	}
+	s.seenMu.Lock()
+	s.seenHashes[hash] = struct{}{}
+	if len(s.seenHashes) > 50000 {
+		pruned := 0
+		for k := range s.seenHashes {
+			delete(s.seenHashes, k)
+			pruned++
+			if pruned >= 25000 {
+				break
+			}
+		}
+	}
+	s.seenMu.Unlock()
+}
+
+// Insert queues a security event for asynchronous batched persistence after verifying hash.
 func (s *SQLiteStore) Insert(ev *SecurityEvent) {
 	if ev == nil || atomic.LoadInt32(&s.closed) == 1 {
 		return
 	}
 
+	h := ev.EnsureHash()
+	if h != "" && s.HasHash(h) {
+		return // Duplicate event hash detected; skip adding to DB
+	}
+	if h != "" {
+		s.MarkHash(h)
+	}
+
 	select {
 	case s.insertChan <- ev:
+	case <-s.done:
+		return
 	default:
 		// If queue is completely backed up, perform non-blocking drop or inline insert
 		// to prevent memory growth under extreme load
@@ -185,8 +306,8 @@ func (s *SQLiteStore) flushBatch(batch []*SecurityEvent) {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO security_events (
-			timestamp, time_str, client_ip, method, path, status, verdict, rule, country, country_code, latency_ms, source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			timestamp, time_str, client_ip, method, path, status, verdict, rule, country, country_code, latency_ms, source, hash
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		_ = tx.Rollback()
@@ -203,6 +324,7 @@ func (s *SQLiteStore) flushBatch(batch []*SecurityEvent) {
 		if tStr == "" {
 			tStr = time.Now().Format("15:04:05")
 		}
+		hash := ev.EnsureHash()
 		_, _ = stmt.Exec(
 			ts,
 			tStr,
@@ -216,6 +338,7 @@ func (s *SQLiteStore) flushBatch(batch []*SecurityEvent) {
 			ev.CountryCode,
 			ev.LatencyMs,
 			ev.Source,
+			hash,
 		)
 	}
 
@@ -238,8 +361,7 @@ func (s *SQLiteStore) GetRecent(limit int) ([]*SecurityEvent, error) {
 	return s.Query(LogQueryFilter{Limit: limit})
 }
 
-// Query retrieves events matching the provided LogQueryFilter.
-func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
+func buildWhereClause(f LogQueryFilter) ([]string, []interface{}) {
 	var where []string
 	var args []interface{}
 
@@ -260,28 +382,69 @@ func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
 		args = append(args, f.ClientIP)
 	}
 	if f.Country != "" && f.Country != "ALL" {
-		where = append(where, "country = ?")
-		args = append(args, f.Country)
+		where = append(where, "(country = ? OR country_code = ?)")
+		args = append(args, f.Country, f.Country)
 	}
 	if f.Method != "" && f.Method != "ALL" {
 		where = append(where, "method = ?")
 		args = append(args, strings.ToUpper(f.Method))
 	}
+	if f.Path != "" {
+		where = append(where, "path = ?")
+		args = append(args, f.Path)
+	}
+	if f.Source != "" && f.Source != "ALL" {
+		where = append(where, "source = ?")
+		args = append(args, f.Source)
+	}
 	if f.Status > 0 {
 		where = append(where, "status = ?")
 		args = append(args, f.Status)
+	} else if f.StatusStr != "" && f.StatusStr != "ALL" {
+		switch strings.ToLower(f.StatusStr) {
+		case "2xx":
+			where = append(where, "status >= 200 AND status < 300")
+		case "4xx":
+			where = append(where, "status >= 400 AND status < 500")
+		case "5xx":
+			where = append(where, "status >= 500 AND status < 600")
+		default:
+			if st, err := strconv.Atoi(f.StatusStr); err == nil {
+				where = append(where, "status = ?")
+				args = append(args, st)
+			}
+		}
 	}
 	if f.Rule != "" && f.Rule != "ALL" {
 		where = append(where, "rule = ?")
 		args = append(args, f.Rule)
 	}
 	if f.Search != "" {
-		where = append(where, "(client_ip LIKE ? OR path LIKE ? OR rule LIKE ? OR country LIKE ?)")
+		where = append(where, "(client_ip LIKE ? OR path LIKE ? OR rule LIKE ? OR country LIKE ? OR source LIKE ?)")
 		pattern := "%" + f.Search + "%"
-		args = append(args, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
 	}
+	return where, args
+}
 
-	query := "SELECT id, timestamp, time_str, client_ip, method, path, status, verdict, rule, country, country_code, latency_ms, source FROM security_events"
+// CountFiltered returns the total number of events matching the provided LogQueryFilter.
+func (s *SQLiteStore) CountFiltered(f LogQueryFilter) int64 {
+	where, args := buildWhereClause(f)
+	query := "SELECT COUNT(*) FROM security_events"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	var count int64
+	row := s.db.QueryRow(query, args...)
+	_ = row.Scan(&count)
+	return count
+}
+
+// Query retrieves events matching the provided LogQueryFilter.
+func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
+	where, args := buildWhereClause(f)
+
+	query := "SELECT id, timestamp, time_str, client_ip, method, path, status, verdict, rule, country, country_code, latency_ms, source, hash FROM security_events"
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -312,7 +475,7 @@ func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
 	for rows.Next() {
 		var ev SecurityEvent
 		var lat sql.NullFloat64
-		var rule, cCode, src sql.NullString
+		var rule, cCode, src, hStr sql.NullString
 		err := rows.Scan(
 			&ev.ID,
 			&ev.Timestamp,
@@ -327,6 +490,7 @@ func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
 			&cCode,
 			&lat,
 			&src,
+			&hStr,
 		)
 		if err != nil {
 			continue
@@ -343,7 +507,16 @@ func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
 		if src.Valid {
 			ev.Source = src.String
 		}
+		if hStr.Valid && hStr.String != "" {
+			ev.Hash = hStr.String
+		} else {
+			ev.EnsureHash()
+		}
 		events = append(events, &ev)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate events: %w", err)
 	}
 
 	return events, nil
@@ -379,8 +552,14 @@ func (s *SQLiteStore) Flush() {
 		return
 	}
 	done := make(chan struct{})
-	s.flushChan <- done
-	<-done
+	select {
+	case s.flushChan <- done:
+		select {
+		case <-done:
+		case <-s.done:
+		}
+	case <-s.done:
+	}
 }
 
 // Close gracefully flushes pending events and closes the SQLite database connection.

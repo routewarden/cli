@@ -227,7 +227,6 @@ func BenchmarkCrypto_EncryptDecrypt(b *testing.B) {
 	priv, pub, _ := crypto.GenerateKeyPair()
 	payload := []byte(`{"time":"2026-10-18T11:00:00Z","path":"/login","verdict":"BLOCK","rule":"sqli"}`)
 
-	
 	for b.Loop() {
 		enc, err := crypto.Encrypt(pub, payload)
 		if err != nil {
