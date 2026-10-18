@@ -2,6 +2,7 @@ package observability
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,9 +52,159 @@ func EnsureStackPrepared(dir string) error {
 }
 
 type containerTarget struct {
-	ID   string
-	Name string
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
+
+type SourceInfo struct {
+	Mode    string            `json:"mode"`
+	File    string            `json:"file,omitempty"`
+	Targets []containerTarget `json:"targets,omitempty"`
+}
+
+var (
+	sourceMu   sync.RWMutex
+	currSource SourceInfo
+)
+
+func updateSourceInfo(mode, file string, targets []containerTarget) {
+	sourceMu.Lock()
+	defer sourceMu.Unlock()
+	currSource = SourceInfo{
+		Mode:    mode,
+		File:    file,
+		Targets: targets,
+	}
+}
+
+func getSourceInfo() SourceInfo {
+	sourceMu.RLock()
+	defer sourceMu.RUnlock()
+	return currSource
+}
+
+const sourceBadgeInjection = `
+<style>
+#rw-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: rgba(22, 25, 34, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin: 12px 0 16px 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  color: #e2e8f0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease-in-out;
+}
+.rw-pulse {
+  width: 8px;
+  height: 8px;
+  background-color: #10b981;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: rw-pulse-anim 2s infinite;
+}
+@keyframes rw-pulse-anim {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.rw-pulse-idle {
+  width: 8px;
+  height: 8px;
+  background-color: #f59e0b;
+  border-radius: 50%;
+  display: inline-block;
+}
+.rw-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #93c5fd;
+}
+.rw-tag-id {
+  color: #94a3b8;
+  font-size: 11px;
+}
+.rw-label {
+  font-weight: 600;
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+</style>
+<script>
+(function() {
+  function createOrUpdateBar(data) {
+    var bar = document.getElementById('rw-status-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'rw-status-bar';
+      var titleElem = document.getElementById('report-title');
+      if (titleElem && titleElem.parentNode) {
+        titleElem.parentNode.insertBefore(bar, titleElem.nextSibling);
+      } else {
+        var container = document.querySelector('.container') || document.body;
+        container.insertBefore(bar, container.firstChild);
+      }
+    }
+
+    var content = '';
+    if (data.mode === 'file') {
+      content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Source:</div>';
+      content += '<span class="rw-tag">📁 ' + (data.file || 'Local Log File') + '</span>';
+    } else if (data.targets && data.targets.length > 0) {
+      content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Containers:</div>';
+      data.targets.forEach(function(t) {
+        var shortID = (t.id && t.id.length > 12) ? t.id.substring(0, 12) : t.id;
+        content += '<span class="rw-tag">🐳 ' + t.name + ' <span class="rw-tag-id">(' + shortID + ')</span></span>';
+      });
+      content += '<span style="color:#64748b; font-size:11px; margin-left:auto;">' + data.targets.length + ' active container' + (data.targets.length > 1 ? 's' : '') + '</span>';
+    } else {
+      content += '<div class="rw-label"><span class="rw-pulse-idle"></span> Auto-Discovery:</div>';
+      content += '<span style="color:#94a3b8; font-style:italic; font-size:12px;">Waiting for gateway containers with label <code>routewarden=true</code>...</span>';
+    }
+    bar.innerHTML = content;
+  }
+
+  function fetchSources() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sources', true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState === 4 && xhr.status === 200) {
+        try {
+          var data = JSON.parse(xhr.responseText);
+          createOrUpdateBar(data);
+        } catch(e) {}
+      }
+    };
+    xhr.send();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fetchSources);
+  } else {
+    fetchSources();
+  }
+  setInterval(fetchSources, 3000);
+})();
+</script>
+`
 
 type streamMsg struct {
 	Container string
@@ -207,6 +358,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	// Discover container targets or tail file
 	var targets []containerTarget
 	if file != "" {
+		updateSourceInfo("file", file, nil)
 		tailFileToLog(dashboardCtx, file, logFile)
 	} else if container != "" {
 		if found, err := findSpecificContainer(container); err == nil && len(found) > 0 {
@@ -214,11 +366,13 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		} else {
 			targets = []containerTarget{{ID: container, Name: container}}
 		}
+		updateSourceInfo("docker", "", targets)
 	} else {
 		discovered, err := discoverDockerContainers(label)
 		if err == nil && len(discovered) > 0 {
 			targets = discovered
 		}
+		updateSourceInfo("docker", "", targets)
 	}
 
 	// Prime access.log with initial logs from targets so GoAccess renders immediately
@@ -321,6 +475,12 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	wsProxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		_ = json.NewEncoder(w).Encode(getSourceInfo())
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Upgrade") == "websocket" || strings.HasPrefix(r.URL.Path, "/ws") {
 			wsProxy.ServeHTTP(w, r)
@@ -329,7 +489,14 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 
 		if _, err := os.Stat(reportPath); err == nil {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			http.ServeFile(w, r, reportPath)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			htmlBytes, err := os.ReadFile(reportPath)
+			if err != nil {
+				http.ServeFile(w, r, reportPath)
+				return
+			}
+			injected := bytes.Replace(htmlBytes, []byte("</body>"), []byte(sourceBadgeInjection+"</body>"), 1)
+			_, _ = w.Write(injected)
 			return
 		}
 
@@ -424,6 +591,17 @@ func findSpecificContainer(nameOrID string) ([]containerTarget, error) {
 func watchAndStreamContainers(ctx context.Context, label string, specificContainer string, initialTargets []containerTarget, out *os.File) {
 	var mu sync.Mutex
 	active := make(map[string]context.CancelFunc)
+	activeTargets := make(map[string]containerTarget)
+
+	syncSourceInfo := func() {
+		mu.Lock()
+		var list []containerTarget
+		for _, t := range activeTargets {
+			list = append(list, t)
+		}
+		mu.Unlock()
+		updateSourceInfo("docker", "", list)
+	}
 
 	startStream := func(target containerTarget, tailLines string) {
 		mu.Lock()
@@ -433,13 +611,17 @@ func watchAndStreamContainers(ctx context.Context, label string, specificContain
 		}
 		cCtx, cancel := context.WithCancel(ctx)
 		active[target.ID] = cancel
+		activeTargets[target.ID] = target
 		mu.Unlock()
+		syncSourceInfo()
 
 		go func() {
 			defer func() {
 				mu.Lock()
 				delete(active, target.ID)
+				delete(activeTargets, target.ID)
 				mu.Unlock()
+				syncSourceInfo()
 				if ctx.Err() == nil {
 					fmt.Printf("🛑 [Docker] Container stopped: %s (%s)\n", target.Name, target.ID[:min(12, len(target.ID))])
 				}
