@@ -2983,12 +2983,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           </select>
         </div>
 
-        <div class="filter-item">
-          <select class="filter-select" id="select-rule" title="Filter by threat rule">
-            <option value="ALL">🛡️ All Threat Rules</option>
-          </select>
-        </div>
-
         <div class="search-wrap">
           <span class="search-icon">🔍</span>
           <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
@@ -3253,7 +3247,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     country: 'ALL',
     method: 'ALL',
     status: 'ALL',
-    rule: 'ALL',
     search: '',
     ip: '',
     path: ''
@@ -3294,7 +3287,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var selectCountry = document.getElementById('select-country');
   var selectMethod = document.getElementById('select-method');
   var selectStatus = document.getElementById('select-status');
-  var selectRule = document.getElementById('select-rule');
   var chipsContainer = document.getElementById('active-chips-container');
   var chipsList = document.getElementById('chips-list');
   var modal = document.getElementById('event-modal');
@@ -3472,7 +3464,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (filters.country !== 'ALL') cmd += ' --country=' + filters.country;
     if (filters.method !== 'ALL') cmd += ' --method=' + filters.method;
     if (filters.status !== 'ALL') cmd += ' --status=' + filters.status;
-    if (filters.rule !== 'ALL') cmd += ' --rule=' + filters.rule;
     if (filters.ip) cmd += ' --ip=' + filters.ip;
     if (filters.path) cmd += ' --path=' + filters.path;
     if (filters.search) cmd += ' --grep="' + filters.search + '"';
@@ -3555,12 +3546,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderTable();
   });
 
-  selectRule.addEventListener('change', function(e) {
-    filters.rule = e.target.value;
-    renderActiveChips();
-    renderTable();
-  });
-
   searchInput.addEventListener('input', function(e) {
     filters.search = e.target.value.toLowerCase().trim();
     if (searchClearBtn) {
@@ -3636,7 +3621,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     selectCountry.value = 'ALL';
     selectMethod.value = 'ALL';
     selectStatus.value = 'ALL';
-    selectRule.value = 'ALL';
     searchInput.value = '';
     if (searchClearBtn) searchClearBtn.style.display = 'none';
 
@@ -3721,7 +3705,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (filters.country !== 'ALL') chips.push({ label: 'Country: ' + filters.country, clear: function() { filters.country = 'ALL'; selectCountry.value = 'ALL'; }});
     if (filters.method !== 'ALL') chips.push({ label: 'Method: ' + filters.method, clear: function() { filters.method = 'ALL'; selectMethod.value = 'ALL'; }});
     if (filters.status !== 'ALL') chips.push({ label: 'Status: ' + filters.status, clear: function() { filters.status = 'ALL'; selectStatus.value = 'ALL'; }});
-    if (filters.rule !== 'ALL') chips.push({ label: 'Rule: ' + filters.rule, clear: function() { filters.rule = 'ALL'; selectRule.value = 'ALL'; }});
     if (filters.search) chips.push({ label: 'Search: "' + filters.search + '"', clear: function() {
       filters.search = '';
       searchInput.value = '';
@@ -3734,7 +3717,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (selectCountry) selectCountry.classList.toggle('filter-active', filters.country !== 'ALL');
     if (selectMethod) selectMethod.classList.toggle('filter-active', filters.method !== 'ALL');
     if (selectStatus) selectStatus.classList.toggle('filter-active', filters.status !== 'ALL');
-    if (selectRule) selectRule.classList.toggle('filter-active', filters.rule !== 'ALL');
 
     updatePromptCommand();
 
@@ -3775,7 +3757,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
       if (filters.country !== 'ALL' && ev.country !== filters.country && ev.country_code !== filters.country) return false;
       if (filters.method !== 'ALL' && (ev.method || '').toUpperCase() !== filters.method) return false;
-      if (filters.rule !== 'ALL' && (ev.rule || '') !== filters.rule) return false;
       if (filters.ip && ev.client_ip !== filters.ip) return false;
       if (filters.path && ev.path !== filters.path) return false;
 
@@ -3866,7 +3847,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       else if (filters.timeRange === '24h') tDesc = 'last 24 hours';
       else if (filters.timeRange === 'custom') tDesc = 'custom time window';
       emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">⏱️</div>NO LOGS IN SELECTED TIME RANGE (' + tDesc.toUpperCase() + ')<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Select a broader time window or reset filters to view earlier security events.</div>';
-    } else if (filters.search || filters.country !== 'ALL' || filters.method !== 'ALL' || filters.status !== 'ALL' || filters.rule !== 'ALL') {
+    } else if (filters.search || filters.country !== 'ALL' || filters.method !== 'ALL' || filters.status !== 'ALL') {
       emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">🔍</div>NO EVENTS MATCHING ACTIVE FILTERS<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Click [RESET ALL FILTERS] to clear query parameters.</div>';
     }
 
@@ -3938,18 +3919,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     // Update Donut Chart
     updateDonut(clean, blocked, tarpit, total);
 
-    // Populate Rule Dropdown & List
+    // Populate Rule List
     if (stats.top_rules && stats.top_rules.length > 0) {
-      var currentSel = selectRule.value;
-      var optHTML = '<option value="ALL">All Threat Rules</option>';
-      stats.top_rules.forEach(function(r) {
-        optHTML += '<option value="' + r.name + '">' + r.name + ' (' + r.count + ')</option>';
-      });
-      if (selectRule.innerHTML !== optHTML) {
-        selectRule.innerHTML = optHTML;
-        selectRule.value = currentSel;
-      }
-
       var maxRuleCount = stats.top_rules[0].count || 1;
       var rHTML = '';
       stats.top_rules.forEach(function(r) {
@@ -4037,13 +4008,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderActiveChips();
     renderTable();
     if (latestStats) updateWorldMap(latestStats);
-  };
-
-  window.filterByRule = function(rule) {
-    filters.rule = rule;
-    selectRule.value = rule;
-    renderActiveChips();
-    renderTable();
   };
 
   window.filterByIP = function(ip) {
