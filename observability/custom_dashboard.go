@@ -1181,6 +1181,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
     :root {
       --bg-primary: #070b14;
@@ -1850,17 +1852,101 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     .map-container {
       position: relative;
-      background: radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.95), #060913);
+      background: #060913;
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 10px;
       overflow: hidden;
-      min-height: 320px;
+      height: 420px;
+      min-height: 420px;
     }
-    #world-map-svg {
+    #leaflet-map {
       width: 100%;
       height: 100%;
-      min-height: 320px;
-      display: block;
+      z-index: 1;
+      background: #060913;
+    }
+    .leaflet-container {
+      background: #060913 !important;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+    .leaflet-bar {
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.6) !important;
+      border-radius: 6px !important;
+      overflow: hidden;
+    }
+    .leaflet-bar a {
+      background-color: rgba(15, 23, 42, 0.9) !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      color: #cbd5e1 !important;
+      transition: all 0.15s;
+    }
+    .leaflet-bar a:hover {
+      background-color: rgba(30, 41, 59, 1) !important;
+      color: #38bdf8 !important;
+    }
+    .leaflet-tooltip.soc-map-tooltip {
+      background: rgba(11, 17, 32, 0.96) !important;
+      border: 1px solid rgba(56, 189, 248, 0.4) !important;
+      color: #f8fafc !important;
+      border-radius: 8px !important;
+      padding: 10px 14px !important;
+      font-size: 11px !important;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.75) !important;
+      backdrop-filter: blur(12px);
+    }
+    .leaflet-tooltip-top:before {
+      border-top-color: rgba(56, 189, 248, 0.4) !important;
+    }
+    .soc-marker-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+    }
+    .soc-marker-ring {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid;
+      animation: soc-ring-pulse 2.2s infinite ease-out;
+      pointer-events: none;
+    }
+    @keyframes soc-ring-pulse {
+      0% { transform: scale(0.3); opacity: 1; }
+      70% { transform: scale(1.6); opacity: 0.25; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .soc-marker-core {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid #070b14;
+      z-index: 2;
+      transition: transform 0.2s;
+    }
+    .soc-marker-wrap:hover .soc-marker-core {
+      transform: scale(1.35);
+    }
+    .soc-marker-label {
+      position: absolute;
+      top: -20px;
+      background: rgba(11, 17, 32, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: #f8fafc;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      transition: all 0.15s;
     }
     .map-sidebar {
       background: rgba(5, 8, 16, 0.45);
@@ -1869,7 +1955,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       padding: 12px 14px;
       display: flex;
       flex-direction: column;
-      max-height: 360px;
+      max-height: 420px;
     }
     .map-sidebar-title {
       font-size: 11px;
@@ -1910,55 +1996,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: rgba(56, 189, 248, 0.2);
       border-color: var(--accent-cyan);
     }
-    .map-tooltip {
-      position: absolute;
-      pointer-events: none;
-      background: rgba(11, 17, 32, 0.96);
-      border: 1px solid var(--card-hover-border);
-      border-radius: 6px;
-      padding: 8px 12px;
-      font-size: 11px;
-      color: #f8fafc;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
-      z-index: 100;
-      white-space: nowrap;
-      transform: translate(-50%, -120%);
-      transition: opacity 0.1s ease;
-    }
     .map-legend {
       display: flex;
       align-items: center;
       gap: 8px;
-    }
-    .map-blip {
-      cursor: pointer;
-      transition: transform 0.2s;
-    }
-    .map-dot {
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .map-dot:hover {
-      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
-    }
-    @keyframes map-pulse {
-      0% {
-        r: 6px;
-        opacity: 0.9;
-      }
-      50% {
-        r: 16px;
-        opacity: 0.35;
-      }
-      100% {
-        r: 24px;
-        opacity: 0;
-      }
-    }
-    .map-radar {
-      animation: map-pulse 2.2s infinite ease-out;
-      transform-origin: center;
-      pointer-events: none;
     }
 
     .table-container {
@@ -2500,73 +2541,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <span class="legend-dot" style="background:#f43f5e;"></span><span style="font-size:11px; color:#94a3b8;">Threats</span>
           <span class="legend-dot" style="background:#f59e0b;"></span><span style="font-size:11px; color:#94a3b8;">Tarpit</span>
         </div>
-        <span style="font-size:11px; color:var(--text-muted);">Click any country on map or list to filter</span>
+        <button id="btn-reset-map" onclick="resetMapZoom()" title="Reset map view to world" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; border-radius:6px; padding:3px 9px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.15s;">⟲ Reset View</button>
+        <span style="font-size:11px; color:var(--text-muted);">Click any country to filter</span>
       </div>
     </div>
     <div class="map-body">
       <div class="map-container">
-        <svg id="world-map-svg" viewBox="0 0 1000 480" preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <radialGradient id="ocean-grad" cx="50%" cy="50%" r="60%">
-              <stop offset="0%" stop-color="#0c1631" />
-              <stop offset="100%" stop-color="#060913" />
-            </radialGradient>
-            <filter id="blip-glow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-
-          <!-- Ocean / Deep Space Background -->
-          <rect width="1000" height="480" fill="url(#ocean-grad)" rx="10" />
-
-          <!-- Graticule & Coordinate Grid -->
-          <g stroke="rgba(56, 189, 248, 0.05)" stroke-width="1">
-            <line x1="0" y1="80" x2="1000" y2="80" />
-            <line x1="0" y1="160" x2="1000" y2="160" />
-            <line x1="0" y1="240" x2="1000" y2="240" stroke="rgba(56, 189, 248, 0.15)" stroke-dasharray="4,4" />
-            <line x1="0" y1="320" x2="1000" y2="320" />
-            <line x1="0" y1="400" x2="1000" y2="400" />
-            
-            <line x1="150" y1="0" x2="150" y2="480" />
-            <line x1="300" y1="0" x2="300" y2="480" />
-            <line x1="450" y1="0" x2="450" y2="480" />
-            <line x1="600" y1="0" x2="600" y2="480" />
-            <line x1="750" y1="0" x2="750" y2="480" />
-            <line x1="900" y1="0" x2="900" y2="480" />
-          </g>
-
-          <!-- Continents Vector Layer -->
-          <g class="continents-layer" fill="rgba(30, 41, 59, 0.65)" stroke="rgba(56, 189, 248, 0.22)" stroke-width="1.2" stroke-linejoin="round">
-            <!-- North & Central America -->
-            <path d="M 105,75 L 140,45 L 210,40 L 250,55 L 290,45 L 305,70 L 280,105 L 255,95 L 250,115 L 285,145 L 270,180 L 230,195 L 190,215 L 175,210 L 170,175 L 135,160 L 115,120 L 95,95 Z M 175,210 L 220,240 L 250,230 L 260,250 L 220,255 L 180,225 Z" />
-            <!-- Greenland -->
-            <path d="M 330,45 L 375,35 L 400,60 L 370,100 L 345,95 L 330,65 Z" />
-            <!-- South America -->
-            <path d="M 250,240 L 290,245 L 345,260 L 370,300 L 350,340 L 315,385 L 290,430 L 275,430 L 270,370 L 260,310 L 245,270 Z" />
-            <!-- Europe -->
-            <path d="M 450,125 L 470,95 L 510,80 L 530,100 L 520,125 L 545,135 L 550,165 L 515,185 L 480,185 L 460,170 L 440,150 Z" />
-            <path d="M 495,50 L 535,45 L 550,85 L 525,105 L 500,85 Z" />
-            <path d="M 450,110 L 465,100 L 475,125 L 455,140 Z" />
-            <!-- Africa -->
-            <path d="M 450,185 L 520,185 L 565,215 L 590,265 L 565,335 L 540,375 L 515,370 L 485,305 L 450,250 L 440,205 Z" />
-            <path d="M 600,320 L 610,310 L 615,345 L 605,355 Z" />
-            <!-- Asia -->
-            <path d="M 550,135 L 610,75 L 710,60 L 800,65 L 890,95 L 870,140 L 810,165 L 775,145 L 755,190 L 780,240 L 745,265 L 720,255 L 700,210 L 675,235 L 635,215 L 600,185 L 565,180 Z" />
-            <path d="M 840,150 L 855,140 L 860,175 L 845,185 Z" />
-            <!-- Oceania & Australia -->
-            <path d="M 790,320 L 850,305 L 880,340 L 860,380 L 805,380 L 775,345 Z" />
-            <path d="M 905,375 L 920,370 L 925,410 L 910,410 Z" />
-            <path d="M 720,265 L 755,270 L 785,285 L 760,295 Z M 800,260 L 830,270 L 825,290 Z" />
-          </g>
-
-          <!-- Dynamic Radar Threat Blips Layer -->
-          <g id="map-blips-group"></g>
-        </svg>
-        <div id="map-tooltip" class="map-tooltip" style="display:none;"></div>
+        <div id="leaflet-map"></div>
       </div>
       <div class="map-sidebar">
         <div class="map-sidebar-title">
@@ -3128,65 +3109,126 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (latestStats) updateWorldMap(latestStats);
   };
 
-  // Geographic coordinates for world countries on 1000x480 SVG map
+  // Precise GPS coordinates (latitude, longitude) for countries worldwide
   var countryCoords = {
-    'US': { x: 215, y: 155, name: 'United States' },
-    'CA': { x: 210, y: 105, name: 'Canada' },
-    'MX': { x: 195, y: 200, name: 'Mexico' },
-    'BR': { x: 335, y: 295, name: 'Brazil' },
-    'AR': { x: 300, y: 365, name: 'Argentina' },
-    'CL': { x: 275, y: 350, name: 'Chile' },
-    'CO': { x: 260, y: 235, name: 'Colombia' },
-    'PE': { x: 255, y: 275, name: 'Peru' },
-    'VE': { x: 285, y: 220, name: 'Venezuela' },
-    'GB': { x: 472, y: 122, name: 'United Kingdom' },
-    'IE': { x: 455, y: 124, name: 'Ireland' },
-    'FR': { x: 480, y: 142, name: 'France' },
-    'DE': { x: 504, y: 130, name: 'Germany' },
-    'NL': { x: 492, y: 126, name: 'Netherlands' },
-    'BE': { x: 485, y: 132, name: 'Belgium' },
-    'ES': { x: 465, y: 165, name: 'Spain' },
-    'PT': { x: 450, y: 168, name: 'Portugal' },
-    'IT': { x: 512, y: 158, name: 'Italy' },
-    'CH': { x: 496, y: 146, name: 'Switzerland' },
-    'AT': { x: 515, y: 144, name: 'Austria' },
-    'SE': { x: 520, y: 92,  name: 'Sweden' },
-    'NO': { x: 500, y: 95,  name: 'Norway' },
-    'FI': { x: 545, y: 88,  name: 'Finland' },
-    'DK': { x: 498, y: 110, name: 'Denmark' },
-    'PL': { x: 532, y: 128, name: 'Poland' },
-    'CZ': { x: 516, y: 136, name: 'Czech Republic' },
-    'UA': { x: 575, y: 134, name: 'Ukraine' },
-    'RO': { x: 555, y: 150, name: 'Romania' },
-    'HU': { x: 535, y: 146, name: 'Hungary' },
-    'GR': { x: 540, y: 175, name: 'Greece' },
-    'RU': { x: 670, y: 95,  name: 'Russia' },
-    'TR': { x: 565, y: 170, name: 'Turkey' },
-    'CN': { x: 745, y: 175, name: 'China' },
-    'JP': { x: 845, y: 168, name: 'Japan' },
-    'KR': { x: 808, y: 170, name: 'South Korea' },
-    'IN': { x: 670, y: 205, name: 'India' },
-    'PK': { x: 640, y: 190, name: 'Pakistan' },
-    'BD': { x: 698, y: 208, name: 'Bangladesh' },
-    'SG': { x: 740, y: 260, name: 'Singapore' },
-    'MY': { x: 736, y: 252, name: 'Malaysia' },
-    'ID': { x: 775, y: 280, name: 'Indonesia' },
-    'PH': { x: 800, y: 228, name: 'Philippines' },
-    'TH': { x: 728, y: 218, name: 'Thailand' },
-    'VN': { x: 742, y: 220, name: 'Vietnam' },
-    'TW': { x: 792, y: 200, name: 'Taiwan' },
-    'HK': { x: 765, y: 205, name: 'Hong Kong' },
-    'AU': { x: 835, y: 340, name: 'Australia' },
-    'NZ': { x: 915, y: 385, name: 'New Zealand' },
-    'ZA': { x: 540, y: 340, name: 'South Africa' },
-    'EG': { x: 548, y: 195, name: 'Egypt' },
-    'NG': { x: 495, y: 235, name: 'Nigeria' },
-    'KE': { x: 575, y: 255, name: 'Kenya' },
-    'MA': { x: 445, y: 185, name: 'Morocco' },
-    'SA': { x: 585, y: 205, name: 'Saudi Arabia' },
-    'AE': { x: 615, y: 202, name: 'United Arab Emirates' },
-    'IL': { x: 554, y: 180, name: 'Israel' }
+    'US': { lat: 37.0902, lon: -95.7129, name: 'United States' },
+    'CA': { lat: 56.1304, lon: -106.3468, name: 'Canada' },
+    'MX': { lat: 23.6345, lon: -102.5528, name: 'Mexico' },
+    'BR': { lat: -14.2350, lon: -51.9253, name: 'Brazil' },
+    'AR': { lat: -38.4161, lon: -63.6167, name: 'Argentina' },
+    'CL': { lat: -35.6751, lon: -71.5430, name: 'Chile' },
+    'CO': { lat: 4.5709, lon: -74.2973, name: 'Colombia' },
+    'PE': { lat: -9.1900, lon: -75.0152, name: 'Peru' },
+    'VE': { lat: 6.4238, lon: -66.5897, name: 'Venezuela' },
+    'EC': { lat: -1.8312, lon: -78.1834, name: 'Ecuador' },
+    'GB': { lat: 55.3781, lon: -3.4360, name: 'United Kingdom' },
+    'IE': { lat: 53.1424, lon: -7.6921, name: 'Ireland' },
+    'FR': { lat: 46.2276, lon: 2.2137, name: 'France' },
+    'DE': { lat: 51.1657, lon: 10.4515, name: 'Germany' },
+    'NL': { lat: 52.1326, lon: 5.2913, name: 'Netherlands' },
+    'BE': { lat: 50.5039, lon: 4.4699, name: 'Belgium' },
+    'LU': { lat: 49.8153, lon: 6.1296, name: 'Luxembourg' },
+    'ES': { lat: 40.4637, lon: -3.7492, name: 'Spain' },
+    'PT': { lat: 39.3999, lon: -8.2245, name: 'Portugal' },
+    'IT': { lat: 41.8719, lon: 12.5674, name: 'Italy' },
+    'CH': { lat: 46.8182, lon: 8.2275, name: 'Switzerland' },
+    'AT': { lat: 47.5162, lon: 14.5501, name: 'Austria' },
+    'SE': { lat: 60.1282, lon: 18.6435, name: 'Sweden' },
+    'NO': { lat: 60.4720, lon: 8.4689, name: 'Norway' },
+    'FI': { lat: 61.9241, lon: 25.7482, name: 'Finland' },
+    'DK': { lat: 56.2639, lon: 9.5018, name: 'Denmark' },
+    'IS': { lat: 64.9631, lon: -19.0208, name: 'Iceland' },
+    'PL': { lat: 51.9194, lon: 19.1451, name: 'Poland' },
+    'CZ': { lat: 49.8175, lon: 15.4730, name: 'Czech Republic' },
+    'SK': { lat: 48.6690, lon: 19.6990, name: 'Slovakia' },
+    'HU': { lat: 47.1625, lon: 19.5033, name: 'Hungary' },
+    'RO': { lat: 45.9432, lon: 24.9668, name: 'Romania' },
+    'BG': { lat: 42.7339, lon: 25.4858, name: 'Bulgaria' },
+    'UA': { lat: 48.3794, lon: 31.1656, name: 'Ukraine' },
+    'EE': { lat: 58.5953, lon: 25.0136, name: 'Estonia' },
+    'LV': { lat: 56.8796, lon: 24.6032, name: 'Latvia' },
+    'LT': { lat: 55.1694, lon: 23.8813, name: 'Lithuania' },
+    'GR': { lat: 39.0742, lon: 21.8243, name: 'Greece' },
+    'CY': { lat: 35.1264, lon: 33.4299, name: 'Cyprus' },
+    'HR': { lat: 45.1000, lon: 15.2000, name: 'Croatia' },
+    'SI': { lat: 46.1512, lon: 14.9955, name: 'Slovenia' },
+    'RS': { lat: 44.0165, lon: 21.0059, name: 'Serbia' },
+    'RU': { lat: 61.5240, lon: 105.3188, name: 'Russia' },
+    'TR': { lat: 38.9637, lon: 35.2433, name: 'Turkey' },
+    'CN': { lat: 35.8617, lon: 104.1954, name: 'China' },
+    'JP': { lat: 36.2048, lon: 138.2529, name: 'Japan' },
+    'KR': { lat: 35.9078, lon: 127.7669, name: 'South Korea' },
+    'IN': { lat: 20.5937, lon: 78.9629, name: 'India' },
+    'PK': { lat: 30.3753, lon: 69.3451, name: 'Pakistan' },
+    'BD': { lat: 23.6850, lon: 90.3563, name: 'Bangladesh' },
+    'LK': { lat: 7.8731, lon: 80.7718, name: 'Sri Lanka' },
+    'SG': { lat: 1.3521, lon: 103.8198, name: 'Singapore' },
+    'MY': { lat: 4.2105, lon: 101.9758, name: 'Malaysia' },
+    'ID': { lat: -0.7893, lon: 113.9213, name: 'Indonesia' },
+    'PH': { lat: 12.8797, lon: 121.7740, name: 'Philippines' },
+    'TH': { lat: 15.8700, lon: 100.9925, name: 'Thailand' },
+    'VN': { lat: 14.0583, lon: 108.2772, name: 'Vietnam' },
+    'TW': { lat: 23.6978, lon: 120.9605, name: 'Taiwan' },
+    'HK': { lat: 22.3193, lon: 114.1694, name: 'Hong Kong' },
+    'AU': { lat: -25.2744, lon: 133.7751, name: 'Australia' },
+    'NZ': { lat: -40.9006, lon: 174.8860, name: 'New Zealand' },
+    'ZA': { lat: -30.5595, lon: 22.9375, name: 'South Africa' },
+    'EG': { lat: 26.8206, lon: 30.8025, name: 'Egypt' },
+    'NG': { lat: 9.0820, lon: 8.6753, name: 'Nigeria' },
+    'KE': { lat: -0.0236, lon: 37.9062, name: 'Kenya' },
+    'MA': { lat: 31.7917, lon: -7.0926, name: 'Morocco' },
+    'DZ': { lat: 28.0339, lon: 1.6596, name: 'Algeria' },
+    'SA': { lat: 23.8859, lon: 45.0792, name: 'Saudi Arabia' },
+    'AE': { lat: 23.4241, lon: 53.8478, name: 'United Arab Emirates' },
+    'IL': { lat: 31.0461, lon: 34.8516, name: 'Israel' },
+    'QA': { lat: 25.3548, lon: 51.1839, name: 'Qatar' },
+    'KW': { lat: 29.3117, lon: 47.4818, name: 'Kuwait' }
   };
+
+  var leafletMap = null;
+  var mapMarkersLayer = null;
+
+  function initLeafletMap() {
+    if (typeof L === 'undefined') return;
+    var container = document.getElementById('leaflet-map');
+    if (!container || leafletMap) return;
+
+    try {
+      leafletMap = L.map('leaflet-map', {
+        center: [22, 10],
+        zoom: 2,
+        minZoom: 1.5,
+        maxZoom: 12,
+        zoomControl: false,
+        attributionControl: false
+      });
+
+      L.control.zoom({ position: 'topright' }).addTo(leafletMap);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        subdomains: 'abcd',
+        maxZoom: 19
+      }).addTo(leafletMap);
+
+      mapMarkersLayer = L.layerGroup().addTo(leafletMap);
+
+      setTimeout(function() {
+        if (leafletMap) leafletMap.invalidateSize();
+      }, 300);
+    } catch(e) {
+      console.warn('Map initialization error:', e);
+    }
+  }
+
+  window.resetMapZoom = function() {
+    if (leafletMap) {
+      leafletMap.setView([22, 10], 2);
+    }
+  };
+
+  window.addEventListener('resize', function() {
+    if (leafletMap) leafletMap.invalidateSize();
+  });
 
   function updateWorldMap(stats) {
     if (!stats) return;
@@ -3196,15 +3238,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       countEl.textContent = countries.length + (countries.length === 1 ? ' Country Detected' : ' Countries Detected');
     }
 
-    // 1. Render Blips on SVG map
-    var blipsGroup = document.getElementById('map-blips-group');
-    if (blipsGroup) {
-      var blipsHTML = '';
+    if (!leafletMap && typeof L !== 'undefined') {
+      initLeafletMap();
+    }
+
+    // 1. Render Interactive Markers on Leaflet map
+    if (leafletMap && mapMarkersLayer) {
+      mapMarkersLayer.clearLayers();
+
       countries.forEach(function(c) {
         var code = (c.country_code || '').toUpperCase();
         if (!code || code === 'LAN' || code === 'LOCAL') return;
-        var coord = countryCoords[code];
-        if (!coord) return;
+        var geo = countryCoords[code];
+        if (!geo) return;
 
         var total = c.count || 0;
         var blocked = c.blocked || 0;
@@ -3217,23 +3263,50 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         else if (tarpit > 0) color = '#f59e0b';
 
         var flag = getFlagEmoji(code);
-        var r = Math.min(14, Math.max(6, 6 + Math.log2(total || 1) * 2));
         var isFilterActive = filters.country === c.name || filters.country === code;
 
-        blipsHTML += '<g class="map-blip" onclick="filterByCountry(\'' + c.name + '\')">' +
-          '<circle class="map-radar" cx="' + coord.x + '" cy="' + coord.y + '" stroke="' + color + '" fill="none" />' +
-          '<circle class="map-dot" cx="' + coord.x + '" cy="' + coord.y + '" r="' + r + '" fill="' + color + '" ' +
-            'stroke="' + (isFilterActive ? '#38bdf8' : '#070b14') + '" stroke-width="' + (isFilterActive ? '3' : '1.5') + '" ' +
-            'filter="url(#blip-glow)" ' +
-            'onmouseenter="showMapTooltip(event, \'' + c.name + '\', \'' + code + '\', ' + total + ', ' + blocked + ', ' + tarpit + ', ' + clean + ')" ' +
-            'onmouseleave="hideMapTooltip()" />' +
-          '<text x="' + coord.x + '" y="' + (coord.y - r - 4) + '" text-anchor="middle" font-size="10" font-weight="700" fill="#f8fafc" font-family="JetBrains Mono, monospace" pointer-events="none">' + flag + ' ' + total + '</text>' +
-        '</g>';
+        var markerHtml = '<div class="soc-marker-wrap">' +
+          '<div class="soc-marker-ring" style="border-color:' + color + ';"></div>' +
+          '<div class="soc-marker-core" style="background:' + color + '; box-shadow:0 0 10px ' + color + ';"></div>' +
+          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1.5px solid #38bdf8; box-shadow:0 0 8px #38bdf8;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
+        '</div>';
+
+        var customIcon = L.divIcon({
+          className: 'soc-leaflet-div-icon',
+          html: markerHtml,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        });
+
+        var marker = L.marker([geo.lat, geo.lon], { icon: customIcon });
+
+        var blockRate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
+        var tipHtml = '<div style="font-weight:700; font-size:13px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">' +
+            '<span>' + flag + '</span> <span>' + (geo.name || c.name) + '</span> <span style="font-size:10px; color:#94a3b8; font-weight:normal;">[' + code + ']</span>' +
+          '</div>' +
+          '<div style="display:grid; grid-template-columns:auto auto; gap:3px 14px; font-family:JetBrains Mono, monospace; font-size:11px;">' +
+            '<span style="color:#94a3b8;">Total Hits:</span><b style="color:#f8fafc;">' + Number(total).toLocaleString() + '</b>' +
+            '<span style="color:#94a3b8;">Threat Blocks:</span><b style="color:#fb7185;">' + blocked + ' (' + blockRate + ')</b>' +
+            '<span style="color:#94a3b8;">Tarpit Throttled:</span><b style="color:#fcd34d;">' + tarpit + '</b>' +
+            '<span style="color:#94a3b8;">Clean Ingress:</span><b style="color:#6ee7b7;">' + clean + '</b>' +
+          '</div>' +
+          '<div style="font-size:10px; color:#38bdf8; margin-top:6px; text-align:right;">Click marker to filter ➔</div>';
+
+        marker.bindTooltip(tipHtml, {
+          direction: 'top',
+          className: 'soc-map-tooltip',
+          offset: [0, -14]
+        });
+
+        marker.on('click', function() {
+          filterByCountry(c.name);
+        });
+
+        marker.addTo(mapMarkersLayer);
       });
-      blipsGroup.innerHTML = blipsHTML;
     }
 
-    // 2. Render Sidebar list
+    // 2. Render Sidebar country breakdown
     var listEl = document.getElementById('map-countries-list');
     if (listEl) {
       if (countries.length === 0) {
@@ -3274,36 +3347,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       listEl.innerHTML = listHTML;
     }
   }
-
-  window.showMapTooltip = function(e, name, code, total, blocked, tarpit, clean) {
-    var tooltip = document.getElementById('map-tooltip');
-    if (!tooltip) return;
-    var flag = getFlagEmoji(code);
-    var blockRate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
-    tooltip.innerHTML = '<div style="font-weight:700; font-size:12px; margin-bottom:4px; display:flex; align-items:center; gap:6px;">' + flag + ' ' + name + ' <span style="font-size:10px; color:#94a3b8; font-weight:normal;">[' + code + ']</span></div>' +
-      '<div style="display:grid; grid-template-columns:auto auto; gap:3px 12px; font-family:JetBrains Mono, monospace; font-size:11px;">' +
-        '<span style="color:#94a3b8;">Total Hits:</span><b style="color:#f8fafc;">' + Number(total).toLocaleString() + '</b>' +
-        '<span style="color:#94a3b8;">Threat Blocks:</span><b style="color:#fb7185;">' + blocked + ' (' + blockRate + ')</b>' +
-        '<span style="color:#94a3b8;">Tarpit Throttled:</span><b style="color:#fcd34d;">' + tarpit + '</b>' +
-        '<span style="color:#94a3b8;">Clean Ingress:</span><b style="color:#6ee7b7;">' + clean + '</b>' +
-      '</div>' +
-      '<div style="font-size:10px; color:#38bdf8; margin-top:6px; text-align:right;">Click to filter logs ➔</div>';
-
-    var container = document.querySelector('.map-container');
-    if (container) {
-      var rect = container.getBoundingClientRect();
-      var x = e.clientX - rect.left;
-      var y = e.clientY - rect.top;
-      tooltip.style.left = x + 'px';
-      tooltip.style.top = y + 'px';
-      tooltip.style.display = 'block';
-    }
-  };
-
-  window.hideMapTooltip = function() {
-    var tooltip = document.getElementById('map-tooltip');
-    if (tooltip) tooltip.style.display = 'none';
-  };
 
   window.filterByRule = function(rule) {
     filters.rule = rule;
