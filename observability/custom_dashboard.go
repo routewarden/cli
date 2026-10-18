@@ -2937,7 +2937,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="chart-card">
       <div class="card-cap">
         <span>🎯 TOP TARGETED ENDPOINTS</span>
-        <span style="font-size:10.5px; color:var(--overlay);">Click row to filter</span>
       </div>
       <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
