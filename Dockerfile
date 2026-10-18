@@ -10,7 +10,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build the Go binary on native platform with cross-compilation
 # ──────────────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
