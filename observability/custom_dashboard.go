@@ -1177,1305 +1177,1294 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RouteWarden — Security Operations Center & Gateway Intelligence</title>
+  <title>RouteWarden — SOC INTELLIGENCE & Gateway Threat Defense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
+    /* ═══════════════════════════════════════════════════════════════
+       Catppuccin Mocha Terminal Theme (claude-tui Inspired)
+       ═══════════════════════════════════════════════════════════════ */
     :root {
-      --bg-primary: #070b14;
-      --bg-secondary: #0b1120;
-      --card-bg: rgba(15, 23, 42, 0.72);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --card-hover-border: rgba(56, 189, 248, 0.35);
-      --accent-cyan: #38bdf8;
-      --accent-blue: #60a5fa;
-      --accent-indigo: #6366f1;
-      --accent-green: #10b981;
-      --accent-red: #f43f5e;
-      --accent-amber: #f59e0b;
-      --accent-purple: #a855f7;
-      --text-primary: #f8fafc;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
+      --crust: #11111b;
+      --base: #181825;
+      --panel: #1e1e2e;
+      --surface: #313244;
+      --surface-hi: #45475a;
+      --line: #282838;
+      --line-hi: #3b3b4f;
+      --overlay: #6c7086;
+      --subtext: #a6adc8;
+      --text: #cdd6f4;
+      --text-hi: #ffffff;
+
+      --green: #a6e3a1;
+      --teal: #94e2d5;
+      --yellow: #f9e2af;
+      --peach: #fab387;
+      --pink: #f38ba8;
+      --mauve: #cba6f7;
+      --blue: #89b4fa;
+
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      --col: 1540px;
     }
 
-    * {
+    *, *::before, *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
-    body {
-      background-color: var(--bg-primary);
-      background-image: 
-        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.08) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
-        radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.5) 0px, transparent 100%);
-      background-attachment: fixed;
-      color: var(--text-primary);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow-x: hidden;
+    html, body {
+      background: var(--crust);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.5;
+      font-variant-numeric: tabular-nums;
       -webkit-font-smoothing: antialiased;
     }
 
-    .dashboard-wrap {
-      max-width: 1540px;
-      margin: 0 auto;
-      padding: 20px 24px 40px 24px;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
+    a {
+      color: var(--teal);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
     }
 
-    /* Top Header Bar */
-    header.soc-header {
+    /* ── Sticky Top Terminal Bar (.bar) ──────────────────── */
+    .bar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: rgba(24, 24, 37, 0.94);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      padding: 8px 18px;
       display: flex;
-      flex-wrap: wrap;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       gap: 16px;
-      background: var(--card-bg);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 14px 22px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      font-size: 11.5px;
     }
-
-    .brand-wrap {
+    .bar-left {
       display: flex;
       align-items: center;
       gap: 12px;
-    }
-    .brand-logo {
-      font-size: 26px;
-      filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.6));
-    }
-    .brand-title {
-      font-size: 19px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #ffffff 40%, #93c5fd 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .brand-badge {
-      font-size: 11px;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      background: rgba(99, 102, 241, 0.2);
-      color: #c7d2fe;
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      padding: 2px 8px;
-      border-radius: 6px;
+      color: var(--text-hi);
+      letter-spacing: 0.5px;
     }
-
-    .header-actions {
+    .bar-mid {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 16px;
+      color: var(--subtext);
     }
-
-    .live-indicator {
-      display: inline-flex;
+    .bar-right {
+      display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #6ee7b7;
-    }
-    .pulse-dot {
-      width: 8px;
-      height: 8px;
-      background-color: var(--accent-green);
-      border-radius: 50%;
-      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-      animation: pulse-anim 2s infinite;
-    }
-    @keyframes pulse-anim {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-      70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
 
-    .btn-action {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: #cbd5e1;
-      padding: 7px 14px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      display: inline-block;
+      animation: pulse-ring 2s infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* ── Terminal Buttons (.tui-btn) ─────────────────────── */
+    .tui-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border: 1px solid var(--line-hi);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 3px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s ease;
+      transition: all 0.12s ease;
+      white-space: nowrap;
     }
-    .btn-action:hover {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: rgba(56, 189, 248, 0.4);
-      color: #38bdf8;
-      box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+    .tui-btn:hover {
+      background: var(--surface);
+      border-color: var(--overlay);
+      color: var(--text-hi);
+    }
+    .tui-btn.active {
+      background: var(--surface);
+      border-color: var(--teal);
+      color: var(--teal);
     }
 
-    /* Monitored Sources Ribbon */
+    /* ── Main Container ──────────────────────────────────── */
+    .wrap {
+      max-width: var(--col);
+      margin: 0 auto;
+      padding: 18px 20px 60px;
+    }
+
+    /* ── Masthead with ASCII Wordmark & Spec Datasheet ───── */
+    .masthead {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 24px;
+      align-items: start;
+      margin: 10px 0 20px;
+    }
+    @media (max-width: 1080px) {
+      .masthead { grid-template-columns: 1fr; gap: 16px; }
+    }
+
+    .wordmark {
+      margin: 0 0 10px;
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: clamp(6.5px, 0.95vw, 10px);
+      line-height: 1.15;
+      white-space: pre;
+      color: var(--text);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .wordmark .hl { color: var(--green); }
+    .wordmark .sub { color: var(--teal); }
+
+    .lede {
+      color: var(--subtext);
+      font-size: 12.5px;
+      margin: 0 0 4px;
+    }
+    .lede.tight {
+      color: var(--overlay);
+      font-size: 11.5px;
+    }
+
+    /* Datasheet (.spec) */
+    .spec {
+      border: 1px solid var(--line);
+      background: var(--base);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .spec div {
+      display: flex;
+      gap: 14px;
+      padding: 6px 12px;
+      font-size: 11.5px;
+      border-bottom: 1px solid var(--line);
+    }
+    .spec div:last-child {
+      border-bottom: 0;
+    }
+    .spec dt {
+      color: var(--overlay);
+      width: 8.5em;
+      flex: none;
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .spec dd {
+      margin: 0;
+      color: var(--text);
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    /* ── Sources Ribbon ──────────────────────────────────── */
     .sources-ribbon {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 10px;
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 10px 16px;
-      font-size: 12px;
-      color: var(--text-secondary);
+      gap: 8px;
+      background: var(--base);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 7px 12px;
+      font-size: 11px;
+      color: var(--subtext);
+      margin-bottom: 20px;
     }
     .source-tag {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-family: 'JetBrains Mono', monospace;
+      background: var(--panel);
+      border: 1px solid var(--line-hi);
+      padding: 2px 7px;
+      border-radius: 3px;
+      color: var(--text);
       font-size: 11px;
-      color: #93c5fd;
     }
 
-    /* Executive KPI Grid */
+    /* ── Section Headings (.head) ────────────────────────── */
+    .head {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin: 24px 0 10px;
+    }
+    .head h2 {
+      font-size: 11.5px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--green);
+      margin: 0;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .head .rule {
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+    .head .cmd {
+      color: var(--overlay);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    /* ── Terminal Window Frame (.term) ───────────────────── */
+    .term {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .term .cap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--subtext);
+      background: var(--base);
+    }
+    .term .cap span:first-child {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    /* ── Section 01: KPI Spec Cards ──────────────────────── */
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
     }
     .kpi-card {
-      background: var(--card-bg);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 18px 20px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--line);
+      background: var(--base);
+      border-radius: 4px;
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      position: relative;
-      overflow: hidden;
-      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      gap: 8px;
+      transition: border-color 0.15s ease;
     }
     .kpi-card:hover {
-      transform: translateY(-2px);
-      border-color: var(--card-hover-border);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      border-color: var(--line-hi);
     }
     .kpi-top {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      margin-bottom: 10px;
+      align-items: center;
     }
     .kpi-label {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.07em;
+      font-size: 10.5px;
+      letter-spacing: 1px;
       text-transform: uppercase;
-      color: var(--text-secondary);
-    }
-    .kpi-icon {
-      font-size: 20px;
-      opacity: 0.85;
+      color: var(--overlay);
+      font-weight: 600;
     }
     .kpi-val {
-      font-size: 32px;
-      font-weight: 800;
-      font-family: 'JetBrains Mono', monospace;
-      color: #ffffff;
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-hi);
       line-height: 1.1;
-      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-meter {
+      font-size: 11px;
+      color: var(--subtext);
+      font-weight: 500;
+      letter-spacing: 0.5px;
     }
     .kpi-sub {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 8px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .pill-threat {
-      background: rgba(244, 63, 94, 0.16);
-      color: #fb7185;
-      border: 1px solid rgba(244, 63, 94, 0.35);
-      padding: 2px 7px;
-      border-radius: 5px;
       font-size: 11px;
-      font-weight: 700;
-    }
-    .pill-tarpit {
-      background: rgba(245, 158, 11, 0.16);
-      color: #fcd34d;
-      border: 1px solid rgba(245, 158, 11, 0.35);
-      padding: 2px 7px;
-      border-radius: 5px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .pill-clean {
-      background: rgba(16, 185, 129, 0.16);
-      color: #6ee7b7;
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      padding: 2px 7px;
-      border-radius: 5px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .pill-cipher {
-      background: rgba(168, 85, 247, 0.16);
-      color: #d8b4fe;
-      border: 1px solid rgba(168, 85, 247, 0.35);
-      padding: 2px 7px;
-      border-radius: 5px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-
-    /* Charts Section */
-    .charts-grid {
-      display: grid;
-      grid-template-columns: 2.1fr 1fr;
-      gap: 20px;
-    }
-    @media (max-width: 1080px) {
-      .charts-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .chart-card {
-      background: var(--card-bg);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 20px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      color: var(--overlay);
       display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-width: 0;
-    }
-    .card-header {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      min-height: 28px;
-    }
-    .card-title {
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    /* Timeline Controls & Legend */
-    .timeline-legend {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      font-size: 11px;
-      font-weight: 600;
-      flex-wrap: wrap;
-    }
-    .legend-item {
-      display: inline-flex;
       align-items: center;
       gap: 6px;
-      cursor: pointer;
-      user-select: none;
-      transition: opacity 0.2s;
-    }
-    .legend-item.dimmed {
-      opacity: 0.35;
-    }
-    .legend-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 3px;
     }
 
-    .timeline-container {
-      width: 100%;
-      height: 260px;
-      position: relative;
-      overflow: hidden;
-      border-radius: 10px;
-      background: rgba(5, 8, 16, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.04);
+    .tui-tag {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10.5px;
+      font-weight: 600;
+      border: 1px solid transparent;
     }
-    .timeline-svg {
+    .tag-pink {
+      background: rgba(243, 139, 168, 0.12);
+      border-color: rgba(243, 139, 168, 0.35);
+      color: var(--pink);
+    }
+    .tag-yellow {
+      background: rgba(249, 226, 175, 0.12);
+      border-color: rgba(249, 226, 175, 0.35);
+      color: var(--yellow);
+    }
+    .tag-green {
+      background: rgba(166, 227, 161, 0.12);
+      border-color: rgba(166, 227, 161, 0.35);
+      color: var(--green);
+    }
+    .tag-teal {
+      background: rgba(148, 226, 213, 0.12);
+      border-color: rgba(148, 226, 213, 0.35);
+      color: var(--teal);
+    }
+
+    /* ── Section 02: World Map & Detection Layout ────────── */
+    .map-body {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      min-height: 420px;
+    }
+    @media (max-width: 1024px) {
+      .map-body { grid-template-columns: 1fr; }
+    }
+    .map-stage {
+      position: relative;
+      background: var(--crust);
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+    }
+    @media (max-width: 1024px) {
+      .map-stage { border-right: none; border-bottom: 1px solid var(--line); }
+    }
+    #ascii-map-container {
+      position: relative;
+      width: 100%;
+      height: 420px;
+    }
+    #ascii-matrix-canvas {
       width: 100%;
       height: 100%;
       display: block;
     }
-
-    /* Non-Overlapping HUD Chart Tooltip */
-    .chart-tooltip {
-      position: absolute;
-      display: none;
-      pointer-events: none;
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), 0 0 15px rgba(56, 189, 248, 0.2);
-      z-index: 50;
-      line-height: 1.5;
-      transform: translateX(-50%);
-      top: 12px;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-    }
-
-    /* Donut & Rules Stack */
-    .donut-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 20px;
-      padding: 8px 0;
-      flex-wrap: wrap;
-    }
-    .donut-svg {
-      width: 120px;
-      height: 120px;
-      transform: rotate(-90deg);
-      flex-shrink: 0;
-    }
-    .donut-legend {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
-      min-width: 120px;
-    }
-
-    /* Rules Progress Bars */
-    .rules-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      max-height: 190px;
-      overflow-y: auto;
-      padding-right: 4px;
-    }
-    .rules-list::-webkit-scrollbar {
-      width: 4px;
-    }
-    .rules-list::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.15);
-      border-radius: 4px;
-    }
-    .rule-item {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      cursor: pointer;
-      padding: 6px 8px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      transition: background 0.15s ease, border-color 0.15s ease;
-    }
-    .rule-item:hover {
-      background: rgba(56, 189, 248, 0.08);
-      border-color: rgba(56, 189, 248, 0.25);
-    }
-    .rule-meta {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .rule-name {
-      color: #e2e8f0;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 170px;
-      min-width: 0;
-    }
-    .rule-count {
-      color: #94a3b8;
-      flex-shrink: 0;
-      font-size: 10px;
-    }
-    .rule-bar-wrap {
-      width: 100%;
-      height: 5px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .rule-bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      background: linear-gradient(90deg, #6366f1, #38bdf8);
-      transition: width 0.4s ease;
-    }
-
-    /* Intelligence Split Grid */
-    .intel-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-    @media (max-width: 900px) {
-      .intel-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .table-responsive {
-      width: 100%;
-      overflow-x: auto;
-    }
-
-    .intel-table {
-      width: 100%;
-      min-width: 360px;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    .intel-table th {
-      text-align: left;
-      padding: 8px 12px;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--card-border);
-      white-space: nowrap;
-    }
-    .intel-table td {
-      padding: 8px 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      color: #cbd5e1;
-      font-family: 'JetBrains Mono', monospace;
-      white-space: nowrap;
-    }
-    .intel-table tr:hover td {
-      background: rgba(255, 255, 255, 0.04);
-      cursor: pointer;
-    }
-
-    /* Multi-Dimensional SOC Console Filters */
-    .console-card {
-      background: var(--card-bg);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 20px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-width: 0;
-    }
-
-    .console-toolbar {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .filters-row {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .filter-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: var(--text-secondary);
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.2s ease;
-    }
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.09);
-      color: #ffffff;
-    }
-    .tab-btn.active {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: rgba(56, 189, 248, 0.4);
-      color: #38bdf8;
-    }
-
-    .filter-select {
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 6px;
-      color: #e2e8f0;
-      font-size: 12px;
-      padding: 6px 10px;
-      font-family: 'JetBrains Mono', monospace;
-      outline: none;
-      cursor: pointer;
-      max-width: 200px;
-      transition: border-color 0.2s;
-    }
-    .filter-select:focus {
-      border-color: var(--accent-cyan);
-    }
-
-    .search-box {
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 6px 12px;
-      color: #f8fafc;
-      font-size: 12px;
-      font-family: 'JetBrains Mono', monospace;
-      outline: none;
-      min-width: 180px;
-      flex: 1 1 200px;
-      transition: border-color 0.2s ease;
-    }
-    .search-box:focus {
-      border-color: var(--accent-cyan);
-    }
-
-    /* Active Filter Chips Bar */
-    .active-chips-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      padding: 8px 12px;
-      background: rgba(56, 189, 248, 0.05);
-      border: 1px dashed rgba(56, 189, 248, 0.22);
-      border-radius: 8px;
-    }
-    .filter-chip {
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      color: #7dd3fc;
-      padding: 3px 8px;
-      border-radius: 5px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-family: 'JetBrains Mono', monospace;
-      white-space: nowrap;
-    }
-    .chip-close {
-      cursor: pointer;
-      font-weight: 700;
-      color: #38bdf8;
-    }
-    .chip-close:hover {
-      color: #ffffff;
-    }
-    .btn-clear-all {
-      color: #fb7185;
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 600;
-      text-decoration: underline;
-      margin-left: auto;
-    }
-
-    /* Global Origin & Threat Map */
-    .map-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 16px 20px;
-      backdrop-filter: blur(12px);
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.36);
-    }
-    .map-body {
-      display: grid;
-      grid-template-columns: 1fr 300px;
-      gap: 16px;
-      margin-top: 12px;
-    }
-    @media (max-width: 1024px) {
-      .map-body {
-        grid-template-columns: 1fr;
-      }
-    }
-    .map-container {
+    #osm-map-container {
       position: relative;
-      background: #060913;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 10px;
-      overflow: hidden;
+      width: 100%;
       height: 420px;
-      min-height: 420px;
     }
     #leaflet-map {
       width: 100%;
       height: 100%;
-      z-index: 1;
-      background: #060913;
+      background: #0d0f18 !important;
+    }
+
+    /* OSM Dark Inversion Filter for Retro Terminal Map */
+    .leaflet-tile-pane {
+      filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
     }
     .leaflet-container {
-      background: #060913 !important;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+      font-family: var(--mono) !important;
     }
-    .leaflet-tile-pane {
-      filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: var(--base) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--line) !important;
+      border-radius: 4px !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
     }
-    .leaflet-bar {
-      border: 1px solid rgba(255, 255, 255, 0.12) !important;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.6) !important;
-      border-radius: 6px !important;
-      overflow: hidden;
-    }
-    .leaflet-bar a {
-      background-color: rgba(15, 23, 42, 0.9) !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-      color: #cbd5e1 !important;
-      transition: all 0.15s;
-    }
-    .leaflet-bar a:hover {
-      background-color: rgba(30, 41, 59, 1) !important;
-      color: #38bdf8 !important;
-    }
-    .leaflet-tooltip.soc-map-tooltip {
-      background: rgba(11, 17, 32, 0.96) !important;
-      border: 1px solid rgba(56, 189, 248, 0.4) !important;
-      color: #f8fafc !important;
-      border-radius: 8px !important;
-      padding: 10px 14px !important;
-      font-size: 11px !important;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.75) !important;
-      backdrop-filter: blur(12px);
-    }
-    .leaflet-tooltip-top:before {
-      border-top-color: rgba(56, 189, 248, 0.4) !important;
-    }
+
+    /* Leaflet Div Icon Markers */
     .soc-marker-wrap {
       position: relative;
+      width: 24px;
+      height: 24px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
       cursor: pointer;
     }
     .soc-marker-ring {
       position: absolute;
-      width: 32px;
-      height: 32px;
+      width: 22px;
+      height: 22px;
       border-radius: 50%;
-      border: 2px solid;
-      animation: soc-ring-pulse 2.2s infinite ease-out;
-      pointer-events: none;
-    }
-    @keyframes soc-ring-pulse {
-      0% { transform: scale(0.3); opacity: 1; }
-      70% { transform: scale(1.6); opacity: 0.25; }
-      100% { transform: scale(2.2); opacity: 0; }
+      border: 1.5px solid var(--green);
+      animation: pulse-ring 2.2s infinite ease-out;
     }
     .soc-marker-core {
-      width: 12px;
-      height: 12px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      border: 2px solid #070b14;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
       z-index: 2;
-      transition: transform 0.2s;
-    }
-    .soc-marker-wrap:hover .soc-marker-core {
-      transform: scale(1.35);
     }
     .soc-marker-label {
       position: absolute;
-      top: -20px;
-      background: rgba(11, 17, 32, 0.94);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      padding: 2px 6px;
-      border-radius: 4px;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(24, 24, 37, 0.9);
+      border: 1px solid var(--line-hi);
+      padding: 1px 5px;
+      border-radius: 3px;
       font-size: 10px;
-      font-weight: 700;
-      font-family: 'JetBrains Mono', monospace;
-      color: #f8fafc;
+      font-weight: 600;
       white-space: nowrap;
+      color: var(--text-hi);
       pointer-events: none;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
-      transition: all 0.15s;
     }
+
+    /* ASCII Tooltip Floating Box */
+    .ascii-tip {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      z-index: 200;
+      background: rgba(24, 24, 37, 0.96);
+      border: 1px solid var(--line-hi);
+      padding: 8px 12px;
+      border-radius: 3px;
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+      white-space: pre;
+    }
+
+    /* Map Sidebar */
     .map-sidebar {
-      background: rgba(5, 8, 16, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 10px;
-      padding: 12px 14px;
+      background: var(--base);
       display: flex;
       flex-direction: column;
       max-height: 420px;
     }
     .map-sidebar-title {
+      padding: 9px 14px;
       font-size: 11px;
       font-weight: 700;
+      letter-spacing: 0.5px;
       text-transform: uppercase;
-      color: var(--text-muted);
-      letter-spacing: 0.06em;
-      margin-bottom: 10px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
       align-items: center;
+      color: var(--overlay);
     }
     .map-countries-list {
+      flex: 1;
       overflow-y: auto;
+      padding: 6px;
+    }
+    .map-country-item {
+      padding: 7px 10px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      transition: all 0.12s ease;
+      margin-bottom: 4px;
+    }
+    .map-country-item:hover {
+      background: var(--panel);
+      border-color: var(--line);
+    }
+    .map-country-item.active {
+      background: var(--surface);
+      border-color: var(--teal);
+    }
+
+    /* ── Section 03: Telemetry Dynamics (Timeline & Donut) ── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1.1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 1024px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .chart-card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-cap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--base);
+      font-size: 11px;
+      color: var(--subtext);
+    }
+    .card-cap span:first-child {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .timeline-container {
+      position: relative;
+      height: 240px;
+      padding: 10px;
+      background: var(--panel);
+    }
+    .timeline-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .timeline-legend {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      color: var(--subtext);
+    }
+    .legend-item.dimmed {
+      opacity: 0.35;
+    }
+    .chart-tooltip {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      transform: translateX(-50%);
+      background: var(--base);
+      border: 1px solid var(--line-hi);
+      padding: 4px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      color: var(--text);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    /* Donut Threat Ratio */
+    .donut-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 14px 10px;
+    }
+    .donut-svg {
+      width: 110px;
+      height: 110px;
+      transform: rotate(-90deg);
+    }
+    .donut-legend {
       display: flex;
       flex-direction: column;
       gap: 6px;
-      flex: 1;
+      font-size: 11.5px;
     }
-    .map-country-item {
+
+    .rules-list {
+      padding: 8px 14px 14px;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 10px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      flex-direction: column;
+      gap: 7px;
+    }
+    .rule-item {
       cursor: pointer;
-      transition: all 0.15s;
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      background: var(--base);
+      border-radius: 3px;
+      transition: border-color 0.12s ease;
     }
-    .map-country-item:hover {
-      background: rgba(56, 189, 248, 0.12);
-      border-color: rgba(56, 189, 248, 0.3);
+    .rule-item:hover {
+      border-color: var(--line-hi);
     }
-    .map-country-item.active {
-      background: rgba(56, 189, 248, 0.2);
-      border-color: var(--accent-cyan);
+    .rule-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      margin-bottom: 4px;
     }
-    .map-legend {
+    .rule-name {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .rule-count {
+      color: var(--overlay);
+    }
+    .rule-bar-wrap {
+      height: 4px;
+      background: var(--surface);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .rule-bar-fill {
+      height: 100%;
+      background: var(--pink);
+      border-radius: 2px;
+    }
+
+    /* ── Section 04: Intelligence Vectors Grid ───────────── */
+    .intel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 960px) {
+      .intel-grid { grid-template-columns: 1fr; }
+    }
+    .intel-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+    }
+    .intel-table th {
+      text-align: left;
+      padding: 7px 10px;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--overlay);
+      border-bottom: 1px solid var(--line);
+      background: var(--base);
+      font-weight: 600;
+    }
+    .intel-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+    }
+    .intel-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* ── Section 05: Real-Time SOC Stream Table ──────────── */
+    .console-toolbar {
+      padding: 10px 14px;
+      background: var(--base);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .prompt-row {
       display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 11.5px;
+      color: var(--green);
+      font-weight: 600;
+    }
+    .filters-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .filter-tabs {
+      display: inline-flex;
+      border: 1px solid var(--line-hi);
+      background: var(--panel);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .tab-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: transparent;
+      border: none;
+      padding: 4px 10px;
+      color: var(--subtext);
+      cursor: pointer;
+      border-right: 1px solid var(--line-hi);
+      transition: all 0.12s ease;
+    }
+    .tab-btn:last-child {
+      border-right: none;
+    }
+    .tab-btn:hover {
+      background: var(--surface);
+      color: var(--text-hi);
+    }
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--teal);
+      font-weight: 600;
+    }
+
+    .filter-select, .search-box {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--panel);
+      border: 1px solid var(--line-hi);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 3px;
+      outline: none;
+      transition: border-color 0.12s ease;
+    }
+    .filter-select:focus, .search-box:focus {
+      border-color: var(--teal);
+    }
+    .search-box {
+      min-width: 200px;
+      flex: 1;
+    }
+
+    .active-chips-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 11px;
+    }
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--panel);
+      border: 1px solid var(--line-hi);
+      padding: 2px 7px;
+      border-radius: 3px;
+      color: var(--text);
+    }
+    .chip-close {
+      cursor: pointer;
+      color: var(--overlay);
+    }
+    .chip-close:hover {
+      color: var(--pink);
+    }
+    .btn-clear-all {
+      font-family: var(--mono);
+      background: transparent;
+      border: none;
+      color: var(--pink);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+    .btn-clear-all:hover {
+      text-decoration: underline;
     }
 
     .table-container {
       max-height: 480px;
-      overflow-x: auto;
       overflow-y: auto;
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      background: rgba(5, 8, 16, 0.5);
+      overflow-x: auto;
+      background: var(--panel);
     }
-    table.soc-table {
+    .soc-table {
       width: 100%;
-      min-width: 900px;
       border-collapse: collapse;
-      font-size: 12px;
-      text-align: left;
-    }
-    table.soc-table th {
-      position: sticky;
-      top: 0;
-      background: #0f172a;
-      padding: 10px 14px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--card-border);
-      z-index: 2;
-    }
-    table.soc-table td {
-      padding: 10px 14px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      color: #cbd5e1;
-      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
       white-space: nowrap;
     }
-    table.soc-table tr:hover td {
-      background: rgba(255, 255, 255, 0.04);
+    .soc-table th {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--overlay);
+      background: var(--base);
+      border-bottom: 1px solid var(--line);
+      font-weight: 600;
+    }
+    .soc-table td {
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--text);
+    }
+    .soc-table tr {
       cursor: pointer;
+      transition: background 0.1s ease;
+    }
+    .soc-table tr:hover td {
+      background: rgba(255, 255, 255, 0.03);
     }
 
-    /* Verdict Badges */
-    .verdict-block {
-      background: rgba(244, 63, 94, 0.16);
-      color: #fb7185;
-      border: 1px solid rgba(244, 63, 94, 0.35);
-      padding: 3px 8px;
-      border-radius: 5px;
+    /* Retro Bracket Badges */
+    .bracket-badge {
       font-weight: 700;
-      font-size: 11px;
-    }
-    .verdict-tarpit {
-      background: rgba(245, 158, 11, 0.16);
-      color: #fcd34d;
-      border: 1px solid rgba(245, 158, 11, 0.35);
-      padding: 3px 8px;
-      border-radius: 5px;
-      font-weight: 700;
+      letter-spacing: 0.5px;
       font-size: 11px;
     }
     .verdict-allow {
-      background: rgba(16, 185, 129, 0.14);
-      color: #6ee7b7;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      padding: 3px 8px;
-      border-radius: 5px;
-      font-weight: 700;
-      font-size: 11px;
+      color: var(--green);
+    }
+    .verdict-block {
+      color: var(--pink);
+    }
+    .verdict-tarpit {
+      color: var(--yellow);
     }
 
     .badge-method {
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 700;
-      font-size: 10px;
-    }
-    .method-get { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
-    .method-post { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
-    .method-put { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
-    .method-delete { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
-
-    .rule-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 3px;
       font-weight: 600;
-      background: rgba(244, 63, 94, 0.14);
-      color: #fda4af;
-      border: 1px solid rgba(244, 63, 94, 0.3);
+      font-size: 10px;
+      border: 1px solid var(--line-hi);
+    }
+    .method-get { color: var(--teal); background: rgba(148, 226, 213, 0.08); }
+    .method-post { color: var(--blue); background: rgba(137, 180, 250, 0.08); }
+    .method-put { color: var(--yellow); background: rgba(249, 226, 175, 0.08); }
+    .method-delete { color: var(--pink); background: rgba(243, 139, 168, 0.08); }
+
+    .ip-clickable {
       cursor: pointer;
-      transition: all 0.15s;
+      color: var(--teal);
+    }
+    .ip-clickable:hover {
+      text-decoration: underline;
+    }
+    .rule-tag {
+      cursor: pointer;
+      color: var(--pink);
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid rgba(243, 139, 168, 0.3);
+      background: rgba(243, 139, 168, 0.08);
+      font-size: 10.5px;
     }
     .rule-tag:hover {
-      background: rgba(244, 63, 94, 0.28);
-      border-color: rgba(244, 63, 94, 0.55);
-      color: #ffffff;
+      background: rgba(243, 139, 168, 0.18);
     }
 
-    /* Modal Inspector */
+    /* ── Inspector Modals ────────────────────────────────── */
     .modal-overlay {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.75);
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(17, 17, 27, 0.85);
       backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       display: none;
-      align-items: center;
       justify-content: center;
-      z-index: 10000;
+      align-items: center;
+      z-index: 2000;
+      padding: 20px;
     }
     .modal-card {
-      background: #0f172a;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 14px;
-      width: 90%;
-      max-width: 650px;
-      padding: 24px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      background: var(--base);
+      border: 1px solid var(--line-hi);
+      border-radius: 4px;
+      width: 100%;
+      max-width: 820px;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
       display: flex;
       flex-direction: column;
-      gap: 16px;
+    }
+    .ip-modal-card {
+      background: var(--base);
+      border: 1px solid var(--line-hi);
+      border-radius: 4px;
+      width: 100%;
+      max-width: 860px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
     }
     .modal-header {
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--card-border);
-      padding-bottom: 12px;
     }
     .modal-title {
-      font-size: 16px;
+      font-size: 12px;
       font-weight: 700;
-      color: #ffffff;
+      letter-spacing: 0.5px;
+      color: var(--text-hi);
     }
     .modal-close {
       cursor: pointer;
+      color: var(--overlay);
       font-size: 18px;
-      color: var(--text-muted);
+      line-height: 1;
+    }
+    .modal-close:hover {
+      color: var(--pink);
     }
     .modal-body {
-      font-family: 'JetBrains Mono', monospace;
+      padding: 16px;
       font-size: 12px;
       line-height: 1.6;
-      background: #070b14;
-      padding: 16px;
-      border-radius: 8px;
-      overflow-x: auto;
-      color: #e2e8f0;
-      white-space: pre-wrap;
     }
 
-    /* IP Intelligence & Abuse Hub Modal */
-    .ip-modal-card {
-      background: #0b1120;
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      border-radius: 16px;
-      width: 90%;
-      max-width: 760px;
-      max-height: 90vh;
-      overflow-y: auto;
-      padding: 24px;
-      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 25px rgba(56, 189, 248, 0.15);
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
+    /* IP Intelligence Details */
     .ip-header-banner {
+      padding: 14px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
       display: flex;
-      flex-wrap: wrap;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
       gap: 12px;
-      background: rgba(15, 23, 42, 0.7);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 18px;
     }
     .ip-title-address {
-      font-size: 22px;
-      font-weight: 800;
-      font-family: 'JetBrains Mono', monospace;
-      color: #ffffff;
       display: flex;
       align-items: center;
       gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--teal);
     }
     .ip-geo-badge {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #7dd3fc;
+      background: var(--surface);
+      border: 1px solid var(--line-hi);
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      color: var(--text);
     }
     .ip-intel-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 14px;
+      padding: 16px;
     }
-    @media (max-width: 680px) {
-      .ip-intel-grid {
-        grid-template-columns: 1fr;
-      }
+    @media (max-width: 720px) {
+      .ip-intel-grid { grid-template-columns: 1fr; }
     }
     .ip-box {
-      background: rgba(15, 23, 42, 0.55);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-size: 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 4px;
+      padding: 12px;
     }
     .ip-box-title {
       font-size: 11px;
       font-weight: 700;
+      letter-spacing: 0.5px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 2px;
+      color: var(--overlay);
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 4px;
     }
     .ip-kv-row {
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      padding: 3px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      font-size: 11.5px;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
     }
     .ip-kv-label {
-      color: var(--text-secondary);
+      color: var(--overlay);
     }
     .ip-kv-val {
-      font-family: 'JetBrains Mono', monospace;
-      color: #f1f5f9;
+      color: var(--text);
       font-weight: 500;
       text-align: right;
-      word-break: break-all;
     }
+
     .abuse-section {
-      background: rgba(244, 63, 94, 0.06);
-      border: 1px solid rgba(244, 63, 94, 0.22);
-      border-radius: 12px;
-      padding: 16px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      background: var(--panel);
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
     .abuse-actions-row {
       display: flex;
+      gap: 8px;
       flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-    }
-    .btn-abuse {
-      background: rgba(244, 63, 94, 0.16);
-      border: 1px solid rgba(244, 63, 94, 0.35);
-      color: #fda4af;
-      padding: 7px 14px;
-      border-radius: 7px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-    .btn-abuse:hover {
-      background: rgba(244, 63, 94, 0.3);
-      border-color: rgba(244, 63, 94, 0.6);
-      color: #ffffff;
-      box-shadow: 0 0 12px rgba(244, 63, 94, 0.25);
-    }
-    .btn-intel {
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      color: #7dd3fc;
-      padding: 7px 14px;
-      border-radius: 7px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-    .btn-intel:hover {
-      background: rgba(56, 189, 248, 0.24);
-      color: #ffffff;
     }
     .abuse-report-textarea {
-      width: 100%;
-      height: 110px;
-      background: rgba(0, 0, 0, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      padding: 10px;
-      color: #cbd5e1;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--mono);
       font-size: 11px;
       line-height: 1.5;
+      background: var(--crust);
+      border: 1px solid var(--line-hi);
+      color: var(--text);
+      padding: 10px;
+      border-radius: 3px;
+      width: 100%;
+      height: 140px;
       resize: vertical;
-      box-sizing: border-box;
-    }
-    .abuse-report-textarea:focus {
       outline: none;
-      border-color: var(--accent-cyan);
     }
-    .ip-clickable {
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      transition: background 0.15s, color 0.15s;
-    }
-    .ip-clickable:hover {
-      background: rgba(56, 189, 248, 0.15);
-      color: #38bdf8;
-      text-decoration: underline;
-    }
-    .ip-info-btn {
-      font-size: 10px;
-      background: rgba(56, 189, 248, 0.15);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      color: #7dd3fc;
-      padding: 1px 5px;
-      border-radius: 4px;
-      margin-left: 4px;
-    }
-    .btn-report-mini {
-      background: rgba(244, 63, 94, 0.15);
-      border: 1px solid rgba(244, 63, 94, 0.3);
-      color: #fda4af;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-left: 6px;
-      transition: all 0.15s;
-    }
-    .btn-report-mini:hover {
-      background: rgba(244, 63, 94, 0.3);
-      color: #ffffff;
-    }
-    .country-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
+
+    /* ── Terminal Keybindings Status Bar ─────────────────── */
+    .tui-footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--base);
+      border-top: 1px solid var(--line);
+      padding: 5px 18px;
       font-size: 11px;
-      color: #cbd5e1;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
+      color: var(--overlay);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 900;
     }
-    .country-badge:hover {
-      background: rgba(56, 189, 248, 0.15);
-      border-color: rgba(56, 189, 248, 0.35);
-      color: #38bdf8;
+    .footer-keys {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .footer-key-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .key-cap {
+      background: var(--panel);
+      border: 1px solid var(--line-hi);
+      color: var(--teal);
+      padding: 0 4px;
+      border-radius: 2px;
+      font-weight: 700;
+      font-size: 10px;
     }
   </style>
 </head>
 <body>
 
-<div class="dashboard-wrap">
-  <!-- Header Bar -->
-  <header class="soc-header">
-    <div class="brand-wrap">
-      <div class="brand-logo">🛡️</div>
-      <div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span class="brand-title">RouteWarden</span>
-          <span class="brand-badge">SOC INTELLIGENCE</span>
-        </div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top:2px;">Real-Time Reverse Proxy Security Telemetry</div>
-      </div>
+<!-- ── Sticky Top Terminal Bar ─────────────────────────────── -->
+<div class="bar">
+  <div class="bar-left">
+    <span>[ 🛡️ ROUTEWARDEN SOC INTELLIGENCE ]</span>
+    <span style="color:var(--overlay);">//</span>
+    <span style="font-weight:500; color:var(--subtext);">v5.0-TUI</span>
+  </div>
+  <div class="bar-mid">
+    <div style="display:flex; align-items:center; gap:6px;">
+      <span class="pulse-dot"></span>
+      <span id="stream-status" style="color:var(--green); font-weight:600;">LIVE STREAM</span>
+    </div>
+    <span style="color:var(--line-hi);">|</span>
+    <span id="utc-clock">00:00:00 UTC</span>
+  </div>
+  <div class="bar-right">
+    <button class="tui-btn" id="btn-toggle-scroll">⏸ Pause</button>
+    <button class="tui-btn" id="btn-export-json">📥 Export</button>
+    <button class="tui-btn" id="btn-clear-logs">🗑 Clear</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- ── Masthead with ASCII Wordmark & Spec Datasheet ─────── -->
+  <header class="masthead">
+    <div>
+      <pre class="wordmark"><span class="hl"> ____   ___  _   _ _____ _____</span><span class="sub"> _    _  _   ____  ____  _____ _   _ </span>
+<span class="hl">|  _ \ / _ \| | | |_   _| ____|</span><span class="sub">| |  | |/ \ |  _ \|  _ \| ____| \ | |</span>
+<span class="hl">| |_) | | | | | | | | | |  _|  </span><span class="sub">| |  | / _ \| |_) | | | |  _| |  \| |</span>
+<span class="hl">|  _ <| |_| | |_| | | | | |___ </span><span class="sub">| |/\| / ___ \  _ <| |_| | |___| |\  |</span>
+<span class="hl">|_| \_\___/ \___/  |_| |_____|</span><span class="sub">|__/\__/_/   \_\_| \_\____/|_____|_| \_|</span></pre>
+      <p class="lede">Real-time Reverse Proxy Intrusion Telemetry & Threat Defense</p>
+      <p class="lede tight">Deterministic zero-knowledge cipher stream, edge tarpitting & active geo-surveillance.</p>
     </div>
 
-    <div class="header-actions">
-      <div class="live-indicator">
-        <span class="pulse-dot"></span>
-        <span id="stream-status">LIVE STREAM</span>
+    <dl class="spec">
+      <div>
+        <dt>TARGET</dt>
+        <dd>Reverse Proxy Security Telemetry & Live SOC Stream</dd>
       </div>
-      <button class="btn-action" id="btn-toggle-scroll">⏸ Pause</button>
-      <button class="btn-action" id="btn-export-json">📥 Export</button>
-      <button class="btn-action" id="btn-clear-logs">🗑 Clear</button>
-    </div>
+      <div>
+        <dt>ENGINE</dt>
+        <dd>RouteWarden Core v5.0 // GoAccess Ingress Parser</dd>
+      </div>
+      <div>
+        <dt>ORIGIN</dt>
+        <dd>MaxMind GeoLite2 Autonomous Country Engine</dd>
+      </div>
+      <div>
+        <dt>CIPHER</dt>
+        <dd>X25519 + ChaCha20-Poly1305 / AES Zero-Knowledge</dd>
+      </div>
+    </dl>
   </header>
 
-  <!-- Monitored Sources Ribbon -->
+  <!-- ── Monitored Nodes Ribbon ────────────────────────────── -->
   <div class="sources-ribbon" id="sources-container">
-    <span style="font-weight: 600; color: #cbd5e1;">🌐 Monitored Nodes:</span>
-    <span style="color: #64748b; font-style: italic;">Discovering active containers & remote agents...</span>
+    <span style="font-weight: 600; color: var(--text-hi);">🌐 MONITORED NODES:</span>
+    <span style="color: var(--overlay); font-style: italic;">Discovering active containers & remote agents...</span>
   </div>
 
-  <!-- Executive KPI Grid -->
+  <!-- ── Section 01: KPI Spec Cards ────────────────────────── -->
+  <div class="head">
+    <h2>01 // INGRESS TELEMETRY & ATTACK COUNTERS</h2>
+    <div class="rule"></div>
+    <span class="cmd">sys.stat.kpi</span>
+  </div>
+
   <div class="kpi-grid">
-    <div class="kpi-card" style="border-top: 3px solid var(--accent-cyan);">
+    <div class="kpi-card" style="border-top: 2px solid var(--teal);">
       <div class="kpi-top">
         <span class="kpi-label">Total Ingress</span>
-        <span class="kpi-icon">🛡️</span>
+        <span style="font-size:14px;">🛡️</span>
       </div>
       <div class="kpi-val" id="kpi-total">0</div>
+      <div class="kpi-meter" id="kpi-meter-total">[████████████████] 100.0%</div>
       <div class="kpi-sub">Gateway ingress events</div>
     </div>
 
-    <div class="kpi-card" style="border-top: 3px solid var(--accent-red);">
+    <div class="kpi-card" style="border-top: 2px solid var(--pink);">
       <div class="kpi-top">
         <span class="kpi-label">Threats Blocked</span>
-        <span class="kpi-icon">🛑</span>
+        <span style="font-size:14px;">🛑</span>
       </div>
-      <div class="kpi-val" style="color: #fb7185;" id="kpi-blocked">0</div>
-      <div class="kpi-sub"><span class="pill-threat" id="kpi-block-rate">0.0% Rate</span> 403 Forbidden</div>
+      <div class="kpi-val" style="color: var(--pink);" id="kpi-blocked">0</div>
+      <div class="kpi-meter" style="color: var(--pink);" id="kpi-meter-blocked">[░░░░░░░░░░░░░░░░] 0.0%</div>
+      <div class="kpi-sub"><span class="tui-tag tag-pink" id="kpi-block-rate">0.0% Rate</span> 403 Forbidden</div>
     </div>
 
-    <div class="kpi-card" style="border-top: 3px solid var(--accent-amber);">
+    <div class="kpi-card" style="border-top: 2px solid var(--yellow);">
       <div class="kpi-top">
         <span class="kpi-label">Throttled / Tarpit</span>
-        <span class="kpi-icon">⏳</span>
+        <span style="font-size:14px;">⏳</span>
       </div>
-      <div class="kpi-val" style="color: #fcd34d;" id="kpi-tarpit">0</div>
-      <div class="kpi-sub"><span class="pill-tarpit">429 Slowed</span> Hostile bots</div>
+      <div class="kpi-val" style="color: var(--yellow);" id="kpi-tarpit">0</div>
+      <div class="kpi-meter" style="color: var(--yellow);" id="kpi-meter-tarpit">[░░░░░░░░░░░░░░░░] 0.0%</div>
+      <div class="kpi-sub"><span class="tui-tag tag-yellow">429 Slowed</span> Hostile bots</div>
     </div>
 
-    <div class="kpi-card" style="border-top: 3px solid var(--accent-green);">
+    <div class="kpi-card" style="border-top: 2px solid var(--green);">
       <div class="kpi-top">
         <span class="kpi-label">Clean Ingress</span>
-        <span class="kpi-icon">✅</span>
+        <span style="font-size:14px;">✅</span>
       </div>
-      <div class="kpi-val" style="color: #6ee7b7;" id="kpi-clean">0</div>
-      <div class="kpi-sub"><span class="pill-clean">200 OK</span> Legitimate traffic</div>
+      <div class="kpi-val" style="color: var(--green);" id="kpi-clean">0</div>
+      <div class="kpi-meter" style="color: var(--green);" id="kpi-meter-clean">[████████████████] 100.0%</div>
+      <div class="kpi-sub"><span class="tui-tag tag-green">200 OK</span> Legitimate traffic</div>
     </div>
 
-    <div class="kpi-card" style="border-top: 3px solid var(--accent-purple);">
+    <div class="kpi-card" style="border-top: 2px solid var(--mauve);">
       <div class="kpi-top">
         <span class="kpi-label">Telemetry Cipher</span>
-        <span class="kpi-icon">🔒</span>
+        <span style="font-size:14px;">🔒</span>
       </div>
-      <div class="kpi-val" style="font-size: 18px; margin-top: 6px; color: #d8b4fe;">X25519 + AES</div>
-      <div class="kpi-sub"><span class="pill-cipher">Zero-Knowledge</span> ECDH Stream</div>
+      <div class="kpi-val" style="font-size: 18px; margin-top: 4px; color: var(--mauve);">X25519 + AES</div>
+      <div class="kpi-meter" style="color: var(--mauve);">[ENCLAVE: ACTIVE]</div>
+      <div class="kpi-sub"><span class="tui-tag tag-teal">Zero-Knowledge</span> ECDH Stream</div>
     </div>
   </div>
 
-  <!-- Visual Graphs Grid -->
+  <!-- ── Section 02: World Map & Threat Geo-Distribution ───── -->
+  <div class="head">
+    <h2>02 // GEO-DISTRIBUTION & ATTACK MATRIX</h2>
+    <div class="rule"></div>
+    <span class="cmd">geo.threat.matrix</span>
+  </div>
+
+  <div class="term">
+    <div class="cap">
+      <span>🌐 GLOBAL TRAFFIC & THREAT RADAR</span>
+      <span id="map-country-count">0 Countries Detected</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button class="tui-btn active" id="btn-mode-ascii" onclick="setMapMode('ascii')">[📟 ASCII MATRIX]</button>
+        <button class="tui-btn" id="btn-mode-osm" onclick="setMapMode('osm')">[🌍 OSM DARK]</button>
+        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET]</button>
+      </div>
+    </div>
+
+    <div class="map-body">
+      <div class="map-stage">
+        <!-- Mode 1: ASCII Matrix Dot Map -->
+        <div id="ascii-map-container">
+          <canvas id="ascii-matrix-canvas"></canvas>
+          <div id="ascii-tooltip" class="ascii-tip"></div>
+        </div>
+
+        <!-- Mode 2: Leaflet Dark OpenStreetMap -->
+        <div id="osm-map-container" style="display:none;">
+          <div id="leaflet-map"></div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar: Detected Countries Breakdown -->
+      <div class="map-sidebar">
+        <div class="map-sidebar-title">
+          <span>Detected Countries</span>
+          <span style="color:var(--teal);">Real-Time</span>
+        </div>
+        <div id="map-countries-list" class="map-countries-list">
+          <div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">Awaiting parsed telemetry...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 03: Telemetry Dynamics ────────────────────── -->
+  <div class="head">
+    <h2>03 // TELEMETRY DYNAMICS & THREAT SIGNATURES</h2>
+    <div class="rule"></div>
+    <span class="cmd">sig.threat.timeline</span>
+  </div>
+
   <div class="charts-grid">
-    <!-- Real-Time Timeline Curve with Full Scales & Legend -->
+    <!-- Real-Time Timeline Curve -->
     <div class="chart-card">
-      <div class="card-header">
-        <span class="card-title">📈 Ingress Velocity & Threat Timeline</span>
+      <div class="card-cap">
+        <span>📈 INGRESS VELOCITY & THREAT TIMELINE</span>
         <div class="timeline-legend">
-          <span class="legend-item" id="legend-clean"><span class="legend-dot" style="background:#10b981;"></span> Clean</span>
-          <span class="legend-item" id="legend-blocked"><span class="legend-dot" style="background:#f43f5e;"></span> Blocked</span>
-          <span class="legend-item" id="legend-tarpit"><span class="legend-dot" style="background:#f59e0b;"></span> Tarpit</span>
+          <span class="legend-item" id="legend-clean"><span style="color:var(--green);">●</span> Clean</span>
+          <span class="legend-item" id="legend-blocked"><span style="color:var(--pink);">■</span> Blocked</span>
+          <span class="legend-item" id="legend-tarpit"><span style="color:var(--yellow);">▲</span> Tarpit</span>
         </div>
       </div>
       <div class="timeline-container" id="timeline-box">
@@ -2483,117 +2472,90 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
           <defs>
             <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#10b981" stop-opacity="0.2"/>
-              <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="#a6e3a1" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="#a6e3a1" stop-opacity="0.0"/>
             </linearGradient>
             <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.3"/>
-              <stop offset="100%" stop-color="#f43f5e" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="#f38ba8" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#f38ba8" stop-opacity="0.0"/>
             </linearGradient>
           </defs>
           <g id="grid-group"></g>
           <g id="axes-group"></g>
           <path id="path-clean-area" fill="url(#grad-clean)"></path>
           <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
-          <path id="path-clean-line" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"></path>
-          <path id="path-blocked-line" fill="none" stroke="#f43f5e" stroke-width="2.5" stroke-linecap="round"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-dasharray="4,3"></path>
+          <path id="path-clean-line" fill="none" stroke="#a6e3a1" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-blocked-line" fill="none" stroke="#f38ba8" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="#f9e2af" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
           <g id="points-group"></g>
-          <line id="crosshair-line" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,3" style="display:none;"></line>
-          <circle id="crosshair-dot" r="4.5" fill="#38bdf8" stroke="#0f172a" stroke-width="2" style="display:none;"></circle>
+          <line id="crosshair-line" stroke="#94e2d5" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
+          <circle id="crosshair-dot" r="4" fill="#94e2d5" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
           <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
         </svg>
       </div>
     </div>
 
-    <!-- Threat Breakdown (Donut + Top Rules) -->
+    <!-- Threat Ratio & Signatures -->
     <div class="chart-card">
-      <div class="card-header">
-        <span class="card-title">🎯 Threat Ratio & Signatures</span>
+      <div class="card-cap">
+        <span>🎯 THREAT RATIO & SIGNATURES</span>
       </div>
       <div class="donut-wrap">
         <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
           <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
-          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#10b981" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#f43f5e" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#f59e0b" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#a6e3a1" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#f38ba8" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#f9e2af" stroke-width="12" stroke-dasharray="0 238.7"></circle>
         </svg>
         <div class="donut-legend">
-          <div><span style="color:#10b981;">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
-          <div><span style="color:#f43f5e;">●</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
-          <div><span style="color:#f59e0b;">●</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
+          <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
+          <div><span style="color:var(--pink);">■</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
+          <div><span style="color:var(--yellow);">▲</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
         </div>
       </div>
-      <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">Top Triggered Rules (Click to filter):</div>
+      <div style="font-size:10.5px; font-weight:700; color:var(--overlay); text-transform:uppercase; letter-spacing:0.5px; padding:0 14px;">Top Triggered Rules:</div>
       <div class="rules-list" id="rules-container">
-        <div style="color: #64748b; font-size: 11px; font-style: italic;">Awaiting rule triggers...</div>
+        <div style="color:var(--overlay); font-size:11px; font-style:italic;">Awaiting rule triggers...</div>
       </div>
     </div>
   </div>
 
-  <!-- Global Origin & Threat Geo-Distribution Map -->
-  <div class="map-card">
-    <div class="card-header">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span class="card-title">🌍 Global Threat & Traffic Distribution</span>
-        <span class="brand-badge" id="map-country-count">0 Countries Detected</span>
-      </div>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <div class="map-legend">
-          <span class="legend-dot" style="background:#10b981;"></span><span style="font-size:11px; color:#94a3b8;">Clean</span>
-          <span class="legend-dot" style="background:#f43f5e;"></span><span style="font-size:11px; color:#94a3b8;">Threats</span>
-          <span class="legend-dot" style="background:#f59e0b;"></span><span style="font-size:11px; color:#94a3b8;">Tarpit</span>
-        </div>
-        <button id="btn-reset-map" onclick="resetMapZoom()" title="Reset map view to world" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; border-radius:6px; padding:3px 9px; font-size:11px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px; transition:all 0.15s;">⟲ Reset View</button>
-        <span style="font-size:11px; color:var(--text-muted);">Click any country to filter</span>
-      </div>
-    </div>
-    <div class="map-body">
-      <div class="map-container">
-        <div id="leaflet-map"></div>
-      </div>
-      <div class="map-sidebar">
-        <div class="map-sidebar-title">
-          <span>Detected Countries</span>
-          <span style="font-size:10px; color:#38bdf8;">Real-Time</span>
-        </div>
-        <div id="map-countries-list" class="map-countries-list">
-          <div style="color:#64748b; font-size:11px; font-style:italic;">Awaiting parsed telemetry...</div>
-        </div>
-      </div>
-    </div>
+  <!-- ── Section 04: Intelligence Vectors ──────────────────── -->
+  <div class="head">
+    <h2>04 // INTELLIGENCE VECTORS & HOTSPOTS</h2>
+    <div class="rule"></div>
+    <span class="cmd">intel.vectors.query</span>
   </div>
 
-  <!-- Intelligence Tables -->
   <div class="intel-grid">
     <div class="chart-card">
-      <div class="card-header">
-        <span class="card-title">🚨 Top Attacking Client IPs</span>
-        <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
+      <div class="card-cap">
+        <span>🚨 TOP ATTACKING CLIENT IPS</span>
+        <span style="font-size:10.5px; color:var(--overlay);">Click row to inspect</span>
       </div>
-      <div class="table-responsive">
+      <div style="max-height:260px; overflow-y:auto;">
         <table class="intel-table">
           <thead>
             <tr>
               <th>Client IP</th>
-              <th>Origin Country</th>
-              <th>Total Hits</th>
+              <th>Origin</th>
+              <th>Hits</th>
               <th>Threat Breakdown</th>
             </tr>
           </thead>
           <tbody id="top-ips-tbody">
-            <tr><td colspan="4" style="color:#64748b; text-align:center;">No threat IPs logged yet</td></tr>
+            <tr><td colspan="4" style="color:var(--overlay); text-align:center;">No threat IPs logged yet</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <div class="chart-card">
-      <div class="card-header">
-        <span class="card-title">🎯 Top Targeted Endpoints</span>
-        <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
+      <div class="card-cap">
+        <span>🎯 TOP TARGETED ENDPOINTS</span>
+        <span style="font-size:10.5px; color:var(--overlay);">Click row to filter</span>
       </div>
-      <div class="table-responsive">
+      <div style="max-height:260px; overflow-y:auto;">
         <table class="intel-table">
           <thead>
             <tr>
@@ -2603,23 +2565,33 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             </tr>
           </thead>
           <tbody id="top-paths-tbody">
-            <tr><td colspan="3" style="color:#64748b; text-align:center;">No endpoints logged yet</td></tr>
+            <tr><td colspan="3" style="color:var(--overlay); text-align:center;">No endpoints logged yet</td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </div>
 
-  <!-- Real-Time Multi-Dimensional SOC Console -->
-  <div class="console-card">
+  <!-- ── Section 05: Real-Time SOC Security Event Stream ───── -->
+  <div class="head">
+    <h2>05 // SECURITY OPERATIONS LOG STREAM</h2>
+    <div class="rule"></div>
+    <span class="cmd">stream.audit.live</span>
+  </div>
+
+  <div class="term">
     <div class="console-toolbar">
-      <!-- Row 1: Verdict Tabs, Selectors, Search -->
+      <div class="prompt-row">
+        <span>rwarden@soc:~$</span>
+        <span style="color:var(--text);">filter --stream=live</span>
+      </div>
+
       <div class="filters-row">
         <div class="filter-tabs">
-          <button class="tab-btn active" data-filter-verdict="ALL">All (<span id="count-tab-all">0</span>)</button>
-          <button class="tab-btn" data-filter-verdict="BLOCK">🛑 Blocked (<span id="count-tab-block">0</span>)</button>
-          <button class="tab-btn" data-filter-verdict="TARPIT">⏳ Tarpit (<span id="count-tab-tarpit">0</span>)</button>
-          <button class="tab-btn" data-filter-verdict="ALLOW">✅ Clean (<span id="count-tab-clean">0</span>)</button>
+          <button class="tab-btn active" data-filter-verdict="ALL">[ALL: <span id="count-tab-all">0</span>]</button>
+          <button class="tab-btn" data-filter-verdict="BLOCK">[🛑 BLOCKED: <span id="count-tab-block">0</span>]</button>
+          <button class="tab-btn" data-filter-verdict="TARPIT">[⏳ TARPIT: <span id="count-tab-tarpit">0</span>]</button>
+          <button class="tab-btn" data-filter-verdict="ALLOW">[✅ CLEAN: <span id="count-tab-clean">0</span>]</button>
         </div>
 
         <select class="filter-select" id="select-country">
@@ -2650,11 +2622,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
       </div>
 
-      <!-- Row 2: Active Filter Chips Bar -->
       <div class="active-chips-bar" id="active-chips-container" style="display:none;">
-        <span style="color:var(--text-muted);">Active Filters:</span>
+        <span style="color:var(--overlay);">ACTIVE FILTERS:</span>
         <div id="chips-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
-        <button class="btn-clear-all" id="btn-reset-filters">Reset All Filters</button>
+        <button class="btn-clear-all" id="btn-reset-filters">[RESET ALL FILTERS]</button>
       </div>
     </div>
 
@@ -2678,29 +2649,39 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Modal Inspector -->
+<!-- ── Telemetry Event Inspector Modal ──────────────────────── -->
 <div class="modal-overlay" id="event-modal">
   <div class="modal-card">
     <div class="modal-header">
-      <span class="modal-title">🔍 Telemetry Event Inspector</span>
+      <span class="modal-title">🔍 TELEMETRY EVENT INSPECTOR</span>
       <span class="modal-close" id="modal-close-btn">&times;</span>
     </div>
     <div class="modal-body" id="modal-content"></div>
   </div>
 </div>
 
-<!-- IP Threat Intelligence & Abuse Hub Modal -->
+<!-- ── IP Threat Intelligence & Abuse Hub Modal ─────────────── -->
 <div class="modal-overlay" id="ip-modal">
   <div class="ip-modal-card">
     <div class="modal-header">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <span style="font-size: 20px;">🌐</span>
-        <span class="modal-title">IP Threat Intelligence & Abuse Hub</span>
-      </div>
+      <span class="modal-title">🌐 IP THREAT INTELLIGENCE & ABUSE HUB</span>
       <span class="modal-close" id="ip-modal-close-btn">&times;</span>
     </div>
     <div id="ip-modal-content"></div>
   </div>
+</div>
+
+<!-- ── Terminal Keybindings Status Footer ────────────────────── -->
+<div class="tui-footer">
+  <div class="footer-keys">
+    <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
+    <span class="footer-key-item"><span class="key-cap">P</span> Filter Path</span>
+    <span class="footer-key-item"><span class="key-cap">I</span> Inspect IP</span>
+    <span class="footer-key-item"><span class="key-cap">M</span> Toggle Map Mode</span>
+    <span class="footer-key-item"><span class="key-cap">R</span> Reset Filters</span>
+    <span class="footer-key-item"><span class="key-cap">ESC</span> Close Modal</span>
+  </div>
+  <div>ROUTEWARDEN SOC // ACTIVE DEFENSE</div>
 </div>
 
 <script>
@@ -2708,6 +2689,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var autoScroll = true;
   var allEvents = [];
   var timelineData = [];
+  var mapMode = 'ascii'; // 'ascii' or 'osm'
 
   // Active Filter State
   var filters = {
@@ -2756,6 +2738,18 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var modal = document.getElementById('event-modal');
   var modalContent = document.getElementById('modal-content');
   var modalClose = document.getElementById('modal-close-btn');
+
+  // Live UTC Clock
+  function updateClock() {
+    var now = new Date();
+    var h = String(now.getUTCHours()).padStart(2, '0');
+    var m = String(now.getUTCMinutes()).padStart(2, '0');
+    var s = String(now.getUTCSeconds()).padStart(2, '0');
+    var el = document.getElementById('utc-clock');
+    if (el) el.textContent = h + ':' + m + ':' + s + ' UTC';
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
 
   // Legend Toggles
   function setupLegendToggle(id, key) {
@@ -2815,7 +2809,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   btnToggleScroll.addEventListener('click', function() {
     autoScroll = !autoScroll;
     btnToggleScroll.textContent = autoScroll ? '⏸ Pause' : '▶ Resume';
-    btnToggleScroll.style.color = autoScroll ? '#cbd5e1' : '#f59e0b';
+    btnToggleScroll.style.color = autoScroll ? 'var(--text)' : 'var(--yellow)';
   });
 
   btnClearLogs.addEventListener('click', function() {
@@ -2824,6 +2818,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   });
 
   btnResetFilters.addEventListener('click', function() {
+    resetAllFilters();
+  });
+
+  function resetAllFilters() {
     filters.verdict = 'ALL';
     filters.country = 'ALL';
     filters.method = 'ALL';
@@ -2845,7 +2843,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     renderActiveChips();
     renderTable();
-  });
+    if (latestStats) updateWorldMap(latestStats);
+  }
 
   btnExportJSON.addEventListener('click', function() {
     var filtered = getFilteredEvents();
@@ -2860,6 +2859,29 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   modalClose.addEventListener('click', function() { modal.style.display = 'none'; });
   window.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+
+  // Keyboard Shortcuts
+  window.addEventListener('keydown', function(e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) {
+      if (e.key === 'Escape') {
+        e.target.blur();
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      modal.style.display = 'none';
+      var ipModal = document.getElementById('ip-modal');
+      if (ipModal) ipModal.style.display = 'none';
+    } else if (e.key === 'm' || e.key === 'M') {
+      setMapMode(mapMode === 'ascii' ? 'osm' : 'ascii');
+    } else if (e.key === 'r' || e.key === 'R') {
+      resetAllFilters();
+    } else if (e.key === 'f' || e.key === 'F') {
+      selectCountry.focus();
+    } else if (e.key === 'p' || e.key === 'P') {
+      searchInput.focus();
+    }
+  });
 
   function renderActiveChips() {
     var chips = [];
@@ -2891,6 +2913,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           if (chips[idx]) chips[idx].clear();
           renderActiveChips();
           renderTable();
+          if (latestStats) updateWorldMap(latestStats);
         });
       });
     } else {
@@ -2929,20 +2952,18 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var rowsHTML = '';
     filtered.slice(-200).forEach(function(ev) {
       var verdictClass = 'verdict-allow';
-      var verdictLabel = 'ALLOW';
+      var verdictLabel = '[ ALLOW ]';
       if (ev.verdict === 'BLOCK') {
         verdictClass = 'verdict-block';
-        verdictLabel = '🛑 BLOCK';
+        verdictLabel = '[ BLOCKED ]';
       } else if (ev.verdict === 'TARPIT') {
         verdictClass = 'verdict-tarpit';
-        verdictLabel = '⏳ TARPIT';
-      } else {
-        verdictLabel = '✅ ALLOW';
+        verdictLabel = '[ TARPIT ]';
       }
 
-      var ruleHTML = '<span style="color:#64748b; font-size:11px;">—</span>';
+      var ruleHTML = '<span style="color:var(--overlay);">—</span>';
       if (ev.rule) {
-        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule(\'' + ev.rule + '\')">🛡️ ' + ev.rule + '</span>';
+        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule('' + ev.rule + '')">🛡️ ' + ev.rule + '</span>';
       }
 
       var methodClass = 'method-get';
@@ -2951,25 +2972,24 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       else if (m === 'PUT') methodClass = 'method-put';
       else if (m === 'DELETE') methodClass = 'method-delete';
 
-      var latencyColor = ev.latency_ms > 1000 ? '#f59e0b' : '#94a3b8';
       var flag = getFlagEmoji(ev.country_code);
       var countryTitle = ev.country ? (flag + ' ' + ev.country) : 'Client IP';
 
       rowsHTML += '<tr onclick="inspectEvent(' + ev.id + ')">' +
         '<td>' + (ev.time_str || '') + '</td>' +
-        '<td><span class="' + verdictClass + '">' + verdictLabel + '</span></td>' +
+        '<td><span class="bracket-badge ' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
-        '<td style="max-width:320px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
-        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' +
-          '<span style="margin-right:5px; font-size:13px;">' + flag + '</span>' + ev.client_ip + ' <span class="ip-info-btn">ℹ️</span>' +
+        '<td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
+        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP('' + ev.client_ip + '')">' +
+          '<span style="margin-right:5px;">' + flag + '</span>' + ev.client_ip +
         '</span></td>' +
-        '<td>' + ev.status + '</td>' +
+        '<td>[' + ev.status + ']</td>' +
         '<td>' + ruleHTML + '</td>' +
-        '<td style="color:' + latencyColor + ';">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
+        '<td style="color:var(--subtext);">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
       '</tr>';
     });
 
-    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:#64748b; text-align:center;">No matching events</td></tr>';
+    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:var(--overlay); text-align:center; padding:20px;">No matching events</td></tr>';
 
     if (autoScroll && streamContainer) {
       streamContainer.scrollTop = streamContainer.scrollHeight;
@@ -2979,11 +2999,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   window.inspectEvent = function(id) {
     var found = allEvents.find(function(e) { return e.id === id; });
     if (!found) return;
-    modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">' +
-      '<div>Source IP: <b style="color:#38bdf8; font-family:JetBrains Mono, monospace; font-size:14px;">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px; font-size:13px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') + '</div>' +
-      '<button class="btn-action" style="background:rgba(56,189,248,0.15); color:#38bdf8;" onclick="inspectIP(\'' + found.client_ip + '\')">🌐 IP Intel & Abuse Report</button>' +
+
+    modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--line); padding-bottom:10px;">' +
+      '<div>SOURCE IP: <b style="color:var(--teal);">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') + '</div>' +
+      '<button class="tui-btn" onclick="inspectIP('' + found.client_ip + '')">🌐 IP INTEL & ABUSE HUB</button>' +
     '</div>' +
-    '<pre style="margin:0; overflow-x:auto;">' + JSON.stringify(found, null, 2) + '</pre>';
+    '<pre style="margin:0; overflow-x:auto; background:var(--crust); padding:12px; border-radius:3px; border:1px solid var(--line);">' + JSON.stringify(found, null, 2) + '</pre>';
     modal.style.display = 'flex';
   };
 
@@ -3000,6 +3021,25 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     kpiClean.textContent = Number(clean).toLocaleString();
     kpiBlockRate.textContent = (stats.block_rate || '0.0%') + ' Rate';
 
+    // Update ASCII meters
+    function makeMeter(val, max) {
+      if (max <= 0) return '[░░░░░░░░░░░░░░░░] 0.0%';
+      var pct = Math.min(100, (val / max) * 100);
+      var filled = Math.round((pct / 100) * 16);
+      var bar = '';
+      for (var i = 0; i < 16; i++) {
+        bar += (i < filled) ? '█' : '░';
+      }
+      return '[' + bar + '] ' + pct.toFixed(1) + '%';
+    }
+
+    var meterBlocked = document.getElementById('kpi-meter-blocked');
+    var meterTarpit = document.getElementById('kpi-meter-tarpit');
+    var meterClean = document.getElementById('kpi-meter-clean');
+    if (meterBlocked) meterBlocked.textContent = makeMeter(blocked, total);
+    if (meterTarpit) meterTarpit.textContent = makeMeter(tarpit, total);
+    if (meterClean) meterClean.textContent = makeMeter(clean, total);
+
     document.getElementById('count-tab-all').textContent = total;
     document.getElementById('count-tab-block').textContent = blocked;
     document.getElementById('count-tab-tarpit').textContent = tarpit;
@@ -3010,7 +3050,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     // Populate Rule Dropdown & List
     if (stats.top_rules && stats.top_rules.length > 0) {
-      // Dropdown sync
       var currentSel = selectRule.value;
       var optHTML = '<option value="ALL">All Threat Rules</option>';
       stats.top_rules.forEach(function(r) {
@@ -3021,12 +3060,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         selectRule.value = currentSel;
       }
 
-      // Progress bars
       var maxRuleCount = stats.top_rules[0].count || 1;
       var rHTML = '';
       stats.top_rules.forEach(function(r) {
         var pct = ((r.count / maxRuleCount) * 100).toFixed(1);
-        rHTML += '<div class="rule-item" onclick="filterByRule(\'' + r.name + '\')">' +
+        rHTML += '<div class="rule-item" onclick="filterByRule('' + r.name + '')">' +
           '<div class="rule-meta">' +
             '<span class="rule-name">🛡️ ' + r.name + '</span>' +
             '<span class="rule-count">' + Number(r.count).toLocaleString() + ' hits</span>' +
@@ -3060,11 +3098,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var flag = getFlagEmoji(item.country_code);
         var countryName = item.country || 'Unknown';
         ipHTML += '<tr>' +
-          '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + ' <span class="ip-info-btn">ℹ️ Intel</span></span></td>' +
-          '<td><span class="country-badge" title="Filter by ' + countryName + '" onclick="filterByCountry(\'' + countryName + '\')">' + flag + ' ' + countryName + '</span></td>' +
+          '<td><span class="ip-clickable" onclick="inspectIP('' + item.name + '')">' + item.name + '</span></td>' +
+          '<td><span style="cursor:pointer;" onclick="filterByCountry('' + countryName + '')">' + flag + ' ' + countryName + '</span></td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
-          '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span> ' +
-          '<button class="btn-report-mini" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></td>' +
+          '<td><span class="tui-tag tag-pink">' + item.blocked + ' blk</span> <span class="tui-tag tag-yellow">' + item.tarpit + ' tar</span> ' +
+          '<button class="tui-btn" style="padding:1px 6px; font-size:10px; margin-left:6px;" onclick="inspectIP('' + item.name + '')">🚨 Report</button></td>' +
         '</tr>';
       });
       if (topIpsTbody.innerHTML !== ipHTML) {
@@ -3076,8 +3114,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (stats.top_paths && stats.top_paths.length > 0) {
       var pHTML = '';
       stats.top_paths.forEach(function(item) {
-        var ruleBadge = item.rule ? '<span class="pill-threat">' + item.rule + '</span>' : '<span style="color:#64748b;">—</span>';
-        pHTML += '<tr onclick="filterByPath(\'' + item.name + '\')">' +
+        var ruleBadge = item.rule ? '<span class="tui-tag tag-pink">' + item.rule + '</span>' : '<span style="color:var(--overlay);">—</span>';
+        pHTML += '<tr onclick="filterByPath('' + item.name + '')" style="cursor:pointer;">' +
           '<td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">' + item.name + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td>' + ruleBadge + '</td>' +
@@ -3094,7 +3132,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       drawTimeline(timelineData);
     }
 
-    // Update Global Origin World Map
     latestStats = stats;
     updateWorldMap(stats);
   }
@@ -3110,6 +3147,25 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderActiveChips();
     renderTable();
     if (latestStats) updateWorldMap(latestStats);
+  };
+
+  window.filterByRule = function(rule) {
+    filters.rule = rule;
+    selectRule.value = rule;
+    renderActiveChips();
+    renderTable();
+  };
+
+  window.filterByIP = function(ip) {
+    filters.ip = ip;
+    renderActiveChips();
+    renderTable();
+  };
+
+  window.filterByPath = function(path) {
+    filters.path = path;
+    renderActiveChips();
+    renderTable();
   };
 
   // Precise GPS coordinates (latitude, longitude) for countries worldwide
@@ -3188,6 +3244,303 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     'KW': { lat: 29.3117, lon: 47.4818, name: 'Kuwait' }
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  // ASCII Matrix World Map Engine
+  // ═══════════════════════════════════════════════════════════════
+  var asciiCanvas = document.getElementById('ascii-matrix-canvas');
+  var asciiCtx = asciiCanvas ? asciiCanvas.getContext('2d') : null;
+  var asciiTip = document.getElementById('ascii-tooltip');
+  var asciiHoverCountry = null;
+  var animFrameId = null;
+  var pulsePhase = 0;
+
+  // Approximate landmass bounding boxes [latMin, latMax, lonMin, lonMax]
+  var landBoxes = [
+    // North America
+    [25, 70, -165, -60],
+    [15, 32, -115, -80],
+    // South America
+    [-55, 12, -82, -35],
+    // Europe
+    [36, 70, -10, 40],
+    // Russia / Northern Asia
+    [45, 75, 40, 180],
+    // Central & East Asia
+    [10, 50, 60, 145],
+    // Indian Subcontinent
+    [8, 35, 68, 92],
+    // Southeast Asia
+    [-10, 25, 95, 140],
+    // Africa
+    [-35, 37, -18, 52],
+    // Australia & NZ
+    [-45, -10, 112, 178],
+    // Greenland
+    [60, 83, -73, -12],
+    // Japan & UK islands
+    [30, 45, 128, 146],
+    [50, 59, -10, 2]
+  ];
+
+  function isLand(lat, lon) {
+    for (var i = 0; i < landBoxes.length; i++) {
+      var b = landBoxes[i];
+      if (lat >= b[0] && lat <= b[1] && lon >= b[2] && lon <= b[3]) {
+        // Exclude large ocean gaps inside rough boxes
+        if (lat < 0 && lon < -25 && lon > -35) return false; // Atlantic gap
+        if (lat > 25 && lat < 50 && lon > -40 && lon < -10) return false; // Mid-Atlantic
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function geoToCanvas(lat, lon, width, height) {
+    // Equirectangular projection
+    var x = ((lon + 180) / 360) * width;
+    // Map latitude -60 to 75
+    var latMin = -60;
+    var latMax = 78;
+    var y = ((latMax - lat) / (latMax - latMin)) * height;
+    return { x: x, y: y };
+  }
+
+  function canvasToGeo(x, y, width, height) {
+    var lon = (x / width) * 360 - 180;
+    var latMax = 78;
+    var latMin = -60;
+    var lat = latMax - (y / height) * (latMax - latMin);
+    return { lat: lat, lon: lon };
+  }
+
+  function initAsciiCanvas() {
+    if (!asciiCanvas || !asciiCtx) return;
+    var rect = asciiCanvas.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    asciiCanvas.width = rect.width * dpr;
+    asciiCanvas.height = rect.height * dpr;
+    asciiCtx.scale(dpr, dpr);
+  }
+
+  function drawAsciiMatrix() {
+    if (!asciiCanvas || !asciiCtx) return;
+    var rect = asciiCanvas.getBoundingClientRect();
+    var w = rect.width;
+    var h = rect.height;
+    if (w <= 0 || h <= 0) return;
+
+    asciiCtx.clearRect(0, 0, w, h);
+
+    // 1. Draw Subtle Background Coordinate Grid
+    asciiCtx.strokeStyle = 'rgba(40, 40, 56, 0.45)';
+    asciiCtx.lineWidth = 1;
+    for (var x = 0; x < w; x += 60) {
+      asciiCtx.beginPath();
+      asciiCtx.moveTo(x, 0);
+      asciiCtx.lineTo(x, h);
+      asciiCtx.stroke();
+    }
+    for (var y = 0; y < h; y += 45) {
+      asciiCtx.beginPath();
+      asciiCtx.moveTo(0, y);
+      asciiCtx.lineTo(w, y);
+      asciiCtx.stroke();
+    }
+
+    // 2. Draw World Landmass Dot Matrix
+    var step = 14;
+    asciiCtx.fillStyle = 'rgba(108, 112, 134, 0.28)';
+    asciiCtx.font = '10px "JetBrains Mono", monospace';
+    asciiCtx.textAlign = 'center';
+    asciiCtx.textBaseline = 'middle';
+
+    for (var cy = step; cy < h; cy += step) {
+      for (var cx = step; cx < w; cx += step) {
+        var geo = canvasToGeo(cx, cy, w, h);
+        if (isLand(geo.lat, geo.lon)) {
+          asciiCtx.fillText('·', cx, cy);
+        }
+      }
+    }
+
+    // 3. Draw Detected Country Blips & Radar Waves
+    var countries = (latestStats && latestStats.top_countries) ? latestStats.top_countries : [];
+    pulsePhase += 0.04;
+    var pulseRadius = 8 + (Math.sin(pulsePhase) + 1) * 6;
+
+    countries.forEach(function(c) {
+      var code = (c.country_code || '').toUpperCase();
+      if (!code || code === 'LAN' || code === 'LOCAL') return;
+      var coord = countryCoords[code];
+      if (!coord) return;
+
+      var pos = geoToCanvas(coord.lat, coord.lon, w, h);
+      var total = c.count || 0;
+      var blocked = c.blocked || 0;
+      var tarpit = c.tarpit || 0;
+
+      var color = '#a6e3a1'; // Clean green
+      if (blocked > 0) color = '#f38ba8'; // Pink threat
+      else if (tarpit > 0) color = '#f9e2af'; // Yellow tarpit
+
+      var isSelected = (filters.country === c.name || filters.country === code);
+      var isHovered = (asciiHoverCountry && (asciiHoverCountry.country_code === code));
+
+      // Outer Radar Pulse
+      asciiCtx.strokeStyle = color;
+      asciiCtx.globalAlpha = 0.35 + (Math.sin(pulsePhase) + 1) * 0.2;
+      asciiCtx.lineWidth = isSelected ? 2 : 1;
+      asciiCtx.beginPath();
+      asciiCtx.arc(pos.x, pos.y, isSelected ? pulseRadius * 1.3 : pulseRadius, 0, 2 * Math.PI);
+      asciiCtx.stroke();
+      asciiCtx.globalAlpha = 1.0;
+
+      // Inner Core Dot
+      asciiCtx.fillStyle = color;
+      asciiCtx.beginPath();
+      asciiCtx.arc(pos.x, pos.y, isSelected ? 5 : 3.5, 0, 2 * Math.PI);
+      asciiCtx.fill();
+
+      // Country Tag [ US 14.2k ]
+      var flag = getFlagEmoji(code);
+      var tagText = flag + ' ' + (total >= 1000 ? (total/1000).toFixed(1) + 'k' : total);
+      var pad = 4;
+      asciiCtx.font = '600 10px "JetBrains Mono", monospace';
+      var textW = asciiCtx.measureText(tagText).width;
+
+      var tagX = pos.x + 8;
+      var tagY = pos.y - 8;
+      if (tagX + textW + 8 > w) tagX = pos.x - textW - 14;
+      if (tagY < 16) tagY = pos.y + 16;
+
+      // Tag Background
+      asciiCtx.fillStyle = isSelected ? 'rgba(49, 50, 68, 0.95)' : 'rgba(24, 24, 37, 0.88)';
+      asciiCtx.strokeStyle = isSelected ? '#94e2d5' : (isHovered ? '#cdd6f4' : 'rgba(59, 59, 79, 0.9)');
+      asciiCtx.lineWidth = 1;
+
+      asciiCtx.fillRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
+      asciiCtx.strokeRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
+
+      // Tag Text
+      asciiCtx.fillStyle = isSelected ? '#94e2d5' : (blocked > 0 ? '#f38ba8' : '#cdd6f4');
+      asciiCtx.textAlign = 'left';
+      asciiCtx.textBaseline = 'middle';
+      asciiCtx.fillText(tagText, tagX, tagY);
+    });
+
+    if (mapMode === 'ascii') {
+      animFrameId = requestAnimationFrame(drawAsciiMatrix);
+    }
+  }
+
+  // Canvas Mouse Interaction (Hover tooltip & Click filter)
+  if (asciiCanvas) {
+    asciiCanvas.addEventListener('mousemove', function(e) {
+      var rect = asciiCanvas.getBoundingClientRect();
+      var mx = e.clientX - rect.left;
+      var my = e.clientY - rect.top;
+      var countries = (latestStats && latestStats.top_countries) ? latestStats.top_countries : [];
+
+      var found = null;
+      var minDist = 22;
+
+      for (var i = 0; i < countries.length; i++) {
+        var c = countries[i];
+        var code = (c.country_code || '').toUpperCase();
+        var coord = countryCoords[code];
+        if (!coord) continue;
+        var pos = geoToCanvas(coord.lat, coord.lon, rect.width, rect.height);
+        var dist = Math.hypot(pos.x - mx, pos.y - my);
+        if (dist < minDist) {
+          minDist = dist;
+          found = c;
+        }
+      }
+
+      asciiHoverCountry = found;
+      if (found) {
+        asciiCanvas.style.cursor = 'pointer';
+        var code = (found.country_code || '').toUpperCase();
+        var flag = getFlagEmoji(code);
+        var total = found.count || 0;
+        var blocked = found.blocked || 0;
+        var tarpit = found.tarpit || 0;
+        var clean = Math.max(0, total - blocked - tarpit);
+        var rate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
+
+        var tip = '┌─ [ ' + flag + ' ' + found.name.toUpperCase() + ' ] ────────────────┐
+' +
+          '│ Hits:    ' + Number(total).toLocaleString().padEnd(12) + ' │
+' +
+          '│ Threats: ' + (blocked + ' (' + rate + ')').padEnd(12) + ' │
+' +
+          '│ Tarpit:  ' + String(tarpit).padEnd(12) + ' │
+' +
+          '│ Clean:   ' + String(clean).padEnd(12) + ' │
+' +
+          '│ Click to filter telemetry       │
+' +
+          '└─────────────────────────────────┘';
+
+        asciiTip.textContent = tip;
+        var tipX = mx + 16;
+        var tipY = my + 16;
+        if (tipX + 260 > rect.width) tipX = mx - 270;
+        if (tipY + 130 > rect.height) tipY = my - 130;
+        asciiTip.style.left = tipX + 'px';
+        asciiTip.style.top = tipY + 'px';
+        asciiTip.style.display = 'block';
+      } else {
+        asciiCanvas.style.cursor = 'default';
+        asciiTip.style.display = 'none';
+      }
+    });
+
+    asciiCanvas.addEventListener('mouseleave', function() {
+      asciiHoverCountry = null;
+      asciiTip.style.display = 'none';
+    });
+
+    asciiCanvas.addEventListener('click', function() {
+      if (asciiHoverCountry) {
+        filterByCountry(asciiHoverCountry.name);
+      }
+    });
+  }
+
+  window.setMapMode = function(mode) {
+    mapMode = mode;
+    var btnAscii = document.getElementById('btn-mode-ascii');
+    var btnOsm = document.getElementById('btn-mode-osm');
+    var asciiContainer = document.getElementById('ascii-map-container');
+    var osmContainer = document.getElementById('osm-map-container');
+
+    if (mode === 'ascii') {
+      btnAscii.classList.add('active');
+      btnOsm.classList.remove('active');
+      asciiContainer.style.display = 'block';
+      osmContainer.style.display = 'none';
+      initAsciiCanvas();
+      if (!animFrameId) drawAsciiMatrix();
+    } else {
+      btnOsm.classList.add('active');
+      btnAscii.classList.remove('active');
+      asciiContainer.style.display = 'none';
+      osmContainer.style.display = 'block';
+      if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      initLeafletMap();
+      if (leafletMap) {
+        setTimeout(function() { leafletMap.invalidateSize(); }, 50);
+      }
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // Leaflet OSM Dark Engine
+  // ═══════════════════════════════════════════════════════════════
   var leafletMap = null;
   var mapMarkersLayer = null;
 
@@ -3210,7 +3563,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>'
+        attribution: '&copy; OpenStreetMap'
       }).addTo(leafletMap);
 
       mapMarkersLayer = L.layerGroup().addTo(leafletMap);
@@ -3224,12 +3577,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   window.resetMapZoom = function() {
-    if (leafletMap) {
+    if (mapMode === 'osm' && leafletMap) {
       leafletMap.setView([22, 10], 2);
+    } else if (mapMode === 'ascii') {
+      initAsciiCanvas();
     }
   };
 
   window.addEventListener('resize', function() {
+    initAsciiCanvas();
     if (leafletMap) leafletMap.invalidateSize();
   });
 
@@ -3241,11 +3597,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       countEl.textContent = countries.length + (countries.length === 1 ? ' Country Detected' : ' Countries Detected');
     }
 
-    if (!leafletMap && typeof L !== 'undefined') {
-      initLeafletMap();
-    }
-
-    // 1. Render Interactive Markers on Leaflet map
+    // 1. Render Interactive Markers on Leaflet map (if active)
     if (leafletMap && mapMarkersLayer) {
       mapMarkersLayer.clearLayers();
 
@@ -3258,20 +3610,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var total = c.count || 0;
         var blocked = c.blocked || 0;
         var tarpit = c.tarpit || 0;
-        var clean = total - blocked - tarpit;
-        if (clean < 0) clean = 0;
+        var clean = Math.max(0, total - blocked - tarpit);
 
-        var color = '#10b981';
-        if (blocked > 0) color = '#f43f5e';
-        else if (tarpit > 0) color = '#f59e0b';
+        var color = '#a6e3a1';
+        if (blocked > 0) color = '#f38ba8';
+        else if (tarpit > 0) color = '#f9e2af';
 
         var flag = getFlagEmoji(code);
         var isFilterActive = filters.country === c.name || filters.country === code;
 
         var markerHtml = '<div class="soc-marker-wrap">' +
           '<div class="soc-marker-ring" style="border-color:' + color + ';"></div>' +
-          '<div class="soc-marker-core" style="background:' + color + '; box-shadow:0 0 10px ' + color + ';"></div>' +
-          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1.5px solid #38bdf8; box-shadow:0 0 8px #38bdf8;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
+          '<div class="soc-marker-core" style="background:' + color + '; box-shadow:0 0 8px ' + color + ';"></div>' +
+          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1px solid #94e2d5; color:#94e2d5;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
         '</div>';
 
         var customIcon = L.divIcon({
@@ -3284,21 +3635,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var marker = L.marker([geo.lat, geo.lon], { icon: customIcon });
 
         var blockRate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
-        var tipHtml = '<div style="font-weight:700; font-size:13px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">' +
-            '<span>' + flag + '</span> <span>' + (geo.name || c.name) + '</span> <span style="font-size:10px; color:#94a3b8; font-weight:normal;">[' + code + ']</span>' +
+        var tipHtml = '<div style="font-weight:700; font-size:12px; margin-bottom:4px; font-family:var(--mono);">' +
+            flag + ' ' + (geo.name || c.name) + ' [' + code + ']' +
           '</div>' +
-          '<div style="display:grid; grid-template-columns:auto auto; gap:3px 14px; font-family:JetBrains Mono, monospace; font-size:11px;">' +
-            '<span style="color:#94a3b8;">Total Hits:</span><b style="color:#f8fafc;">' + Number(total).toLocaleString() + '</b>' +
-            '<span style="color:#94a3b8;">Threat Blocks:</span><b style="color:#fb7185;">' + blocked + ' (' + blockRate + ')</b>' +
-            '<span style="color:#94a3b8;">Tarpit Throttled:</span><b style="color:#fcd34d;">' + tarpit + '</b>' +
-            '<span style="color:#94a3b8;">Clean Ingress:</span><b style="color:#6ee7b7;">' + clean + '</b>' +
+          '<div style="display:grid; grid-template-columns:auto auto; gap:2px 10px; font-family:var(--mono); font-size:11px;">' +
+            '<span style="color:var(--overlay);">Hits:</span><b style="color:var(--text);">' + Number(total).toLocaleString() + '</b>' +
+            '<span style="color:var(--overlay);">Blocked:</span><b style="color:var(--pink);">' + blocked + ' (' + blockRate + ')</b>' +
+            '<span style="color:var(--overlay);">Tarpit:</span><b style="color:var(--yellow);">' + tarpit + '</b>' +
+            '<span style="color:var(--overlay);">Clean:</span><b style="color:var(--green);">' + clean + '</b>' +
           '</div>' +
-          '<div style="font-size:10px; color:#38bdf8; margin-top:6px; text-align:right;">Click marker to filter ➔</div>';
+          '<div style="font-size:10px; color:var(--teal); margin-top:4px;">Click marker to filter ➔</div>';
 
         marker.bindTooltip(tipHtml, {
           direction: 'top',
-          className: 'soc-map-tooltip',
-          offset: [0, -14]
+          offset: [0, -12]
         });
 
         marker.on('click', function() {
@@ -3309,11 +3659,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       });
     }
 
-    // 2. Render Sidebar country breakdown
+    // 2. Render Sidebar country breakdown with ASCII Progress Bars
     var listEl = document.getElementById('map-countries-list');
     if (listEl) {
       if (countries.length === 0) {
-        listEl.innerHTML = '<div style="color:#64748b; font-size:11px; font-style:italic;">No countries detected yet</div>';
+        listEl.innerHTML = '<div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">No countries detected yet</div>';
         return;
       }
 
@@ -3325,50 +3675,33 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var total = c.count || 0;
         var blocked = c.blocked || 0;
         var tarpit = c.tarpit || 0;
-        var clean = total - blocked - tarpit;
-        if (clean < 0) clean = 0;
-        var pct = ((total / maxHits) * 100).toFixed(0);
         var isFilterActive = filters.country === c.name || filters.country === code;
 
-        listHTML += '<div class="map-country-item' + (isFilterActive ? ' active' : '') + '" onclick="filterByCountry(\'' + c.name + '\')">' +
-          '<div style="flex:1; min-width:0;">' +
-            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">' +
-              '<span style="font-weight:600; font-size:12px; color:#f1f5f9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + flag + ' ' + c.name + '</span>' +
-              '<span style="font-family:JetBrains Mono, monospace; font-size:11px; font-weight:700; color:' + (blocked > 0 ? '#fb7185' : '#38bdf8') + ';">' + Number(total).toLocaleString() + '</span>' +
-            '</div>' +
-            '<div style="height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">' +
-              '<div style="width:' + pct + '%; height:100%; background:' + (blocked > 0 ? '#f43f5e' : (tarpit > 0 ? '#f59e0b' : '#10b981')) + '; border-radius:2px;"></div>' +
-            '</div>' +
-            '<div style="display:flex; gap:6px; font-size:10px; margin-top:3px; color:#64748b;">' +
-              (blocked > 0 ? '<span style="color:#fb7185;">' + blocked + ' blk</span>' : '') +
-              (tarpit > 0 ? '<span style="color:#fcd34d;">' + tarpit + ' tar</span>' : '') +
-              (clean > 0 ? '<span style="color:#6ee7b7;">' + clean + ' cln</span>' : '') +
-            '</div>' +
+        // Make ASCII mini bar (10 chars)
+        var pct = (total / maxHits);
+        var filled = Math.max(1, Math.round(pct * 10));
+        var bar = '';
+        for (var b = 0; b < 10; b++) {
+          bar += (b < filled) ? '█' : '░';
+        }
+
+        var barColor = blocked > 0 ? 'var(--pink)' : (tarpit > 0 ? 'var(--yellow)' : 'var(--green)');
+
+        listHTML += '<div class="map-country-item' + (isFilterActive ? ' active' : '') + '" onclick="filterByCountry('' + c.name + '')">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+            '<span style="font-weight:600; color:var(--text);">' + flag + ' ' + c.name + '</span>' +
+            '<span style="font-weight:700; color:' + (blocked > 0 ? 'var(--pink)' : 'var(--teal)') + ';">' + Number(total).toLocaleString() + '</span>' +
+          '</div>' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--overlay); margin-top:2px;">' +
+            '<span style="color:' + barColor + ';">[' + bar + ']</span>' +
+            '<span>' + (blocked > 0 ? '<span style="color:var(--pink);">' + blocked + ' blk</span> ' : '') +
+            (tarpit > 0 ? '<span style="color:var(--yellow);">' + tarpit + ' tar</span> ' : '') + '</span>' +
           '</div>' +
         '</div>';
       });
       listEl.innerHTML = listHTML;
     }
   }
-
-  window.filterByRule = function(rule) {
-    filters.rule = rule;
-    selectRule.value = rule;
-    renderActiveChips();
-    renderTable();
-  };
-
-  window.filterByIP = function(ip) {
-    filters.ip = ip;
-    renderActiveChips();
-    renderTable();
-  };
-
-  window.filterByPath = function(path) {
-    filters.path = path;
-    renderActiveChips();
-    renderTable();
-  };
 
   function updateDonut(clean, blocked, tarpit, total) {
     if (total === 0) total = 1;
@@ -3419,10 +3752,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     var w = 800;
     var h = 240;
-    var padLeft = 55;
-    var padRight = 20;
-    var padTop = 20;
-    var padBottom = 32;
+    var padLeft = 45;
+    var padRight = 15;
+    var padTop = 15;
+    var padBottom = 26;
 
     var chartW = w - padLeft - padRight;
     var chartH = h - padTop - padBottom;
@@ -3431,7 +3764,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     data.forEach(function(d) {
       if (d.total > maxVal) maxVal = d.total;
     });
-    // Round maxVal up to nice increment
     maxVal = Math.ceil(maxVal * 1.15);
 
     // 1. Draw Y-Axis Gridlines & Labels
@@ -3441,13 +3773,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     for (var i = 0; i <= yTicks; i++) {
       var val = Math.round((maxVal / yTicks) * i);
       var y = padTop + chartH - (i / yTicks) * chartH;
-      // Dotted horizontal gridline
-      gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3,3" />';
-      // Y-axis tick text with guaranteed padding from axis line
-      axesHTML += '<text x="' + (padLeft - 10) + '" y="' + (y + 4) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
+      gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="rgba(255,255,255,0.06)" stroke-dasharray="2,2" />';
+      axesHTML += '<text x="' + (padLeft - 8) + '" y="' + (y + 4) + '" fill="var(--overlay)" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
     }
 
-    // 2. Draw X-Axis Ticks & Labels (Deduplicated, Evenly Distributed, Zero Overlap)
+    // 2. Draw X-Axis Ticks & Labels
     var step = chartW / Math.max(1, data.length - 1);
     var tickIndices = [];
     if (data.length === 1) {
@@ -3472,8 +3802,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (idx === 0) anchor = 'start';
       else if (idx === data.length - 1) anchor = 'end';
 
-      axesHTML += '<text x="' + x + '" y="' + (h - 8) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="' + anchor + '">' + (d.time || '') + '</text>';
-      gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.03)" />';
+      axesHTML += '<text x="' + x + '" y="' + (h - 6) + '" fill="var(--overlay)" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="' + anchor + '">' + (d.time || '') + '</text>';
+      gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.04)" />';
     });
 
     gridGroup.innerHTML = gridHTML;
@@ -3546,23 +3876,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       tarpitLine.style.display = 'none';
     }
 
-    // Data points indicator (circles)
-    if (pointsGroup) {
-      var ptsHTML = '';
-      if (data.length <= 30) {
-        data.forEach(function(d, i) {
-          if (i < ptsClean.length && visibleSeries.clean && d.clean > 0) {
-            ptsHTML += '<circle cx="' + ptsClean[i].x.toFixed(1) + '" cy="' + ptsClean[i].y.toFixed(1) + '" r="3" fill="#10b981" stroke="#070b14" stroke-width="1.5" />';
-          }
-          if (i < ptsBlocked.length && visibleSeries.blocked && d.blocked > 0) {
-            ptsHTML += '<circle cx="' + ptsBlocked[i].x.toFixed(1) + '" cy="' + ptsBlocked[i].y.toFixed(1) + '" r="3" fill="#f43f5e" stroke="#070b14" stroke-width="1.5" />';
-          }
-        });
-      }
-      pointsGroup.innerHTML = ptsHTML;
-    }
-
-    // 4. Interactive Crosshair & Tooltip Hover
+    // Interactive Hover
     overlay.onmousemove = function(e) {
       var rect = overlay.getBoundingClientRect();
       var mouseX = (e.clientX - rect.left) * (w / rect.width);
@@ -3573,7 +3887,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         return;
       }
 
-      // Find nearest data point
       var closest = pointMap[0];
       var minDiff = 999999;
       pointMap.forEach(function(pt) {
@@ -3600,15 +3913,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       var d = closest.data;
       var rate = d.total > 0 ? ((d.blocked / d.total) * 100).toFixed(1) + '%' : '0.0%';
-      var toolHTML = '<span style="color:#38bdf8; font-weight:700;">⏱ ' + d.time + ' UTC</span> &nbsp;|&nbsp; ' +
-        '<span style="color:#ffffff;">Total: <b>' + d.total + '</b></span> &nbsp;|&nbsp; ' +
-        '<span style="color:#10b981;">Clean: <b>' + d.clean + '</b></span> &nbsp;|&nbsp; ' +
-        '<span style="color:#f43f5e;">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></span> &nbsp;|&nbsp; ' +
-        '<span style="color:#f59e0b;">Tarpit: <b>' + d.tarpit + '</b></span>';
+      var toolHTML = '<span style="color:var(--teal); font-weight:700;">⏱ ' + d.time + ' UTC</span> &nbsp;|&nbsp; ' +
+        '<span style="color:var(--text-hi);">Total: <b>' + d.total + '</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:var(--green);">Clean: <b>' + d.clean + '</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:var(--pink);">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:var(--yellow);">Tarpit: <b>' + d.tarpit + '</b></span>';
 
       tooltip.innerHTML = toolHTML;
 
-      // Position HUD banner neatly centered at top of chart without overflowing card title
       var box = document.getElementById('timeline-box');
       var boxW = box ? box.clientWidth : 800;
       var clientX = (closest.x / w) * boxW;
@@ -3629,7 +3941,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   function renderSources(sources) {
     if (!sources) return;
-    var sHTML = '<span style="font-weight: 600; color: #cbd5e1;">🌐 Monitored Nodes:</span>';
+    var sHTML = '<span style="font-weight: 600; color: var(--text-hi);">🌐 MONITORED NODES:</span>';
     var count = 0;
 
     if (sources.mode === 'file') {
@@ -3647,13 +3959,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     if (sources.agents && sources.agents.length > 0) {
       sources.agents.forEach(function(ag) {
-        sHTML += '<span class="source-tag">🌐 ' + ag.name + ' (' + (ag.remote_ip || 'remote') + ') <span style="color:#a78bfa;">🔒 X25519</span></span>';
+        sHTML += '<span class="source-tag">🌐 ' + ag.name + ' (' + (ag.remote_ip || 'remote') + ') <span style="color:var(--mauve);">🔒 X25519</span></span>';
         count++;
       });
     }
 
     if (count === 0 && sources.mode !== 'file') {
-      sHTML += '<span style="color: #64748b; font-style: italic;">Awaiting local containers or remote agents (<code>rwarden push</code>)...</span>';
+      sHTML += '<span style="color: var(--overlay); font-style: italic;">Awaiting local containers or remote agents (<code>rwarden push</code>)...</span>';
     }
     sourcesContainer.innerHTML = sHTML;
   }
@@ -3720,7 +4032,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (!ip) return;
     var modal = document.getElementById('ip-modal');
     var content = document.getElementById('ip-modal-content');
-    content.innerHTML = '<div style="text-align:center; padding:40px; color:#94a3b8;"><div class="pulse-dot" style="margin:0 auto 12px auto;"></div>Fetching IP geolocation & threat intelligence via ip-api.com for <b>' + ip + '</b>...</div>';
+    content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--subtext);"><div class="pulse-dot" style="margin:0 auto 12px auto;"></div>Fetching IP geolocation & threat intelligence for <b>' + ip + '</b>...</div>';
     modal.style.display = 'flex';
 
     var eventsForIP = allEvents.filter(function(e) { return e.client_ip === ip; });
@@ -3788,21 +4100,21 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       '<div>' +
         '<div class="ip-title-address">' +
           '<span>' + ip + '</span>' +
-          '<button class="btn-action" style="padding:4px 8px; font-size:11px;" onclick="copyText(\'' + ip + '\', this)">📋 Copy</button>' +
+          '<button class="tui-btn" style="padding:2px 6px; font-size:10.5px;" onclick="copyText('' + ip + '', this)">📋 Copy</button>' +
         '</div>' +
         '<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
           '<span class="ip-geo-badge">' + flag + ' ' + country + (city ? ' — ' + city : '') + '</span>' +
-          '<span style="font-size:11px; color:#94a3b8; font-family:JetBrains Mono, monospace;">' + org + '</span>' +
+          '<span style="font-size:11px; color:var(--subtext);">' + org + '</span>' +
         '</div>' +
       '</div>' +
       '<div style="display:flex; gap:8px;">' +
-        '<button class="btn-action" style="background:rgba(56,189,248,0.15); color:#38bdf8;" onclick="filterAndCloseIP(\'' + ip + '\')">🔍 Filter Logs</button>' +
+        '<button class="tui-btn" onclick="filterAndCloseIP('' + ip + '')">🔍 Filter Logs</button>' +
       '</div>' +
     '</div>' +
 
     '<div class="ip-intel-grid">' +
       '<div class="ip-box">' +
-        '<div class="ip-box-title">🌍 Geolocation & Network (https://ip-api.com/)</div>' +
+        '<div class="ip-box-title">🌍 Geolocation & Network (MaxMind / IP-API)</div>' +
         '<div class="ip-kv-row"><span class="ip-kv-label">Country:</span><span class="ip-kv-val">' + flag + ' ' + country + ' (' + (countryCode || 'N/A') + ')</span></div>' +
         '<div class="ip-kv-row"><span class="ip-kv-label">City / Region:</span><span class="ip-kv-val">' + city + (region ? ', ' + region : '') + '</span></div>' +
         '<div class="ip-kv-row"><span class="ip-kv-label">ISP:</span><span class="ip-kv-val">' + isp + '</span></div>' +
@@ -3813,30 +4125,30 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       '<div class="ip-box">' +
         '<div class="ip-box-title">🛡️ RouteWarden Gateway Telemetry</div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Observed Hits:</span><span class="ip-kv-val" style="color:#ffffff;">' + totalHits + ' requests</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Blocked (403):</span><span class="ip-kv-val" style="color:#fb7185;">' + blockedHits + ' threats</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Tarpitted (429):</span><span class="ip-kv-val" style="color:#fcd34d;">' + tarpitHits + ' throttled</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Triggered Rules:</span><span class="ip-kv-val" style="color:#e2e8f0;">' + rulesList + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Threat Severity:</span><span class="ip-kv-val">' + (blockedHits > 0 ? '<span class="pill-threat">HOSTILE</span>' : (tarpitHits > 0 ? '<span class="pill-tarpit">SUSPICIOUS</span>' : '<span class="pill-clean">BENIGN</span>')) + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Observed Hits:</span><span class="ip-kv-val" style="color:var(--text-hi);">' + totalHits + ' requests</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Blocked (403):</span><span class="ip-kv-val" style="color:var(--pink);">' + blockedHits + ' threats</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Tarpitted (429):</span><span class="ip-kv-val" style="color:var(--yellow);">' + tarpitHits + ' throttled</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Triggered Rules:</span><span class="ip-kv-val" style="color:var(--text);">' + rulesList + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Threat Severity:</span><span class="ip-kv-val">' + (blockedHits > 0 ? '<span class="tui-tag tag-pink">HOSTILE</span>' : (tarpitHits > 0 ? '<span class="tui-tag tag-yellow">SUSPICIOUS</span>' : '<span class="tui-tag tag-green">BENIGN</span>')) + '</span></div>' +
       '</div>' +
     '</div>' +
 
     '<div class="abuse-section">' +
       '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
-        '<span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#fb7185;">🚨 Abuse Reporting & Investigation</span>' +
+        '<span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--pink);">🚨 Abuse Reporting & External Intelligence</span>' +
         '<div class="abuse-actions-row">' +
-          '<a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-abuse">🚨 Report on AbuseIPDB</a>' +
-          '<a href="https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-intel">🔬 VirusTotal</a>' +
-          '<a href="https://who.is/whois-ip/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-intel">🌐 WHOIS</a>' +
+          '<a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🚨 AbuseIPDB</a>' +
+          '<a href="https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🔬 VirusTotal</a>' +
+          '<a href="https://who.is/whois-ip/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🌐 WHOIS</a>' +
         '</div>' +
       '</div>' +
 
-      '<div style="font-size:11px; color:#cbd5e1; margin-top:2px;">Standardized incident report generated from RouteWarden logs (ready to submit to upstream host / CERT):</div>' +
+      '<div style="font-size:10.5px; color:var(--subtext);">Standardized incident report generated from RouteWarden logs (ready to submit to host / CERT):</div>' +
       '<textarea class="abuse-report-textarea" id="abuse-report-text" readonly>' + abuseReportText + '</textarea>' +
 
-      '<div style="display:flex; justify-content:flex-end; gap:10px; align-items:center; flex-wrap:wrap;">' +
-        '<button class="btn-action" id="btn-copy-report" onclick="copyReport()"><span id="copy-report-icon">📋</span> Copy Incident Report</button>' +
-        '<a href="mailto:abuse@' + encodeURIComponent(isp.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com') + '?subject=' + encodeURIComponent('Abuse Report: Malicious Activity from ' + ip) + '&body=' + encodeURIComponent(abuseReportText) + '" class="btn-action" style="text-decoration:none;">📧 Mail Host Abuse Contact</a>' +
+      '<div style="display:flex; justify-content:flex-end; gap:8px; align-items:center; flex-wrap:wrap;">' +
+        '<button class="tui-btn" id="btn-copy-report" onclick="copyReport()"><span id="copy-report-icon">📋</span> Copy Incident Report</button>' +
+        '<a href="mailto:abuse@' + encodeURIComponent(isp.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com') + '?subject=' + encodeURIComponent('Abuse Report: Malicious Activity from ' + ip) + '&body=' + encodeURIComponent(abuseReportText) + '" class="tui-btn">📧 Mail Host Abuse Contact</a>' +
       '</div>' +
     '</div>';
 
@@ -3912,18 +4224,22 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       } catch(err) {}
     });
     es.addEventListener('connected', function() {
-      document.getElementById('stream-status').textContent = 'LIVE STREAM';
+      var el = document.getElementById('stream-status');
+      if (el) el.textContent = 'LIVE STREAM';
     });
     es.onerror = function() {
-      document.getElementById('stream-status').textContent = 'RECONNECTING...';
+      var el = document.getElementById('stream-status');
+      if (el) el.textContent = 'RECONNECTING...';
     };
   }
 
+  // Initial startup
+  initAsciiCanvas();
+  drawAsciiMatrix();
   fetchStats();
   initSSE();
   setInterval(fetchStats, 3000);
 })();
 </script>
 </body>
-</html>
-`
+</html>`
