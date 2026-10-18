@@ -2576,7 +2576,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="table-container" id="stream-table-container">
+    <div class="table-container" id="stream-table-container" style="position:relative;">
       <table class="soc-table">
         <thead>
           <tr>
@@ -2592,6 +2592,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         </thead>
         <tbody id="stream-tbody"></tbody>
       </table>
+      <div style="position:sticky; bottom:12px; display:flex; justify-content:center; pointer-events:none; width:100%; margin-top:-36px;">
+        <button id="btn-scroll-top" class="tui-btn" style="display:none; pointer-events:auto; background:var(--teal); color:var(--crust); font-weight:700; border-color:var(--teal); box-shadow:0 2px 10px rgba(0,0,0,0.35); cursor:pointer;" onclick="jumpToLatest()">▲ JUMP TO LATEST</button>
+      </div>
     </div>
   </div>
 
@@ -2981,7 +2984,28 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     autoScroll = !autoScroll;
     btnToggleScroll.textContent = autoScroll ? '⏸ Pause' : '▶ Resume';
     btnToggleScroll.style.color = autoScroll ? 'var(--text)' : 'var(--yellow)';
+    if (autoScroll) {
+      renderTable();
+    }
   });
+
+  window.jumpToLatest = function() {
+    if (streamContainer) {
+      streamContainer.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    if (!autoScroll) {
+      btnToggleScroll.click();
+    }
+  };
+
+  if (streamContainer) {
+    streamContainer.addEventListener('scroll', function() {
+      var btn = document.getElementById('btn-scroll-top');
+      if (btn) {
+        btn.style.display = streamContainer.scrollTop > 100 ? 'inline-flex' : 'none';
+      }
+    });
+  }
 
   btnClearLogs.addEventListener('click', function() {
     allEvents = [];
@@ -3121,7 +3145,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   function renderTable() {
     var filtered = getFilteredEvents();
     var rowsHTML = '';
-    filtered.slice(-200).forEach(function(ev) {
+    filtered.slice(0, 250).forEach(function(ev) {
       var verdictClass = 'verdict-allow';
       var verdictLabel = '[ ALLOW ]';
       if (ev.verdict === 'BLOCK') {
@@ -3162,8 +3186,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:var(--overlay); text-align:center; padding:20px;">No matching events</td></tr>';
 
-    if (autoScroll && streamContainer) {
-      streamContainer.scrollTop = streamContainer.scrollHeight;
+    if (streamContainer) {
+      if (autoScroll && streamContainer.scrollTop <= 30) {
+        streamContainer.scrollTop = 0;
+      }
     }
   }
 
@@ -4077,7 +4103,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           updateKPIs(data);
           if (data.sources) renderSources(data.sources);
           if (data.recent_events && allEvents.length === 0) {
-            allEvents = data.recent_events.reverse();
+            allEvents = data.recent_events;
             renderTable();
           }
         } catch(e) {}
@@ -4092,9 +4118,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     es.addEventListener('event', function(e) {
       try {
         var ev = JSON.parse(e.data);
-        allEvents.push(ev);
-        if (allEvents.length > 1000) allEvents.shift();
-        renderTable();
+        allEvents.unshift(ev);
+        if (allEvents.length > 1000) allEvents.pop();
+        if (autoScroll) {
+          renderTable();
+        }
       } catch(err) {}
     });
     es.addEventListener('connected', function() {
