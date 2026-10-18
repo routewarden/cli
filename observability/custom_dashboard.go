@@ -2564,7 +2564,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     </button>
     <button class="tui-btn" id="btn-toggle-scroll">⏸ Pause</button>
     <button class="tui-btn" id="btn-export-json">📥 Export</button>
-    <button class="tui-btn" id="btn-clear-logs">🗑 Clear</button>
   </div>
 </div>
 
@@ -3036,7 +3035,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var topIpsTbody = document.getElementById('top-ips-tbody');
   var topPathsTbody = document.getElementById('top-paths-tbody');
   var btnToggleScroll = document.getElementById('btn-toggle-scroll');
-  var btnClearLogs = document.getElementById('btn-clear-logs');
   var btnExportJSON = document.getElementById('btn-export-json');
   var btnResetFilters = document.getElementById('btn-reset-filters');
   var searchInput = document.getElementById('search-input');
@@ -3348,11 +3346,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
     });
   }
-
-  btnClearLogs.addEventListener('click', function() {
-    allEvents = [];
-    renderTable();
-  });
 
   btnResetFilters.addEventListener('click', function() {
     resetAllFilters();
