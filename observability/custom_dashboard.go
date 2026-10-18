@@ -2427,177 +2427,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- ── Section 02: World Map & Threat Geo-Distribution ───── -->
+  <!-- ── Section 02: Real-Time SOC Security Event Stream ───── -->
   <div class="head">
-    <h2>02 // GEO-DISTRIBUTION & ATTACK MATRIX</h2>
-    <div class="rule"></div>
-    <span class="cmd">geo.threat.matrix</span>
-  </div>
-
-  <div class="term">
-    <div class="cap">
-      <span>🌐 GLOBAL TRAFFIC & THREAT RADAR</span>
-      <span id="map-country-count">0 Countries Detected</span>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button class="tui-btn active" id="btn-mode-ascii" onclick="setMapMode('ascii')">[📟 ASCII MATRIX]</button>
-        <button class="tui-btn" id="btn-mode-osm" onclick="setMapMode('osm')">[🌍 OSM DARK]</button>
-        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET]</button>
-      </div>
-    </div>
-
-    <div class="map-body">
-      <div class="map-stage">
-        <!-- Mode 1: ASCII Matrix Dot Map -->
-        <div id="ascii-map-container">
-          <canvas id="ascii-matrix-canvas"></canvas>
-          <div id="ascii-tooltip" class="ascii-tip"></div>
-        </div>
-
-        <!-- Mode 2: Leaflet Dark OpenStreetMap -->
-        <div id="osm-map-container" style="display:none;">
-          <div id="leaflet-map"></div>
-        </div>
-      </div>
-
-      <!-- Right Sidebar: Detected Countries Breakdown -->
-      <div class="map-sidebar">
-        <div class="map-sidebar-title">
-          <span>Detected Countries</span>
-          <span style="color:var(--teal);">Real-Time</span>
-        </div>
-        <div id="map-countries-list" class="map-countries-list">
-          <div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">Awaiting parsed telemetry...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Section 03: Telemetry Dynamics ────────────────────── -->
-  <div class="head">
-    <h2>03 // TELEMETRY DYNAMICS & THREAT SIGNATURES</h2>
-    <div class="rule"></div>
-    <span class="cmd">sig.threat.timeline</span>
-  </div>
-
-  <div class="charts-grid">
-    <!-- Real-Time Timeline Curve -->
-    <div class="chart-card">
-      <div class="card-cap">
-        <span>📈 INGRESS VELOCITY & THREAT TIMELINE</span>
-        <div class="timeline-legend">
-          <span class="legend-item" id="legend-clean"><span style="color:var(--green);">●</span> Clean</span>
-          <span class="legend-item" id="legend-blocked"><span style="color:var(--pink);">■</span> Blocked</span>
-          <span class="legend-item" id="legend-tarpit"><span style="color:var(--yellow);">▲</span> Tarpit</span>
-        </div>
-      </div>
-      <div class="timeline-container" id="timeline-box">
-        <div class="chart-tooltip" id="timeline-tooltip"></div>
-        <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#00ff9d" stop-opacity="0.25"/>
-              <stop offset="100%" stop-color="#00ff9d" stop-opacity="0.0"/>
-            </linearGradient>
-            <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#ff3366" stop-opacity="0.3"/>
-              <stop offset="100%" stop-color="#ff3366" stop-opacity="0.0"/>
-            </linearGradient>
-          </defs>
-          <g id="grid-group"></g>
-          <g id="axes-group"></g>
-          <path id="path-clean-area" fill="url(#grad-clean)"></path>
-          <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
-          <path id="path-clean-line" fill="none" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-blocked-line" fill="none" stroke="#ff3366" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#ffb800" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
-          <g id="points-group"></g>
-          <line id="crosshair-line" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
-          <circle id="crosshair-dot" r="4" fill="#00e5ff" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
-          <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
-        </svg>
-      </div>
-    </div>
-
-    <!-- Threat Ratio & Signatures -->
-    <div class="chart-card">
-      <div class="card-cap">
-        <span>🎯 THREAT RATIO & SIGNATURES</span>
-      </div>
-      <div class="donut-wrap">
-        <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
-          <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
-          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#00ff9d" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#ff3366" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#ffb800" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-        </svg>
-        <div class="donut-legend">
-          <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
-          <div><span style="color:var(--pink);">■</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
-          <div><span style="color:var(--yellow);">▲</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
-        </div>
-      </div>
-      <div style="font-size:10.5px; font-weight:700; color:var(--overlay); text-transform:uppercase; letter-spacing:0.5px; padding:0 14px;">Top Triggered Rules:</div>
-      <div class="rules-list" id="rules-container">
-        <div style="color:var(--overlay); font-size:11px; font-style:italic;">Awaiting rule triggers...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Section 04: Intelligence Vectors ──────────────────── -->
-  <div class="head">
-    <h2>04 // INTELLIGENCE VECTORS & HOTSPOTS</h2>
-    <div class="rule"></div>
-    <span class="cmd">intel.vectors.query</span>
-  </div>
-
-  <div class="intel-grid">
-    <div class="chart-card">
-      <div class="card-cap">
-        <span>🚨 TOP ATTACKING CLIENT IPS</span>
-        <span style="font-size:10.5px; color:var(--overlay);">Click row to inspect</span>
-      </div>
-      <div style="max-height:260px; overflow-y:auto;">
-        <table class="intel-table">
-          <thead>
-            <tr>
-              <th>Client IP</th>
-              <th>Origin</th>
-              <th>Hits</th>
-              <th>Threat Breakdown</th>
-            </tr>
-          </thead>
-          <tbody id="top-ips-tbody">
-            <tr><td colspan="4" style="color:var(--overlay); text-align:center;">No threat IPs logged yet</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="chart-card">
-      <div class="card-cap">
-        <span>🎯 TOP TARGETED ENDPOINTS</span>
-        <span style="font-size:10.5px; color:var(--overlay);">Click row to filter</span>
-      </div>
-      <div style="max-height:260px; overflow-y:auto;">
-        <table class="intel-table">
-          <thead>
-            <tr>
-              <th>Target Path</th>
-              <th>Requests</th>
-              <th>Triggered Rule</th>
-            </tr>
-          </thead>
-          <tbody id="top-paths-tbody">
-            <tr><td colspan="3" style="color:var(--overlay); text-align:center;">No endpoints logged yet</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Section 05: Real-Time SOC Security Event Stream ───── -->
-  <div class="head">
-    <h2>05 // SECURITY OPERATIONS LOG STREAM</h2>
+    <h2>02 // SECURITY OPERATIONS LOG STREAM</h2>
     <div class="rule"></div>
     <span class="cmd">stream.audit.live</span>
   </div>
@@ -2670,6 +2502,175 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </table>
     </div>
   </div>
+
+  <!-- ── Section 03: World Map & Threat Geo-Distribution ───── -->
+  <div class="head">
+    <h2>03 // GEO-DISTRIBUTION & ATTACK MATRIX</h2>
+    <div class="rule"></div>
+    <span class="cmd">geo.threat.matrix</span>
+  </div>
+
+  <div class="term">
+    <div class="cap">
+      <span>🌐 GLOBAL TRAFFIC & THREAT RADAR</span>
+      <span id="map-country-count">0 Countries Detected</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button class="tui-btn active" id="btn-mode-ascii" onclick="setMapMode('ascii')">[📟 ASCII MATRIX]</button>
+        <button class="tui-btn" id="btn-mode-osm" onclick="setMapMode('osm')">[🌍 OSM DARK]</button>
+        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET]</button>
+      </div>
+    </div>
+
+    <div class="map-body">
+      <div class="map-stage">
+        <!-- Mode 1: ASCII Matrix Dot Map -->
+        <div id="ascii-map-container">
+          <canvas id="ascii-matrix-canvas"></canvas>
+          <div id="ascii-tooltip" class="ascii-tip"></div>
+        </div>
+
+        <!-- Mode 2: Leaflet Dark OpenStreetMap -->
+        <div id="osm-map-container" style="display:none;">
+          <div id="leaflet-map"></div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar: Detected Countries Breakdown -->
+      <div class="map-sidebar">
+        <div class="map-sidebar-title">
+          <span>Detected Countries</span>
+          <span style="color:var(--teal);">Real-Time</span>
+        </div>
+        <div id="map-countries-list" class="map-countries-list">
+          <div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">Awaiting parsed telemetry...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 04: Telemetry Dynamics ────────────────────── -->
+  <div class="head">
+    <h2>04 // TELEMETRY DYNAMICS & THREAT SIGNATURES</h2>
+    <div class="rule"></div>
+    <span class="cmd">sig.threat.timeline</span>
+  </div>
+
+  <div class="charts-grid">
+    <!-- Real-Time Timeline Curve -->
+    <div class="chart-card">
+      <div class="card-cap">
+        <span>📈 INGRESS VELOCITY & THREAT TIMELINE</span>
+        <div class="timeline-legend">
+          <span class="legend-item" id="legend-clean"><span style="color:var(--green);">●</span> Clean</span>
+          <span class="legend-item" id="legend-blocked"><span style="color:var(--pink);">■</span> Blocked</span>
+          <span class="legend-item" id="legend-tarpit"><span style="color:var(--yellow);">▲</span> Tarpit</span>
+        </div>
+      </div>
+      <div class="timeline-container" id="timeline-box">
+        <div class="chart-tooltip" id="timeline-tooltip"></div>
+        <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#00ff9d" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="#00ff9d" stop-opacity="0.0"/>
+            </linearGradient>
+            <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#ff3366" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#ff3366" stop-opacity="0.0"/>
+            </linearGradient>
+          </defs>
+          <g id="grid-group"></g>
+          <g id="axes-group"></g>
+          <path id="path-clean-area" fill="url(#grad-clean)"></path>
+          <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
+          <path id="path-clean-line" fill="none" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-blocked-line" fill="none" stroke="#ff3366" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="#ffb800" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
+          <g id="points-group"></g>
+          <line id="crosshair-line" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
+          <circle id="crosshair-dot" r="4" fill="#00e5ff" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
+          <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Threat Ratio & Signatures -->
+    <div class="chart-card">
+      <div class="card-cap">
+        <span>🎯 THREAT RATIO & SIGNATURES</span>
+      </div>
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
+          <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
+          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#00ff9d" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#ff3366" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#ffb800" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+        </svg>
+        <div class="donut-legend">
+          <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
+          <div><span style="color:var(--pink);">■</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
+          <div><span style="color:var(--yellow);">▲</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
+        </div>
+      </div>
+      <div style="font-size:10.5px; font-weight:700; color:var(--overlay); text-transform:uppercase; letter-spacing:0.5px; padding:0 14px;">Top Triggered Rules:</div>
+      <div class="rules-list" id="rules-container">
+        <div style="color:var(--overlay); font-size:11px; font-style:italic;">Awaiting rule triggers...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 05: Intelligence Vectors ──────────────────── -->
+  <div class="head">
+    <h2>05 // INTELLIGENCE VECTORS & HOTSPOTS</h2>
+    <div class="rule"></div>
+    <span class="cmd">intel.vectors.query</span>
+  </div>
+
+  <div class="intel-grid">
+    <div class="chart-card">
+      <div class="card-cap">
+        <span>🚨 TOP ATTACKING CLIENT IPS</span>
+        <span style="font-size:10.5px; color:var(--overlay);">Click row to inspect</span>
+      </div>
+      <div style="max-height:260px; overflow-y:auto;">
+        <table class="intel-table">
+          <thead>
+            <tr>
+              <th>Client IP</th>
+              <th>Origin</th>
+              <th>Hits</th>
+              <th>Threat Breakdown</th>
+            </tr>
+          </thead>
+          <tbody id="top-ips-tbody">
+            <tr><td colspan="4" style="color:var(--overlay); text-align:center;">No threat IPs logged yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="card-cap">
+        <span>🎯 TOP TARGETED ENDPOINTS</span>
+        <span style="font-size:10.5px; color:var(--overlay);">Click row to filter</span>
+      </div>
+      <div style="max-height:260px; overflow-y:auto;">
+        <table class="intel-table">
+          <thead>
+            <tr>
+              <th>Target Path</th>
+              <th>Requests</th>
+              <th>Triggered Rule</th>
+            </tr>
+          </thead>
+          <tbody id="top-paths-tbody">
+            <tr><td colspan="3" style="color:var(--overlay); text-align:center;">No endpoints logged yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ── Telemetry Event Inspector Modal ──────────────────────── -->
