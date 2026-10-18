@@ -17,10 +17,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/routewarden/cli/crypto"
 )
 
 // DefaultDir returns the default directory where dashboard files are stored.
@@ -56,16 +59,80 @@ type containerTarget struct {
 	Name string `json:"name"`
 }
 
+type RemoteAgentInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Hostname   string `json:"hostname,omitempty"`
+	RemoteIP   string `json:"remote_ip,omitempty"`
+	FirstSeen  string `json:"first_seen"`
+	LastSeen   string `json:"last_seen"`
+	EventCount int64  `json:"event_count"`
+	Status     string `json:"status"` // "online", "idle", "offline"
+}
+
 type SourceInfo struct {
-	Mode    string            `json:"mode"`
-	File    string            `json:"file,omitempty"`
-	Targets []containerTarget `json:"targets,omitempty"`
+	Mode    string             `json:"mode"`
+	File    string             `json:"file,omitempty"`
+	Targets []containerTarget  `json:"targets,omitempty"`
+	Agents  []*RemoteAgentInfo `json:"agents,omitempty"`
 }
 
 var (
 	sourceMu   sync.RWMutex
 	currSource SourceInfo
+	agentMu    sync.RWMutex
+	agents     = make(map[string]*RemoteAgentInfo)
 )
+
+func registerOrTouchAgent(id, name, hostname, remoteIP string, eventCount int) *RemoteAgentInfo {
+	agentMu.Lock()
+	defer agentMu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	ag, exists := agents[id]
+	if !exists {
+		ag = &RemoteAgentInfo{
+			ID:        id,
+			Name:      name,
+			Hostname:  hostname,
+			RemoteIP:  remoteIP,
+			FirstSeen: now,
+			LastSeen:  now,
+			Status:    "online",
+		}
+		agents[id] = ag
+	}
+	ag.LastSeen = now
+	if remoteIP != "" {
+		ag.RemoteIP = remoteIP
+	}
+	if hostname != "" {
+		ag.Hostname = hostname
+	}
+	ag.EventCount += int64(eventCount)
+	ag.Status = "online"
+	return ag
+}
+
+func getActiveAgents() []*RemoteAgentInfo {
+	agentMu.RLock()
+	defer agentMu.RUnlock()
+	var list []*RemoteAgentInfo
+	now := time.Now().UTC()
+	for _, a := range agents {
+		if parsed, err := time.Parse(time.RFC3339, a.LastSeen); err == nil {
+			diff := now.Sub(parsed)
+			if diff > 5*time.Minute {
+				a.Status = "offline"
+			} else if diff > 60*time.Second {
+				a.Status = "idle"
+			} else {
+				a.Status = "online"
+			}
+		}
+		list = append(list, a)
+	}
+	return list
+}
 
 func updateSourceInfo(mode, file string, targets []containerTarget) {
 	sourceMu.Lock()
@@ -80,7 +147,9 @@ func updateSourceInfo(mode, file string, targets []containerTarget) {
 func getSourceInfo() SourceInfo {
 	sourceMu.RLock()
 	defer sourceMu.RUnlock()
-	return currSource
+	s := currSource
+	s.Agents = getActiveAgents()
+	return s
 }
 
 const sourceBadgeInjection = `
@@ -164,21 +233,39 @@ const sourceBadgeInjection = `
       }
     }
 
+    var totalSources = 0;
+    if (data.targets) totalSources += data.targets.length;
+    if (data.agents) totalSources += data.agents.length;
+
     var content = '';
+    content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Sources:</div>';
+
     if (data.mode === 'file') {
-      content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Source:</div>';
       content += '<span class="rw-tag">📁 ' + (data.file || 'Local Log File') + '</span>';
-    } else if (data.targets && data.targets.length > 0) {
-      content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Containers:</div>';
+    }
+
+    if (data.targets && data.targets.length > 0) {
       data.targets.forEach(function(t) {
         var shortID = (t.id && t.id.length > 12) ? t.id.substring(0, 12) : t.id;
         content += '<span class="rw-tag">🐳 ' + t.name + ' <span class="rw-tag-id">(' + shortID + ')</span></span>';
       });
-      content += '<span style="color:#64748b; font-size:11px; margin-left:auto;">' + data.targets.length + ' active container' + (data.targets.length > 1 ? 's' : '') + '</span>';
-    } else {
-      content += '<div class="rw-label"><span class="rw-pulse-idle"></span> Auto-Discovery:</div>';
-      content += '<span style="color:#94a3b8; font-style:italic; font-size:12px;">Waiting for gateway containers with label <code>routewarden=true</code>...</span>';
     }
+
+    if (data.agents && data.agents.length > 0) {
+      data.agents.forEach(function(ag) {
+        var statusDot = ag.status === 'online' ? '<span class="rw-pulse"></span>' : '<span class="rw-pulse-idle"></span>';
+        var extra = ag.event_count > 0 ? ' • ' + Number(ag.event_count).toLocaleString() + ' events' : '';
+        content += '<span class="rw-tag">' + statusDot + ' 🌐 ' + ag.name + ' <span class="rw-tag-id">(' + (ag.remote_ip || 'remote') + extra + ')</span> <span style="color:#a78bfa;font-size:10px;">🔒 Encrypted</span></span>';
+      });
+    }
+
+    if (totalSources === 0 && data.mode !== 'file') {
+      content = '<div class="rw-label"><span class="rw-pulse-idle"></span> Ingestion Active:</div>' +
+        '<span style="color:#94a3b8; font-style:italic; font-size:12px;">Waiting for local Docker containers or remote agents (<code>rwarden push</code>)...</span>';
+    } else {
+      content += '<span style="color:#64748b; font-size:11px; margin-left:auto;">' + totalSources + ' active source' + (totalSources > 1 ? 's' : '') + '</span>';
+    }
+
     bar.innerHTML = content;
   }
 
@@ -470,15 +557,175 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		go watchAndStreamContainers(dashboardCtx, label, container, targets, logFile)
 	}
 
+	// Server keypair for decryption
+	serverPriv, serverPub, err := EnsureServerKeypair(dir)
+	if err != nil {
+		return fmt.Errorf("initialize server keypair: %w", err)
+	}
+	serverPubStr := crypto.EncodePublicKey(serverPub)
+
 	// Setup ReverseProxy for WebSocket and HTTP Server
 	targetURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", wsPort))
 	wsProxy := httputil.NewSingleHostReverseProxy(targetURL)
+
+	var logMu sync.Mutex
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		_ = json.NewEncoder(w).Encode(getSourceInfo())
+	})
+
+	mux.HandleFunc("/api/v1/pubkey", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"public_key": serverPubStr,
+			"version":    "5.0.0",
+		})
+	})
+
+	mux.HandleFunc("/api/v1/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		UpdateAgentLastSeen(key.ID, dir)
+		clientIP := extractClientIP(r)
+		registerOrTouchAgent(key.ID, key.Name, "", clientIP, 0)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "registered",
+			"agent_id":   key.ID,
+			"agent_name": key.Name,
+			"public_key": serverPubStr,
+		})
+	})
+
+	mux.HandleFunc("/api/v1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		var hb struct {
+			Hostname string `json:"hostname"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&hb)
+
+		UpdateAgentLastSeen(key.ID, dir)
+		clientIP := extractClientIP(r)
+		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		// Try decrypting if payload is EncryptedPayload
+		var plaintext = bodyBytes
+		var encPayload crypto.EncryptedPayload
+		if err := json.Unmarshal(bodyBytes, &encPayload); err == nil && encPayload.Ciphertext != "" && encPayload.EphemeralPub != "" {
+			dec, err := crypto.Decrypt(serverPriv, &encPayload)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
+				return
+			}
+			plaintext = dec
+		}
+
+		type EventPayload struct {
+			AgentID  string            `json:"agent_id"`
+			Hostname string            `json:"hostname"`
+			Events   []json.RawMessage `json:"events"`
+		}
+
+		var payload EventPayload
+		if err := json.Unmarshal(plaintext, &payload); err != nil {
+			var strList []string
+			if err2 := json.Unmarshal(plaintext, &strList); err2 == nil {
+				for _, s := range strList {
+					payload.Events = append(payload.Events, json.RawMessage([]byte(strconv.Quote(s))))
+				}
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload format"})
+				return
+			}
+		}
+
+		// Convert and write events
+		count := 0
+		logMu.Lock()
+		for _, rawEv := range payload.Events {
+			evStr := string(rawEv)
+			if strings.HasPrefix(evStr, `"`) && strings.HasSuffix(evStr, `"`) {
+				var unq string
+				if err := json.Unmarshal(rawEv, &unq); err == nil {
+					evStr = unq
+				}
+			}
+			combined := toCombinedLog(evStr)
+			if combined != "" {
+				_, _ = logFile.WriteString(combined + "\n")
+				count++
+			}
+		}
+		_ = logFile.Sync()
+		logMu.Unlock()
+
+		clientIP := extractClientIP(r)
+		UpdateAgentLastSeen(key.ID, dir)
+		registerOrTouchAgent(key.ID, key.Name, payload.Hostname, clientIP, count)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "accepted",
+			"ingested": count,
+			"agent":    key.Name,
+		})
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -521,6 +768,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	fmt.Println("🚀 RouteWarden Security Dashboard (GoAccess) is running!")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("📊 Live Dashboard:     %s\n", dashboardURL)
+	fmt.Printf("🔒 Encrypted Ingest:   %s/api/v1/events\n", dashboardURL)
 	if len(targets) > 0 {
 		fmt.Printf("🐳 Discovered Gateway: %d container(s):\n", len(targets))
 		for _, t := range targets {
@@ -531,6 +779,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	} else {
 		fmt.Println("🐳 Auto-Discovery:     Listening for containers with label 'routewarden=true'")
 	}
+	fmt.Printf("🔑 Server Public Key:  %s\n", serverPubStr[:min(20, len(serverPubStr))]+"...")
 	fmt.Printf("⚡ Memory Footprint:   ~15MB\n")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
@@ -790,4 +1039,26 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
+}
+
+func extractAuthToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return strings.TrimSpace(key)
+	}
+	return ""
+}
+
+func extractClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }

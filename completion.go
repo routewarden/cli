@@ -42,9 +42,10 @@ _rwarden_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="test validate generate audit diff sandbox dashboard monitor tui completion man cleanup schema version help"
+    local commands="test validate generate audit diff sandbox dashboard keys register push monitor tui completion man cleanup schema version help"
     local generate_targets="traefik-yaml traefik-toml traefik-labels caddy nginx tcp-warden"
     local dashboard_cmds="up down status export"
+    local keys_cmds="create list revoke"
     local formats="text json sarif"
     local methods="GET POST PUT DELETE PATCH HEAD OPTIONS"
 
@@ -179,6 +180,9 @@ _rwarden() {
         'diff:Compare two policies and evaluate security posture impact'
         'sandbox:Spin up ephemeral Traefik, Caddy, or NGINX container'
         'dashboard:Launch or manage the GoAccess real-time security dashboard'
+        'keys:Manage API authentication keys for remote log streaming'
+        'register:Enroll remote server with a central RouteWarden dashboard'
+        'push:Stream encrypted logs from a remote node to central dashboard'
         'monitor:Tail and colorize live reverse proxy security events'
         'tui:Launch interactive terminal simulator'
         'completion:Output shell autocompletion code'
@@ -279,6 +283,9 @@ complete -c rwarden -n "__fish_use_subcommand" -a audit -d "Lint configuration a
 complete -c rwarden -n "__fish_use_subcommand" -a diff -d "Compare two policies and evaluate security impact"
 complete -c rwarden -n "__fish_use_subcommand" -a sandbox -d "Launch ephemeral gateway Docker container"
 complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch GoAccess real-time security dashboard"
+complete -c rwarden -n "__fish_use_subcommand" -a keys -d "Manage API keys for remote log streaming"
+complete -c rwarden -n "__fish_use_subcommand" -a register -d "Enroll remote server with central dashboard"
+complete -c rwarden -n "__fish_use_subcommand" -a push -d "Stream encrypted logs to central dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a monitor -d "Stream and colorize reverse proxy security events"
 complete -c rwarden -n "__fish_use_subcommand" -a tui -d "Interactive terminal path testing REPL"
 complete -c rwarden -n "__fish_use_subcommand" -a completion -d "Generate shell completion script"
@@ -309,7 +316,7 @@ func generatePowerShellCompletion() string {
 Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'monitor', 'tui', 'completion', 'man', 'cleanup', 'schema', 'version')
+    $commands = @('test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'completion', 'man', 'cleanup', 'schema', 'version')
     $elements = $commandAst.Elements
 
     if ($elements.Count -eq 2) {

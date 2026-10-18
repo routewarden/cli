@@ -74,6 +74,16 @@ Commands:
                 e.g. rwarden dashboard down
                 e.g. rwarden dashboard status
                 e.g. rwarden dashboard export ./dashboard
+  keys        Manage API keys for distributed remote log shipping
+                e.g. rwarden keys create prod-us-east
+                e.g. rwarden keys list
+                e.g. rwarden keys revoke <id>
+  register    Enroll a remote server with a central RouteWarden dashboard
+                e.g. rwarden register --url http://198.51.100.10:7890 --key <token>
+  push        Stream encrypted logs from a remote node to the central dashboard
+                e.g. rwarden push
+                e.g. rwarden push --docker
+                e.g. rwarden push --file /var/log/nginx/access.log
   cleanup     Stop and remove any running RouteWarden sandbox containers
   completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
                 e.g. source <(rwarden completion bash)
@@ -128,6 +138,15 @@ func main() {
 
 	case "dashboard":
 		handleDashboard(os.Args[2:])
+
+	case "keys":
+		handleKeys(os.Args[2:])
+
+	case "register":
+		handleRegister(os.Args[2:])
+
+	case "push", "agent":
+		handlePush(os.Args[2:])
 
 	case "cleanup":
 		handleCleanup(os.Args[2:])
