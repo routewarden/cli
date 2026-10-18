@@ -209,3 +209,80 @@ func TestCustomDashboard_HTTPEndpoints(t *testing.T) {
 		t.Errorf("expected success and is_private=true for 192.168.1.50")
 	}
 }
+
+func TestAutoDetectCountry(t *testing.T) {
+	tests := []struct {
+		ip          string
+		wantCountry string
+		wantCode    string
+	}{
+		{"127.0.0.1", "Localhost / Loopback", "LAN"},
+		{"10.20.30.40", "Private Network (RFC 1918)", "LAN"},
+		{"192.168.1.1", "Private Network (RFC 1918)", "LAN"},
+		{"172.16.0.1", "Private Network (RFC 1918)", "LAN"},
+		{"198.51.100.24", "TEST-NET-2 (RFC 5737)", "US"},
+		{"203.0.113.88", "TEST-NET-3 (RFC 5737)", "US"},
+		{"1.1.1.1", "United States", "US"},
+		{"88.198.50.10", "Germany", "DE"},
+		{"", "Unknown", ""},
+		{"not-a-valid-ip", "Unknown", ""},
+	}
+
+	for _, tt := range tests {
+		country, code := observability.AutoDetectCountry(tt.ip)
+		if country != tt.wantCountry || code != tt.wantCode {
+			t.Errorf("AutoDetectCountry(%q) = (%q, %q), want (%q, %q)",
+				tt.ip, country, code, tt.wantCountry, tt.wantCode)
+		}
+	}
+}
+
+func TestEventStore_CountryStats(t *testing.T) {
+	store := observability.NewEventStore()
+
+	// Ingest events
+	store.Add(&observability.SecurityEvent{
+		ClientIP: "198.51.100.24",
+		Method:   "GET",
+		Path:     "/",
+		Status:   200,
+		Verdict:  "ALLOW",
+	})
+	store.Add(&observability.SecurityEvent{
+		ClientIP: "88.198.50.10",
+		Method:   "POST",
+		Path:     "/admin",
+		Status:   403,
+		Verdict:  "BLOCK",
+		Rule:     "scanner",
+	})
+	store.Add(&observability.SecurityEvent{
+		ClientIP: "127.0.0.1",
+		Method:   "GET",
+		Path:     "/health",
+		Status:   200,
+		Verdict:  "ALLOW",
+	})
+
+	stats := store.GetStats()
+	if len(stats.TopCountries) == 0 {
+		t.Fatalf("expected TopCountries to be populated")
+	}
+
+	// Verify top IPs have country populated
+	for _, ipItem := range stats.TopIPs {
+		if ipItem.Country == "" || ipItem.CountryCode == "" {
+			t.Errorf("expected IP %s to have Country and CountryCode, got (%q, %q)",
+				ipItem.Name, ipItem.Country, ipItem.CountryCode)
+		}
+	}
+
+	// Verify recent events have Country populated
+	for _, ev := range stats.RecentEvents {
+		if ev.Country == "" || ev.CountryCode == "" {
+			t.Errorf("expected Event for %s to have Country and CountryCode, got (%q, %q)",
+				ev.ClientIP, ev.Country, ev.CountryCode)
+		}
+	}
+}
+

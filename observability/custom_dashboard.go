@@ -15,17 +15,19 @@ import (
 
 // SecurityEvent represents a normalized, structured telemetry event from the gateway.
 type SecurityEvent struct {
-	ID        int64   `json:"id"`
-	Timestamp string  `json:"timestamp"`
-	TimeStr   string  `json:"time_str"`
-	ClientIP  string  `json:"client_ip"`
-	Method    string  `json:"method"`
-	Path      string  `json:"path"`
-	Status    int     `json:"status"`
-	Verdict   string  `json:"verdict"` // "BLOCK", "TARPIT", "ALLOW"
-	Rule      string  `json:"rule"`    // e.g. "path-traversal", "scanner", "sql-injection"
-	LatencyMs float64 `json:"latency_ms"`
-	Source    string  `json:"source,omitempty"`
+	ID          int64   `json:"id"`
+	Timestamp   string  `json:"timestamp"`
+	TimeStr     string  `json:"time_str"`
+	ClientIP    string  `json:"client_ip"`
+	Country     string  `json:"country,omitempty"`
+	CountryCode string  `json:"country_code,omitempty"`
+	Method      string  `json:"method"`
+	Path        string  `json:"path"`
+	Status      int     `json:"status"`
+	Verdict     string  `json:"verdict"` // "BLOCK", "TARPIT", "ALLOW"
+	Rule        string  `json:"rule"`    // e.g. "path-traversal", "scanner", "sql-injection"
+	LatencyMs   float64 `json:"latency_ms"`
+	Source      string  `json:"source,omitempty"`
 }
 
 // TimelinePoint represents aggregated events for a time bucket.
@@ -39,11 +41,13 @@ type TimelinePoint struct {
 
 // TopMetricItem represents a ranked metric entry (e.g. top IP, path, rule).
 type TopMetricItem struct {
-	Name    string `json:"name"`
-	Count   int64  `json:"count"`
-	Blocked int64  `json:"blocked"`
-	Tarpit  int64  `json:"tarpit"`
-	Rule    string `json:"rule,omitempty"`
+	Name        string `json:"name"`
+	Count       int64  `json:"count"`
+	Blocked     int64  `json:"blocked"`
+	Tarpit      int64  `json:"tarpit"`
+	Rule        string `json:"rule,omitempty"`
+	Country     string `json:"country,omitempty"`
+	CountryCode string `json:"country_code,omitempty"`
 }
 
 // DashboardStats represents comprehensive real-time aggregated metrics.
@@ -58,6 +62,7 @@ type DashboardStats struct {
 	TopIPs       []TopMetricItem  `json:"top_ips"`
 	TopPaths     []TopMetricItem  `json:"top_paths"`
 	TopRules     []TopMetricItem  `json:"top_rules"`
+	TopCountries []TopMetricItem  `json:"top_countries,omitempty"`
 	StatusCodes  map[string]int64 `json:"status_codes"`
 	RecentEvents []*SecurityEvent `json:"recent_events"`
 	Sources      SourceInfo       `json:"sources"`
@@ -65,18 +70,19 @@ type DashboardStats struct {
 
 // EventStore maintains in-memory telemetry, ring buffer, aggregates, and SSE subscribers.
 type EventStore struct {
-	mu           sync.RWMutex
-	nextID       int64
-	events       []*SecurityEvent
-	maxEvents    int
-	subscribers  map[chan *SecurityEvent]struct{}
-	ipCounts     map[string]*TopMetricItem
-	pathCounts   map[string]*TopMetricItem
-	ruleCounts   map[string]*TopMetricItem
-	statusCounts map[string]int64
-	timeline     map[string]*TimelinePoint // keyed by HH:MM
-	timelineKeys []string
-	startTime    time.Time
+	mu            sync.RWMutex
+	nextID        int64
+	events        []*SecurityEvent
+	maxEvents     int
+	subscribers   map[chan *SecurityEvent]struct{}
+	ipCounts      map[string]*TopMetricItem
+	countryCounts map[string]*TopMetricItem
+	pathCounts    map[string]*TopMetricItem
+	ruleCounts    map[string]*TopMetricItem
+	statusCounts  map[string]int64
+	timeline      map[string]*TimelinePoint // keyed by HH:MM
+	timelineKeys  []string
+	startTime     time.Time
 }
 
 var globalStore = NewEventStore()
@@ -84,15 +90,16 @@ var globalStore = NewEventStore()
 // NewEventStore creates a new telemetry event store.
 func NewEventStore() *EventStore {
 	return &EventStore{
-		maxEvents:    1000,
-		subscribers:  make(map[chan *SecurityEvent]struct{}),
-		ipCounts:     make(map[string]*TopMetricItem),
-		pathCounts:   make(map[string]*TopMetricItem),
-		ruleCounts:   make(map[string]*TopMetricItem),
-		statusCounts: make(map[string]int64),
-		timeline:     make(map[string]*TimelinePoint),
-		timelineKeys: make([]string, 0),
-		startTime:    time.Now(),
+		maxEvents:     1000,
+		subscribers:   make(map[chan *SecurityEvent]struct{}),
+		ipCounts:      make(map[string]*TopMetricItem),
+		countryCounts: make(map[string]*TopMetricItem),
+		pathCounts:    make(map[string]*TopMetricItem),
+		ruleCounts:    make(map[string]*TopMetricItem),
+		statusCounts:  make(map[string]int64),
+		timeline:      make(map[string]*TimelinePoint),
+		timelineKeys:  make([]string, 0),
+		startTime:     time.Now(),
 	}
 }
 
@@ -171,11 +178,22 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 		tb.Clean++
 	}
 
+	// Auto-detect country if missing
+	if ev.ClientIP != "" {
+		if ev.Country == "" || ev.CountryCode == "" {
+			ev.Country, ev.CountryCode = AutoDetectCountry(ev.ClientIP)
+		}
+	}
+
 	// Top IPs
 	if ev.ClientIP != "" {
 		ipItem, ok := s.ipCounts[ev.ClientIP]
 		if !ok {
-			ipItem = &TopMetricItem{Name: ev.ClientIP}
+			ipItem = &TopMetricItem{
+				Name:        ev.ClientIP,
+				Country:     ev.Country,
+				CountryCode: ev.CountryCode,
+			}
 			s.ipCounts[ev.ClientIP] = ipItem
 		}
 		ipItem.Count++
@@ -184,6 +202,31 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 		} else if isTarpit {
 			ipItem.Tarpit++
 		}
+		if ev.Country != "" && ipItem.Country == "" {
+			ipItem.Country = ev.Country
+			ipItem.CountryCode = ev.CountryCode
+		}
+	}
+
+	// Top Countries
+	countryName := ev.Country
+	if countryName == "" {
+		countryName = "Unknown"
+	}
+	cItem, ok := s.countryCounts[countryName]
+	if !ok {
+		cItem = &TopMetricItem{
+			Name:        countryName,
+			Country:     countryName,
+			CountryCode: ev.CountryCode,
+		}
+		s.countryCounts[countryName] = cItem
+	}
+	cItem.Count++
+	if isBlocked {
+		cItem.Blocked++
+	} else if isTarpit {
+		cItem.Tarpit++
 	}
 
 	// Top Paths
@@ -444,6 +487,9 @@ func (s *EventStore) GetStats() DashboardStats {
 	// Sort Top IPs (deterministic: count desc, then name asc)
 	topIPs := make([]TopMetricItem, 0, len(s.ipCounts))
 	for _, item := range s.ipCounts {
+		if item.Country == "" || item.CountryCode == "" {
+			item.Country, item.CountryCode = AutoDetectCountry(item.Name)
+		}
 		topIPs = append(topIPs, *item)
 	}
 	sort.Slice(topIPs, func(i, j int) bool {
@@ -454,6 +500,21 @@ func (s *EventStore) GetStats() DashboardStats {
 	})
 	if len(topIPs) > 10 {
 		topIPs = topIPs[:10]
+	}
+
+	// Sort Top Countries (deterministic: count desc, then name asc)
+	topCountries := make([]TopMetricItem, 0, len(s.countryCounts))
+	for _, item := range s.countryCounts {
+		topCountries = append(topCountries, *item)
+	}
+	sort.Slice(topCountries, func(i, j int) bool {
+		if topCountries[i].Count != topCountries[j].Count {
+			return topCountries[i].Count > topCountries[j].Count
+		}
+		return topCountries[i].Name < topCountries[j].Name
+	})
+	if len(topCountries) > 10 {
+		topCountries = topCountries[:10]
 	}
 
 	// Sort Top Paths (deterministic: count desc, then name asc)
@@ -512,6 +573,7 @@ func (s *EventStore) GetStats() DashboardStats {
 		TopIPs:       topIPs,
 		TopPaths:     topPaths,
 		TopRules:     topRules,
+		TopCountries: topCountries,
 		StatusCodes:  statCopy,
 		RecentEvents: recent,
 	}
@@ -614,6 +676,352 @@ var (
 	ipCache   = make(map[string]cachedIP)
 )
 
+type ipNetEntry struct {
+	net         *net.IPNet
+	country     string
+	countryCode string
+}
+
+var (
+	builtinIPDBOnce sync.Once
+	builtinIPDB     []ipNetEntry
+)
+
+func initBuiltinIPDB() {
+	rawEntries := []struct {
+		cidr        string
+		country     string
+		countryCode string
+	}{
+		// Private / Local / Test Networks
+		{"127.0.0.0/8", "Localhost / Loopback", "LAN"},
+		{"::1/128", "Localhost / Loopback", "LAN"},
+		{"10.0.0.0/8", "Private Network (RFC 1918)", "LAN"},
+		{"172.16.0.0/12", "Private Network (RFC 1918)", "LAN"},
+		{"192.168.0.0/16", "Private Network (RFC 1918)", "LAN"},
+		{"100.64.0.0/10", "Carrier-Grade NAT (RFC 6598)", "LAN"},
+		{"169.254.0.0/16", "Link-Local", "LAN"},
+		{"192.0.2.0/24", "TEST-NET-1 (RFC 5737)", "US"},
+		{"198.51.100.0/24", "TEST-NET-2 (RFC 5737)", "US"},
+		{"203.0.113.0/24", "TEST-NET-3 (RFC 5737)", "US"},
+		{"224.0.0.0/4", "Multicast", "LAN"},
+		{"240.0.0.0/4", "Reserved", "LAN"},
+		{"fc00::/7", "Unique Local Address", "LAN"},
+		{"fe80::/10", "Link-Local", "LAN"},
+
+		// Major Public IPv4 Anycast / Cloud Providers & Subnets
+		{"1.0.0.0/24", "United States", "US"},
+		{"1.1.1.0/24", "United States", "US"},
+		{"8.8.4.0/24", "United States", "US"},
+		{"8.8.8.0/24", "United States", "US"},
+		{"9.9.9.0/24", "United States", "US"},
+		{"208.67.220.0/22", "United States", "US"},
+		{"208.67.222.0/24", "United States", "US"},
+		{"104.16.0.0/12", "United States", "US"},
+		{"172.217.0.0/16", "United States", "US"},
+		{"142.250.0.0/15", "United States", "US"},
+		{"199.16.156.0/22", "United States", "US"},
+		{"3.0.0.0/8", "United States", "US"},
+		{"4.0.0.0/9", "United States", "US"},
+		{"12.0.0.0/8", "United States", "US"},
+		{"15.0.0.0/8", "United States", "US"},
+		{"16.0.0.0/8", "United States", "US"},
+		{"23.0.0.0/8", "United States", "US"},
+		{"34.0.0.0/8", "United States", "US"},
+		{"44.0.0.0/8", "United States", "US"},
+		{"52.0.0.0/10", "United States", "US"},
+		{"54.0.0.0/10", "United States", "US"},
+		{"64.0.0.0/10", "United States", "US"},
+		{"66.0.0.0/10", "United States", "US"},
+		{"72.0.0.0/10", "United States", "US"},
+		{"98.0.0.0/10", "United States", "US"},
+		{"107.0.0.0/10", "United States", "US"},
+
+		// Germany
+		{"78.46.0.0/15", "Germany", "DE"},
+		{"88.198.0.0/16", "Germany", "DE"},
+		{"116.202.0.0/15", "Germany", "DE"},
+		{"136.243.0.0/16", "Germany", "DE"},
+		{"144.76.0.0/16", "Germany", "DE"},
+		{"148.251.0.0/16", "Germany", "DE"},
+		{"159.69.0.0/16", "Germany", "DE"},
+		{"168.119.0.0/16", "Germany", "DE"},
+		{"178.63.0.0/16", "Germany", "DE"},
+		{"195.201.0.0/16", "Germany", "DE"},
+
+		// United Kingdom
+		{"51.0.0.0/10", "United Kingdom", "GB"},
+		{"81.128.0.0/11", "United Kingdom", "GB"},
+		{"82.0.0.0/11", "United Kingdom", "GB"},
+		{"86.0.0.0/11", "United Kingdom", "GB"},
+		{"185.125.188.0/22", "United Kingdom", "GB"},
+
+		// France
+		{"51.68.0.0/14", "France", "FR"},
+		{"54.36.0.0/14", "France", "FR"},
+		{"87.98.128.0/17", "France", "FR"},
+		{"164.132.0.0/16", "France", "FR"},
+		{"212.83.128.0/18", "France", "FR"},
+
+		// China
+		{"1.24.0.0/13", "China", "CN"},
+		{"14.128.0.0/10", "China", "CN"},
+		{"27.16.0.0/12", "China", "CN"},
+		{"36.96.0.0/11", "China", "CN"},
+		{"42.120.0.0/14", "China", "CN"},
+		{"47.92.0.0/14", "China", "CN"},
+		{"58.32.0.0/11", "China", "CN"},
+		{"59.32.0.0/11", "China", "CN"},
+		{"60.16.0.0/12", "China", "CN"},
+		{"101.64.0.0/11", "China", "CN"},
+		{"110.16.0.0/12", "China", "CN"},
+		{"111.160.0.0/11", "China", "CN"},
+		{"112.64.0.0/11", "China", "CN"},
+		{"113.64.0.0/11", "China", "CN"},
+		{"114.80.0.0/12", "China", "CN"},
+		{"115.192.0.0/11", "China", "CN"},
+		{"116.128.0.0/10", "China", "CN"},
+		{"117.128.0.0/10", "China", "CN"},
+		{"118.160.0.0/11", "China", "CN"},
+		{"119.128.0.0/11", "China", "CN"},
+		{"120.192.0.0/10", "China", "CN"},
+		{"121.192.0.0/10", "China", "CN"},
+		{"123.128.0.0/10", "China", "CN"},
+		{"124.192.0.0/10", "China", "CN"},
+		{"125.64.0.0/11", "China", "CN"},
+		{"180.96.0.0/11", "China", "CN"},
+		{"182.80.0.0/12", "China", "CN"},
+		{"183.128.0.0/10", "China", "CN"},
+		{"218.64.0.0/11", "China", "CN"},
+		{"220.160.0.0/11", "China", "CN"},
+		{"221.192.0.0/11", "China", "CN"},
+		{"222.128.0.0/10", "China", "CN"},
+		{"223.160.0.0/11", "China", "CN"},
+
+		// Russia
+		{"5.45.192.0/18", "Russia", "RU"},
+		{"37.192.0.0/11", "Russia", "RU"},
+		{"46.160.0.0/12", "Russia", "RU"},
+		{"77.222.96.0/19", "Russia", "RU"},
+		{"85.142.0.0/15", "Russia", "RU"},
+		{"87.224.0.0/12", "Russia", "RU"},
+		{"91.200.0.0/14", "Russia", "RU"},
+		{"92.240.0.0/12", "Russia", "RU"},
+		{"93.180.0.0/14", "Russia", "RU"},
+		{"94.240.0.0/12", "Russia", "RU"},
+		{"95.160.0.0/11", "Russia", "RU"},
+		{"176.59.0.0/16", "Russia", "RU"},
+		{"178.64.0.0/12", "Russia", "RU"},
+		{"185.15.0.0/16", "Russia", "RU"},
+		{"195.98.0.0/15", "Russia", "RU"},
+
+		// India
+		{"14.139.0.0/16", "India", "IN"},
+		{"49.200.0.0/13", "India", "IN"},
+		{"49.248.0.0/13", "India", "IN"},
+		{"103.20.0.0/14", "India", "IN"},
+		{"103.24.0.0/14", "India", "IN"},
+		{"103.36.0.0/14", "India", "IN"},
+		{"103.50.0.0/14", "India", "IN"},
+		{"106.192.0.0/11", "India", "IN"},
+		{"115.96.0.0/12", "India", "IN"},
+		{"117.192.0.0/11", "India", "IN"},
+		{"122.160.0.0/12", "India", "IN"},
+		{"157.32.0.0/11", "India", "IN"},
+		{"182.64.0.0/11", "India", "IN"},
+
+		// Japan
+		{"43.224.0.0/12", "Japan", "JP"},
+		{"60.32.0.0/11", "Japan", "JP"},
+		{"61.112.0.0/12", "Japan", "JP"},
+		{"106.128.0.0/10", "Japan", "JP"},
+		{"118.0.0.0/11", "Japan", "JP"},
+		{"122.16.0.0/12", "Japan", "JP"},
+		{"124.32.0.0/11", "Japan", "JP"},
+		{"126.0.0.0/9", "Japan", "JP"},
+		{"133.0.0.0/10", "Japan", "JP"},
+		{"153.120.0.0/13", "Japan", "JP"},
+		{"160.13.0.0/16", "Japan", "JP"},
+		{"210.128.0.0/11", "Japan", "JP"},
+
+		// Singapore
+		{"43.240.0.0/13", "Singapore", "SG"},
+		{"103.1.0.0/16", "Singapore", "SG"},
+		{"116.12.0.0/14", "Singapore", "SG"},
+		{"118.188.0.0/14", "Singapore", "SG"},
+		{"128.106.0.0/16", "Singapore", "SG"},
+		{"175.156.0.0/14", "Singapore", "SG"},
+
+		// Canada
+		{"24.200.0.0/13", "Canada", "CA"},
+		{"64.230.0.0/15", "Canada", "CA"},
+		{"70.24.0.0/13", "Canada", "CA"},
+		{"72.38.0.0/15", "Canada", "CA"},
+		{"142.150.0.0/15", "Canada", "CA"},
+		{"198.84.0.0/14", "Canada", "CA"},
+
+		// Brazil
+		{"45.160.0.0/11", "Brazil", "BR"},
+		{"177.0.0.0/10", "Brazil", "BR"},
+		{"179.96.0.0/11", "Brazil", "BR"},
+		{"187.0.0.0/10", "Brazil", "BR"},
+		{"189.0.0.0/10", "Brazil", "BR"},
+		{"191.160.0.0/11", "Brazil", "BR"},
+		{"200.128.0.0/10", "Brazil", "BR"},
+		{"201.0.0.0/10", "Brazil", "BR"},
+
+		// Netherlands
+		{"46.17.96.0/19", "Netherlands", "NL"},
+		{"80.112.0.0/12", "Netherlands", "NL"},
+		{"84.80.0.0/12", "Netherlands", "NL"},
+		{"145.0.0.0/11", "Netherlands", "NL"},
+		{"188.166.0.0/16", "Netherlands", "NL"},
+
+		// Australia
+		{"1.128.0.0/11", "Australia", "AU"},
+		{"49.176.0.0/12", "Australia", "AU"},
+		{"101.160.0.0/11", "Australia", "AU"},
+		{"120.144.0.0/12", "Australia", "AU"},
+		{"139.130.0.0/16", "Australia", "AU"},
+		{"203.0.0.0/12", "Australia", "AU"},
+
+		// South Korea
+		{"1.208.0.0/12", "South Korea", "KR"},
+		{"14.32.0.0/11", "South Korea", "KR"},
+		{"27.112.0.0/12", "South Korea", "KR"},
+		{"112.160.0.0/11", "South Korea", "KR"},
+		{"121.128.0.0/10", "South Korea", "KR"},
+		{"175.192.0.0/11", "South Korea", "KR"},
+		{"211.168.0.0/13", "South Korea", "KR"},
+	}
+
+	for _, e := range rawEntries {
+		_, ipNet, err := net.ParseCIDR(e.cidr)
+		if err == nil {
+			builtinIPDB = append(builtinIPDB, ipNetEntry{
+				net:         ipNet,
+				country:     e.country,
+				countryCode: e.countryCode,
+			})
+		}
+	}
+}
+
+func lookupBuiltinIPDB(ip net.IP) (string, string) {
+	builtinIPDBOnce.Do(initBuiltinIPDB)
+
+	if ip == nil {
+		return "Unknown", ""
+	}
+
+	// 1. Exact CIDR match in built-in table
+	for _, entry := range builtinIPDB {
+		if entry.net.Contains(ip) {
+			return entry.country, entry.countryCode
+		}
+	}
+
+	// 2. Private/loopback check
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		return "Local / Private Network", "LAN"
+	}
+
+	// 3. IANA Regional RIR allocation fallbacks (IPv4)
+	ip4 := ip.To4()
+	if ip4 != nil {
+		first := ip4[0]
+		switch {
+		// ARIN (North America)
+		case first == 3 || first == 4 || first == 8 || first == 12 || (first >= 15 && first <= 16) ||
+			first == 24 || (first >= 32 && first <= 35) || first == 40 || first == 44 ||
+			first == 50 || first == 52 || first == 54 || (first >= 63 && first <= 76) ||
+			(first >= 96 && first <= 100) || first == 104 || first == 107 || first == 108 ||
+			(first >= 128 && first <= 132) || (first >= 134 && first <= 138) || first == 140 ||
+			first == 142 || first == 144 || (first >= 146 && first <= 149) || first == 152 ||
+			(first >= 155 && first <= 156) || (first >= 161 && first <= 162) ||
+			(first >= 164 && first <= 169) || (first >= 172 && first <= 174) ||
+			first == 198 || first == 199 || (first >= 204 && first <= 209):
+			return "United States", "US"
+
+		// RIPE NCC (Europe)
+		case first == 2 || first == 5 || first == 31 || first == 37 || first == 46 ||
+			first == 62 || (first >= 77 && first <= 95) || first == 109 || first == 141 ||
+			first == 145 || first == 151 || first == 176 || first == 178 || first == 185 ||
+			first == 188 || (first >= 193 && first <= 195) || first == 212 || first == 213 || first == 217:
+			return "European Union", "EU"
+
+		// APNIC (Asia-Pacific)
+		case first == 1 || first == 14 || first == 27 || first == 36 || first == 39 ||
+			first == 42 || first == 43 || first == 49 || (first >= 58 && first <= 61) ||
+			first == 101 || first == 103 || first == 106 || (first >= 110 && first <= 126) ||
+			first == 150 || first == 153 || first == 175 || first == 180 || first == 182 ||
+			first == 183 || first == 202 || first == 203 || first == 210 || first == 211 ||
+			(first >= 218 && first <= 223):
+			return "Asia-Pacific", "AP"
+
+		// LACNIC (Latin America)
+		case first == 177 || first == 179 || first == 181 || (first >= 186 && first <= 187) ||
+			first == 189 || first == 190 || first == 191 || first == 200 || first == 201:
+			return "Brazil", "BR"
+
+		// AFRINIC (Africa)
+		case first == 41 || first == 102 || first == 105 || first == 154 || first == 196 || first == 197:
+			return "South Africa", "ZA"
+		}
+	}
+
+	return "Unknown", ""
+}
+
+// AutoDetectCountry automatically determines the country and country code for an IP address.
+// It checks in-memory cache first, then the built-in zero-dependency IP database, and
+// asynchronously triggers background enrichment via ip-api.com for public IPs.
+func AutoDetectCountry(ipStr string) (string, string) {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "" {
+		return "Unknown", ""
+	}
+
+	// 1. Check IP cache
+	ipCacheMu.RLock()
+	if c, ok := ipCache[ipStr]; ok && c.details != nil && c.details.Country != "" && c.details.CountryCode != "" {
+		country, code := c.details.Country, c.details.CountryCode
+		ipCacheMu.RUnlock()
+		return country, code
+	}
+	ipCacheMu.RUnlock()
+
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return "Unknown", ""
+	}
+
+	// 2. Built-in IP Database lookup
+	country, code := lookupBuiltinIPDB(parsed)
+
+	// 3. Background enrich if public IP and not already queried
+	if !parsed.IsLoopback() && !parsed.IsPrivate() && !parsed.IsLinkLocalUnicast() && !parsed.IsUnspecified() {
+		ipCacheMu.Lock()
+		if _, exists := ipCache[ipStr]; !exists {
+			ipCache[ipStr] = cachedIP{
+				details: &IPDetails{
+					IP:          ipStr,
+					Country:     country,
+					CountryCode: code,
+					Status:      "pending",
+				},
+				fetchedAt: time.Now(),
+			}
+			go func(targetIP string) {
+				LookupIP(targetIP)
+			}(ipStr)
+		}
+		ipCacheMu.Unlock()
+	}
+
+	return country, code
+}
+
 // LookupIP queries IP intelligence using ip-api.com with local caching and private IP handling.
 func LookupIP(ipStr string) *IPDetails {
 	ipStr = strings.TrimSpace(ipStr)
@@ -644,7 +1052,7 @@ func LookupIP(ipStr string) *IPDetails {
 
 	// Check cache (TTL 2 hours)
 	ipCacheMu.RLock()
-	if c, ok := ipCache[ipStr]; ok && time.Since(c.fetchedAt) < 2*time.Hour {
+	if c, ok := ipCache[ipStr]; ok && c.details != nil && c.details.Status == "success" && time.Since(c.fetchedAt) < 2*time.Hour {
 		ipCacheMu.RUnlock()
 		return c.details
 	}
@@ -655,24 +1063,35 @@ func LookupIP(ipStr string) *IPDetails {
 	apiURL := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query", url.QueryEscape(ipStr))
 	resp, err := client.Get(apiURL)
 	if err != nil {
+		cName, cCode := lookupBuiltinIPDB(parsed)
 		return &IPDetails{
-			IP:      ipStr,
-			Status:  "fail",
-			Message: "Lookup failed: " + err.Error(),
+			IP:          ipStr,
+			Status:      "success",
+			Country:     cName,
+			CountryCode: cCode,
+			ISP:         "Built-in GeoIP Database",
+			Message:     "Offline database fallback: " + err.Error(),
 		}
 	}
 	defer resp.Body.Close()
 
 	var details IPDetails
 	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+		cName, cCode := lookupBuiltinIPDB(parsed)
 		return &IPDetails{
-			IP:      ipStr,
-			Status:  "fail",
-			Message: "JSON decode error: " + err.Error(),
+			IP:          ipStr,
+			Status:      "success",
+			Country:     cName,
+			CountryCode: cCode,
+			ISP:         "Built-in GeoIP Database",
+			Message:     "JSON decode error: " + err.Error(),
 		}
 	}
 	if details.IP == "" {
 		details.IP = ipStr
+	}
+	if details.Country == "" {
+		details.Country, details.CountryCode = lookupBuiltinIPDB(parsed)
 	}
 
 	// Cache successful or recognized lookups
@@ -1681,6 +2100,25 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: rgba(244, 63, 94, 0.3);
       color: #ffffff;
     }
+    .country-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .country-badge:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: #38bdf8;
+    }
   </style>
 </head>
 <body>
@@ -1841,12 +2279,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <thead>
             <tr>
               <th>Client IP</th>
+              <th>Origin Country</th>
               <th>Total Hits</th>
               <th>Threat Breakdown</th>
             </tr>
           </thead>
           <tbody id="top-ips-tbody">
-            <tr><td colspan="3" style="color:#64748b; text-align:center;">No threat IPs logged yet</td></tr>
+            <tr><td colspan="4" style="color:#64748b; text-align:center;">No threat IPs logged yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1885,6 +2324,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <button class="tab-btn" data-filter-verdict="TARPIT">⏳ Tarpit (<span id="count-tab-tarpit">0</span>)</button>
           <button class="tab-btn" data-filter-verdict="ALLOW">✅ Clean (<span id="count-tab-clean">0</span>)</button>
         </div>
+
+        <select class="filter-select" id="select-country">
+          <option value="ALL">All Countries</option>
+        </select>
 
         <select class="filter-select" id="select-method">
           <option value="ALL">All Methods</option>
@@ -1971,6 +2414,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   // Active Filter State
   var filters = {
     verdict: 'ALL',
+    country: 'ALL',
     method: 'ALL',
     status: 'ALL',
     rule: 'ALL',
@@ -2003,6 +2447,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var btnExportJSON = document.getElementById('btn-export-json');
   var btnResetFilters = document.getElementById('btn-reset-filters');
   var searchInput = document.getElementById('search-input');
+  var selectCountry = document.getElementById('select-country');
   var selectMethod = document.getElementById('select-method');
   var selectStatus = document.getElementById('select-status');
   var selectRule = document.getElementById('select-rule');
@@ -2035,6 +2480,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       renderActiveChips();
       renderTable();
     });
+  });
+
+  selectCountry.addEventListener('change', function(e) {
+    filters.country = e.target.value;
+    renderActiveChips();
+    renderTable();
   });
 
   selectMethod.addEventListener('change', function(e) {
@@ -2074,6 +2525,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   btnResetFilters.addEventListener('click', function() {
     filters.verdict = 'ALL';
+    filters.country = 'ALL';
     filters.method = 'ALL';
     filters.status = 'ALL';
     filters.rule = 'ALL';
@@ -2085,6 +2537,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var allBtn = document.querySelector('[data-filter-verdict="ALL"]');
     if (allBtn) allBtn.classList.add('active');
 
+    selectCountry.value = 'ALL';
     selectMethod.value = 'ALL';
     selectStatus.value = 'ALL';
     selectRule.value = 'ALL';
@@ -2116,6 +2569,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var ab = document.querySelector('[data-filter-verdict="ALL"]');
       if (ab) ab.classList.add('active');
     }});
+    if (filters.country !== 'ALL') chips.push({ label: 'Country: ' + filters.country, clear: function() { filters.country = 'ALL'; selectCountry.value = 'ALL'; }});
     if (filters.method !== 'ALL') chips.push({ label: 'Method: ' + filters.method, clear: function() { filters.method = 'ALL'; selectMethod.value = 'ALL'; }});
     if (filters.status !== 'ALL') chips.push({ label: 'Status: ' + filters.status, clear: function() { filters.status = 'ALL'; selectStatus.value = 'ALL'; }});
     if (filters.rule !== 'ALL') chips.push({ label: 'Rule: ' + filters.rule, clear: function() { filters.rule = 'ALL'; selectRule.value = 'ALL'; }});
@@ -2147,6 +2601,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   function getFilteredEvents() {
     return allEvents.filter(function(ev) {
       if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
+      if (filters.country !== 'ALL' && ev.country !== filters.country && ev.country_code !== filters.country) return false;
       if (filters.method !== 'ALL' && (ev.method || '').toUpperCase() !== filters.method) return false;
       if (filters.rule !== 'ALL' && (ev.rule || '') !== filters.rule) return false;
       if (filters.ip && ev.client_ip !== filters.ip) return false;
@@ -2162,7 +2617,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
 
       if (filters.search) {
-        var str = (ev.client_ip + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status).toLowerCase();
+        var str = (ev.client_ip + ' ' + (ev.country || '') + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status).toLowerCase();
         if (str.indexOf(filters.search) === -1) return false;
       }
       return true;
@@ -2190,13 +2645,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       else if (m === 'DELETE') methodClass = 'method-delete';
 
       var latencyColor = ev.latency_ms > 1000 ? '#f59e0b' : '#94a3b8';
+      var flag = getFlagEmoji(ev.country_code);
+      var countryTitle = ev.country ? (flag + ' ' + ev.country) : 'Client IP';
 
       rowsHTML += '<tr onclick="inspectEvent(' + ev.id + ')">' +
         '<td>' + (ev.time_str || '') + '</td>' +
         '<td><span class="' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
         '<td style="max-width:320px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
-        '<td><span class="ip-clickable" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' + ev.client_ip + ' <span class="ip-info-btn">ℹ️</span></span></td>' +
+        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' +
+          '<span style="margin-right:5px; font-size:13px;">' + flag + '</span>' + ev.client_ip + ' <span class="ip-info-btn">ℹ️</span>' +
+        '</span></td>' +
         '<td>' + ev.status + '</td>' +
         '<td style="color:' + latencyColor + ';">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
       '</tr>';
@@ -2213,7 +2672,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var found = allEvents.find(function(e) { return e.id === id; });
     if (!found) return;
     modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">' +
-      '<div>Source IP: <b style="color:#38bdf8; font-family:JetBrains Mono, monospace; font-size:14px;">' + found.client_ip + '</b></div>' +
+      '<div>Source IP: <b style="color:#38bdf8; font-family:JetBrains Mono, monospace; font-size:14px;">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px; font-size:13px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') + '</div>' +
       '<button class="btn-action" style="background:rgba(56,189,248,0.15); color:#38bdf8;" onclick="inspectIP(\'' + found.client_ip + '\')">🌐 IP Intel & Abuse Report</button>' +
     '</div>' +
     '<pre style="margin:0; overflow-x:auto;">' + JSON.stringify(found, null, 2) + '</pre>';
@@ -2272,12 +2731,29 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
     }
 
+    // Populate Country Dropdown
+    if (stats.top_countries && stats.top_countries.length > 0) {
+      var currentCountry = selectCountry.value;
+      var cOptHTML = '<option value="ALL">All Countries</option>';
+      stats.top_countries.forEach(function(c) {
+        var fl = getFlagEmoji(c.country_code);
+        cOptHTML += '<option value="' + c.name + '">' + fl + ' ' + c.name + ' (' + c.count + ')</option>';
+      });
+      if (selectCountry.innerHTML !== cOptHTML) {
+        selectCountry.innerHTML = cOptHTML;
+        selectCountry.value = currentCountry;
+      }
+    }
+
     // Top IPs
     if (stats.top_ips && stats.top_ips.length > 0) {
       var ipHTML = '';
       stats.top_ips.forEach(function(item) {
+        var flag = getFlagEmoji(item.country_code);
+        var countryName = item.country || 'Unknown';
         ipHTML += '<tr>' +
           '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + ' <span class="ip-info-btn">ℹ️ Intel</span></span></td>' +
+          '<td><span class="country-badge" title="Filter by ' + countryName + '" onclick="filterByCountry(\'' + countryName + '\')">' + flag + ' ' + countryName + '</span></td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span> ' +
           '<button class="btn-report-mini" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></td>' +
@@ -2310,6 +2786,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       drawTimeline(timelineData);
     }
   }
+
+  window.filterByCountry = function(country) {
+    filters.country = country;
+    selectCountry.value = country;
+    renderActiveChips();
+    renderTable();
+  };
 
   window.filterByRule = function(rule) {
     filters.rule = rule;
