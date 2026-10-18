@@ -437,37 +437,46 @@ func (s *EventStore) GetStats() DashboardStats {
 		})
 	}
 
-	// Sort Top IPs
+	// Sort Top IPs (deterministic: count desc, then name asc)
 	topIPs := make([]TopMetricItem, 0, len(s.ipCounts))
 	for _, item := range s.ipCounts {
 		topIPs = append(topIPs, *item)
 	}
 	sort.Slice(topIPs, func(i, j int) bool {
-		return topIPs[i].Count > topIPs[j].Count
+		if topIPs[i].Count != topIPs[j].Count {
+			return topIPs[i].Count > topIPs[j].Count
+		}
+		return topIPs[i].Name < topIPs[j].Name
 	})
 	if len(topIPs) > 10 {
 		topIPs = topIPs[:10]
 	}
 
-	// Sort Top Paths
+	// Sort Top Paths (deterministic: count desc, then name asc)
 	topPaths := make([]TopMetricItem, 0, len(s.pathCounts))
 	for _, item := range s.pathCounts {
 		topPaths = append(topPaths, *item)
 	}
 	sort.Slice(topPaths, func(i, j int) bool {
-		return topPaths[i].Count > topPaths[j].Count
+		if topPaths[i].Count != topPaths[j].Count {
+			return topPaths[i].Count > topPaths[j].Count
+		}
+		return topPaths[i].Name < topPaths[j].Name
 	})
 	if len(topPaths) > 10 {
 		topPaths = topPaths[:10]
 	}
 
-	// Sort Top Rules
+	// Sort Top Rules (deterministic: count desc, then name asc)
 	topRules := make([]TopMetricItem, 0, len(s.ruleCounts))
 	for _, item := range s.ruleCounts {
 		topRules = append(topRules, *item)
 	}
 	sort.Slice(topRules, func(i, j int) bool {
-		return topRules[i].Count > topRules[j].Count
+		if topRules[i].Count != topRules[j].Count {
+			return topRules[i].Count > topRules[j].Count
+		}
+		return topRules[i].Name < topRules[j].Name
 	})
 	if len(topRules) > 10 {
 		topRules = topRules[:10]
@@ -1908,8 +1917,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       stats.top_rules.forEach(function(r) {
         optHTML += '<option value="' + r.name + '">' + r.name + ' (' + r.count + ')</option>';
       });
-      selectRule.innerHTML = optHTML;
-      selectRule.value = currentSel;
+      if (selectRule.innerHTML !== optHTML) {
+        selectRule.innerHTML = optHTML;
+        selectRule.value = currentSel;
+      }
 
       // Progress bars
       var maxRuleCount = stats.top_rules[0].count || 1;
@@ -1924,7 +1935,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '<div class="rule-bar-wrap"><div class="rule-bar-fill" style="width:' + pct + '%;"></div></div>' +
         '</div>';
       });
-      rulesContainer.innerHTML = rHTML;
+      if (rulesContainer.innerHTML !== rHTML) {
+        rulesContainer.innerHTML = rHTML;
+      }
     }
 
     // Top IPs
@@ -1937,7 +1950,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span></td>' +
         '</tr>';
       });
-      topIpsTbody.innerHTML = ipHTML;
+      if (topIpsTbody.innerHTML !== ipHTML) {
+        topIpsTbody.innerHTML = ipHTML;
+      }
     }
 
     // Top Paths
@@ -1951,7 +1966,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '<td>' + ruleBadge + '</td>' +
         '</tr>';
       });
-      topPathsTbody.innerHTML = pHTML;
+      if (topPathsTbody.innerHTML !== pHTML) {
+        topPathsTbody.innerHTML = pHTML;
+      }
     }
 
     // Timeline SVG
