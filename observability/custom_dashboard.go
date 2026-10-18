@@ -1827,6 +1827,140 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       margin-left: auto;
     }
 
+    /* Global Origin & Threat Map */
+    .map-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      backdrop-filter: blur(12px);
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.36);
+    }
+    .map-body {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    @media (max-width: 1024px) {
+      .map-body {
+        grid-template-columns: 1fr;
+      }
+    }
+    .map-container {
+      position: relative;
+      background: radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.95), #060913);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 320px;
+    }
+    #world-map-svg {
+      width: 100%;
+      height: 100%;
+      min-height: 320px;
+      display: block;
+    }
+    .map-sidebar {
+      background: rgba(5, 8, 16, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      max-height: 360px;
+    }
+    .map-sidebar-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .map-countries-list {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+    }
+    .map-country-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .map-country-item:hover {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .map-country-item.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--accent-cyan);
+    }
+    .map-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(11, 17, 32, 0.96);
+      border: 1px solid var(--card-hover-border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #f8fafc;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      z-index: 100;
+      white-space: nowrap;
+      transform: translate(-50%, -120%);
+      transition: opacity 0.1s ease;
+    }
+    .map-legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .map-blip {
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .map-dot {
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .map-dot:hover {
+      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.8));
+    }
+    @keyframes map-pulse {
+      0% {
+        r: 6px;
+        opacity: 0.9;
+      }
+      50% {
+        r: 16px;
+        opacity: 0.35;
+      }
+      100% {
+        r: 24px;
+        opacity: 0;
+      }
+    }
+    .map-radar {
+      animation: map-pulse 2.2s infinite ease-out;
+      transform-origin: center;
+      pointer-events: none;
+    }
+
     .table-container {
       max-height: 480px;
       overflow-x: auto;
@@ -2353,6 +2487,99 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Global Origin & Threat Geo-Distribution Map -->
+  <div class="map-card">
+    <div class="card-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="card-title">🌍 Global Threat & Traffic Distribution</span>
+        <span class="brand-badge" id="map-country-count">0 Countries Detected</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div class="map-legend">
+          <span class="legend-dot" style="background:#10b981;"></span><span style="font-size:11px; color:#94a3b8;">Clean</span>
+          <span class="legend-dot" style="background:#f43f5e;"></span><span style="font-size:11px; color:#94a3b8;">Threats</span>
+          <span class="legend-dot" style="background:#f59e0b;"></span><span style="font-size:11px; color:#94a3b8;">Tarpit</span>
+        </div>
+        <span style="font-size:11px; color:var(--text-muted);">Click any country on map or list to filter</span>
+      </div>
+    </div>
+    <div class="map-body">
+      <div class="map-container">
+        <svg id="world-map-svg" viewBox="0 0 1000 480" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="ocean-grad" cx="50%" cy="50%" r="60%">
+              <stop offset="0%" stop-color="#0c1631" />
+              <stop offset="100%" stop-color="#060913" />
+            </radialGradient>
+            <filter id="blip-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          <!-- Ocean / Deep Space Background -->
+          <rect width="1000" height="480" fill="url(#ocean-grad)" rx="10" />
+
+          <!-- Graticule & Coordinate Grid -->
+          <g stroke="rgba(56, 189, 248, 0.05)" stroke-width="1">
+            <line x1="0" y1="80" x2="1000" y2="80" />
+            <line x1="0" y1="160" x2="1000" y2="160" />
+            <line x1="0" y1="240" x2="1000" y2="240" stroke="rgba(56, 189, 248, 0.15)" stroke-dasharray="4,4" />
+            <line x1="0" y1="320" x2="1000" y2="320" />
+            <line x1="0" y1="400" x2="1000" y2="400" />
+            
+            <line x1="150" y1="0" x2="150" y2="480" />
+            <line x1="300" y1="0" x2="300" y2="480" />
+            <line x1="450" y1="0" x2="450" y2="480" />
+            <line x1="600" y1="0" x2="600" y2="480" />
+            <line x1="750" y1="0" x2="750" y2="480" />
+            <line x1="900" y1="0" x2="900" y2="480" />
+          </g>
+
+          <!-- Continents Vector Layer -->
+          <g class="continents-layer" fill="rgba(30, 41, 59, 0.65)" stroke="rgba(56, 189, 248, 0.22)" stroke-width="1.2" stroke-linejoin="round">
+            <!-- North & Central America -->
+            <path d="M 105,75 L 140,45 L 210,40 L 250,55 L 290,45 L 305,70 L 280,105 L 255,95 L 250,115 L 285,145 L 270,180 L 230,195 L 190,215 L 175,210 L 170,175 L 135,160 L 115,120 L 95,95 Z M 175,210 L 220,240 L 250,230 L 260,250 L 220,255 L 180,225 Z" />
+            <!-- Greenland -->
+            <path d="M 330,45 L 375,35 L 400,60 L 370,100 L 345,95 L 330,65 Z" />
+            <!-- South America -->
+            <path d="M 250,240 L 290,245 L 345,260 L 370,300 L 350,340 L 315,385 L 290,430 L 275,430 L 270,370 L 260,310 L 245,270 Z" />
+            <!-- Europe -->
+            <path d="M 450,125 L 470,95 L 510,80 L 530,100 L 520,125 L 545,135 L 550,165 L 515,185 L 480,185 L 460,170 L 440,150 Z" />
+            <path d="M 495,50 L 535,45 L 550,85 L 525,105 L 500,85 Z" />
+            <path d="M 450,110 L 465,100 L 475,125 L 455,140 Z" />
+            <!-- Africa -->
+            <path d="M 450,185 L 520,185 L 565,215 L 590,265 L 565,335 L 540,375 L 515,370 L 485,305 L 450,250 L 440,205 Z" />
+            <path d="M 600,320 L 610,310 L 615,345 L 605,355 Z" />
+            <!-- Asia -->
+            <path d="M 550,135 L 610,75 L 710,60 L 800,65 L 890,95 L 870,140 L 810,165 L 775,145 L 755,190 L 780,240 L 745,265 L 720,255 L 700,210 L 675,235 L 635,215 L 600,185 L 565,180 Z" />
+            <path d="M 840,150 L 855,140 L 860,175 L 845,185 Z" />
+            <!-- Oceania & Australia -->
+            <path d="M 790,320 L 850,305 L 880,340 L 860,380 L 805,380 L 775,345 Z" />
+            <path d="M 905,375 L 920,370 L 925,410 L 910,410 Z" />
+            <path d="M 720,265 L 755,270 L 785,285 L 760,295 Z M 800,260 L 830,270 L 825,290 Z" />
+          </g>
+
+          <!-- Dynamic Radar Threat Blips Layer -->
+          <g id="map-blips-group"></g>
+        </svg>
+        <div id="map-tooltip" class="map-tooltip" style="display:none;"></div>
+      </div>
+      <div class="map-sidebar">
+        <div class="map-sidebar-title">
+          <span>Detected Countries</span>
+          <span style="font-size:10px; color:#38bdf8;">Real-Time</span>
+        </div>
+        <div id="map-countries-list" class="map-countries-list">
+          <div style="color:#64748b; font-size:11px; font-style:italic;">Awaiting parsed telemetry...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Intelligence Tables -->
   <div class="intel-grid">
     <div class="chart-card">
@@ -2509,6 +2736,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     ip: '',
     path: ''
   };
+
+  var latestStats = null;
 
   // Visibilities
   var visibleSeries = {
@@ -2880,13 +3109,200 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       timelineData = stats.timeline;
       drawTimeline(timelineData);
     }
+
+    // Update Global Origin World Map
+    latestStats = stats;
+    updateWorldMap(stats);
   }
 
   window.filterByCountry = function(country) {
-    filters.country = country;
-    selectCountry.value = country;
+    if (filters.country === country) {
+      filters.country = 'ALL';
+      selectCountry.value = 'ALL';
+    } else {
+      filters.country = country;
+      selectCountry.value = country;
+    }
     renderActiveChips();
     renderTable();
+    if (latestStats) updateWorldMap(latestStats);
+  };
+
+  // Geographic coordinates for world countries on 1000x480 SVG map
+  var countryCoords = {
+    'US': { x: 215, y: 155, name: 'United States' },
+    'CA': { x: 210, y: 105, name: 'Canada' },
+    'MX': { x: 195, y: 200, name: 'Mexico' },
+    'BR': { x: 335, y: 295, name: 'Brazil' },
+    'AR': { x: 300, y: 365, name: 'Argentina' },
+    'CL': { x: 275, y: 350, name: 'Chile' },
+    'CO': { x: 260, y: 235, name: 'Colombia' },
+    'PE': { x: 255, y: 275, name: 'Peru' },
+    'VE': { x: 285, y: 220, name: 'Venezuela' },
+    'GB': { x: 472, y: 122, name: 'United Kingdom' },
+    'IE': { x: 455, y: 124, name: 'Ireland' },
+    'FR': { x: 480, y: 142, name: 'France' },
+    'DE': { x: 504, y: 130, name: 'Germany' },
+    'NL': { x: 492, y: 126, name: 'Netherlands' },
+    'BE': { x: 485, y: 132, name: 'Belgium' },
+    'ES': { x: 465, y: 165, name: 'Spain' },
+    'PT': { x: 450, y: 168, name: 'Portugal' },
+    'IT': { x: 512, y: 158, name: 'Italy' },
+    'CH': { x: 496, y: 146, name: 'Switzerland' },
+    'AT': { x: 515, y: 144, name: 'Austria' },
+    'SE': { x: 520, y: 92,  name: 'Sweden' },
+    'NO': { x: 500, y: 95,  name: 'Norway' },
+    'FI': { x: 545, y: 88,  name: 'Finland' },
+    'DK': { x: 498, y: 110, name: 'Denmark' },
+    'PL': { x: 532, y: 128, name: 'Poland' },
+    'CZ': { x: 516, y: 136, name: 'Czech Republic' },
+    'UA': { x: 575, y: 134, name: 'Ukraine' },
+    'RO': { x: 555, y: 150, name: 'Romania' },
+    'HU': { x: 535, y: 146, name: 'Hungary' },
+    'GR': { x: 540, y: 175, name: 'Greece' },
+    'RU': { x: 670, y: 95,  name: 'Russia' },
+    'TR': { x: 565, y: 170, name: 'Turkey' },
+    'CN': { x: 745, y: 175, name: 'China' },
+    'JP': { x: 845, y: 168, name: 'Japan' },
+    'KR': { x: 808, y: 170, name: 'South Korea' },
+    'IN': { x: 670, y: 205, name: 'India' },
+    'PK': { x: 640, y: 190, name: 'Pakistan' },
+    'BD': { x: 698, y: 208, name: 'Bangladesh' },
+    'SG': { x: 740, y: 260, name: 'Singapore' },
+    'MY': { x: 736, y: 252, name: 'Malaysia' },
+    'ID': { x: 775, y: 280, name: 'Indonesia' },
+    'PH': { x: 800, y: 228, name: 'Philippines' },
+    'TH': { x: 728, y: 218, name: 'Thailand' },
+    'VN': { x: 742, y: 220, name: 'Vietnam' },
+    'TW': { x: 792, y: 200, name: 'Taiwan' },
+    'HK': { x: 765, y: 205, name: 'Hong Kong' },
+    'AU': { x: 835, y: 340, name: 'Australia' },
+    'NZ': { x: 915, y: 385, name: 'New Zealand' },
+    'ZA': { x: 540, y: 340, name: 'South Africa' },
+    'EG': { x: 548, y: 195, name: 'Egypt' },
+    'NG': { x: 495, y: 235, name: 'Nigeria' },
+    'KE': { x: 575, y: 255, name: 'Kenya' },
+    'MA': { x: 445, y: 185, name: 'Morocco' },
+    'SA': { x: 585, y: 205, name: 'Saudi Arabia' },
+    'AE': { x: 615, y: 202, name: 'United Arab Emirates' },
+    'IL': { x: 554, y: 180, name: 'Israel' }
+  };
+
+  function updateWorldMap(stats) {
+    if (!stats) return;
+    var countries = stats.top_countries || [];
+    var countEl = document.getElementById('map-country-count');
+    if (countEl) {
+      countEl.textContent = countries.length + (countries.length === 1 ? ' Country Detected' : ' Countries Detected');
+    }
+
+    // 1. Render Blips on SVG map
+    var blipsGroup = document.getElementById('map-blips-group');
+    if (blipsGroup) {
+      var blipsHTML = '';
+      countries.forEach(function(c) {
+        var code = (c.country_code || '').toUpperCase();
+        if (!code || code === 'LAN' || code === 'LOCAL') return;
+        var coord = countryCoords[code];
+        if (!coord) return;
+
+        var total = c.count || 0;
+        var blocked = c.blocked || 0;
+        var tarpit = c.tarpit || 0;
+        var clean = total - blocked - tarpit;
+        if (clean < 0) clean = 0;
+
+        var color = '#10b981';
+        if (blocked > 0) color = '#f43f5e';
+        else if (tarpit > 0) color = '#f59e0b';
+
+        var flag = getFlagEmoji(code);
+        var r = Math.min(14, Math.max(6, 6 + Math.log2(total || 1) * 2));
+        var isFilterActive = filters.country === c.name || filters.country === code;
+
+        blipsHTML += '<g class="map-blip" onclick="filterByCountry(\'' + c.name + '\')">' +
+          '<circle class="map-radar" cx="' + coord.x + '" cy="' + coord.y + '" stroke="' + color + '" fill="none" />' +
+          '<circle class="map-dot" cx="' + coord.x + '" cy="' + coord.y + '" r="' + r + '" fill="' + color + '" ' +
+            'stroke="' + (isFilterActive ? '#38bdf8' : '#070b14') + '" stroke-width="' + (isFilterActive ? '3' : '1.5') + '" ' +
+            'filter="url(#blip-glow)" ' +
+            'onmouseenter="showMapTooltip(event, \'' + c.name + '\', \'' + code + '\', ' + total + ', ' + blocked + ', ' + tarpit + ', ' + clean + ')" ' +
+            'onmouseleave="hideMapTooltip()" />' +
+          '<text x="' + coord.x + '" y="' + (coord.y - r - 4) + '" text-anchor="middle" font-size="10" font-weight="700" fill="#f8fafc" font-family="JetBrains Mono, monospace" pointer-events="none">' + flag + ' ' + total + '</text>' +
+        '</g>';
+      });
+      blipsGroup.innerHTML = blipsHTML;
+    }
+
+    // 2. Render Sidebar list
+    var listEl = document.getElementById('map-countries-list');
+    if (listEl) {
+      if (countries.length === 0) {
+        listEl.innerHTML = '<div style="color:#64748b; font-size:11px; font-style:italic;">No countries detected yet</div>';
+        return;
+      }
+
+      var listHTML = '';
+      var maxHits = countries[0].count || 1;
+      countries.forEach(function(c) {
+        var code = (c.country_code || '').toUpperCase();
+        var flag = getFlagEmoji(code);
+        var total = c.count || 0;
+        var blocked = c.blocked || 0;
+        var tarpit = c.tarpit || 0;
+        var clean = total - blocked - tarpit;
+        if (clean < 0) clean = 0;
+        var pct = ((total / maxHits) * 100).toFixed(0);
+        var isFilterActive = filters.country === c.name || filters.country === code;
+
+        listHTML += '<div class="map-country-item' + (isFilterActive ? ' active' : '') + '" onclick="filterByCountry(\'' + c.name + '\')">' +
+          '<div style="flex:1; min-width:0;">' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">' +
+              '<span style="font-weight:600; font-size:12px; color:#f1f5f9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + flag + ' ' + c.name + '</span>' +
+              '<span style="font-family:JetBrains Mono, monospace; font-size:11px; font-weight:700; color:' + (blocked > 0 ? '#fb7185' : '#38bdf8') + ';">' + Number(total).toLocaleString() + '</span>' +
+            '</div>' +
+            '<div style="height:4px; background:rgba(255,255,255,0.06); border-radius:2px; overflow:hidden;">' +
+              '<div style="width:' + pct + '%; height:100%; background:' + (blocked > 0 ? '#f43f5e' : (tarpit > 0 ? '#f59e0b' : '#10b981')) + '; border-radius:2px;"></div>' +
+            '</div>' +
+            '<div style="display:flex; gap:6px; font-size:10px; margin-top:3px; color:#64748b;">' +
+              (blocked > 0 ? '<span style="color:#fb7185;">' + blocked + ' blk</span>' : '') +
+              (tarpit > 0 ? '<span style="color:#fcd34d;">' + tarpit + ' tar</span>' : '') +
+              (clean > 0 ? '<span style="color:#6ee7b7;">' + clean + ' cln</span>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      });
+      listEl.innerHTML = listHTML;
+    }
+  }
+
+  window.showMapTooltip = function(e, name, code, total, blocked, tarpit, clean) {
+    var tooltip = document.getElementById('map-tooltip');
+    if (!tooltip) return;
+    var flag = getFlagEmoji(code);
+    var blockRate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
+    tooltip.innerHTML = '<div style="font-weight:700; font-size:12px; margin-bottom:4px; display:flex; align-items:center; gap:6px;">' + flag + ' ' + name + ' <span style="font-size:10px; color:#94a3b8; font-weight:normal;">[' + code + ']</span></div>' +
+      '<div style="display:grid; grid-template-columns:auto auto; gap:3px 12px; font-family:JetBrains Mono, monospace; font-size:11px;">' +
+        '<span style="color:#94a3b8;">Total Hits:</span><b style="color:#f8fafc;">' + Number(total).toLocaleString() + '</b>' +
+        '<span style="color:#94a3b8;">Threat Blocks:</span><b style="color:#fb7185;">' + blocked + ' (' + blockRate + ')</b>' +
+        '<span style="color:#94a3b8;">Tarpit Throttled:</span><b style="color:#fcd34d;">' + tarpit + '</b>' +
+        '<span style="color:#94a3b8;">Clean Ingress:</span><b style="color:#6ee7b7;">' + clean + '</b>' +
+      '</div>' +
+      '<div style="font-size:10px; color:#38bdf8; margin-top:6px; text-align:right;">Click to filter logs ➔</div>';
+
+    var container = document.querySelector('.map-container');
+    if (container) {
+      var rect = container.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      tooltip.style.left = x + 'px';
+      tooltip.style.top = y + 'px';
+      tooltip.style.display = 'block';
+    }
+  };
+
+  window.hideMapTooltip = function() {
+    var tooltip = document.getElementById('map-tooltip');
+    if (tooltip) tooltip.style.display = 'none';
   };
 
   window.filterByRule = function(rule) {
