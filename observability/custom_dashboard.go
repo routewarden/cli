@@ -1501,36 +1501,121 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 11.5px;
     }
 
-    /* Datasheet (.spec) */
-    .spec {
-      border: 1px solid var(--line);
+    /* ── System Specification HUD (.spec-card) ───────────── */
+    .spec-card {
       background: var(--base);
+      border: 1px solid var(--line);
       border-radius: 4px;
+      box-shadow: var(--card-shadow);
       overflow: hidden;
-    }
-    .spec div {
       display: flex;
-      gap: 14px;
-      padding: 6px 12px;
-      font-size: 11.5px;
+      flex-direction: column;
+    }
+    .spec-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 12px;
+      background: var(--panel);
       border-bottom: 1px solid var(--line);
-    }
-    .spec div:last-child {
-      border-bottom: 0;
-    }
-    .spec dt {
-      color: var(--overlay);
-      width: 8.5em;
-      flex: none;
-      margin: 0;
-      text-transform: uppercase;
+      font-size: 11px;
+      font-weight: 700;
       letter-spacing: 0.5px;
+      color: var(--text-hi);
     }
-    .spec dd {
-      margin: 0;
-      color: var(--text);
+    .spec-grid {
+      display: flex;
+      flex-direction: column;
+    }
+    .spec-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--line);
+      transition: background 0.12s ease;
+      font-size: 11.5px;
+    }
+    .spec-row:last-child {
+      border-bottom: none;
+    }
+    .spec-row:hover {
+      background: var(--surface);
+    }
+    .spec-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: 100px;
+      flex-shrink: 0;
+    }
+    .spec-icon {
+      font-size: 13px;
+      line-height: 1;
+    }
+    .spec-key {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: var(--overlay);
+      text-transform: uppercase;
+    }
+    .spec-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       min-width: 0;
-      overflow-wrap: anywhere;
+    }
+    .spec-val {
+      color: var(--text);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .spec-pill {
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      border: 1px solid transparent;
+    }
+    .spec-pill-teal {
+      background: var(--teal-bg);
+      border-color: var(--teal-border);
+      color: var(--teal);
+    }
+    .spec-pill-green {
+      background: var(--green-bg);
+      border-color: var(--green-border);
+      color: var(--green);
+    }
+    .spec-pill-yellow {
+      background: var(--yellow-bg);
+      border-color: var(--yellow-border);
+      color: var(--yellow);
+    }
+    .spec-pill-mauve {
+      background: var(--mauve-bg);
+      border-color: rgba(179, 136, 255, 0.3);
+      color: var(--mauve);
+    }
+    @media (max-width: 640px) {
+      .spec-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+      .spec-body {
+        width: 100%;
+        flex-wrap: wrap;
+      }
     }
 
     /* ── Sources Ribbon ──────────────────────────────────── */
@@ -2491,24 +2576,56 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <p class="lede tight">Deterministic zero-knowledge cipher stream, edge tarpitting & active geo-surveillance.</p>
     </div>
 
-    <dl class="spec">
-      <div>
-        <dt>TARGET</dt>
-        <dd>Reverse Proxy Security Telemetry & Live SOC Stream</dd>
+    <div class="spec-card">
+      <div class="spec-header">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>⚙️ SYSTEM RUNTIME SPECIFICATION</span>
+        </div>
+        <span class="tui-tag tag-green">● ACTIVE TELEMETRY</span>
       </div>
-      <div>
-        <dt>ENGINE</dt>
-        <dd>RouteWarden Core v5.0 // GoAccess Ingress Parser</dd>
+      <div class="spec-grid">
+        <div class="spec-row">
+          <div class="spec-meta">
+            <span class="spec-icon">🎯</span>
+            <span class="spec-key">TARGET</span>
+          </div>
+          <div class="spec-body">
+            <span class="spec-val">Reverse Proxy Security Telemetry & Live SOC Stream</span>
+            <span class="spec-pill spec-pill-teal">INGRESS</span>
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-meta">
+            <span class="spec-icon">⚡</span>
+            <span class="spec-key">ENGINE</span>
+          </div>
+          <div class="spec-body">
+            <span class="spec-val">RouteWarden Core v5.0 // GoAccess Ingress Parser</span>
+            <span class="spec-pill spec-pill-green">CORE v5.0</span>
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-meta">
+            <span class="spec-icon">🌍</span>
+            <span class="spec-key">ORIGIN</span>
+          </div>
+          <div class="spec-body">
+            <span class="spec-val">MaxMind GeoLite2 Autonomous Country Engine</span>
+            <span class="spec-pill spec-pill-yellow">GEO-RADAR</span>
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-meta">
+            <span class="spec-icon">🔒</span>
+            <span class="spec-key">CIPHER</span>
+          </div>
+          <div class="spec-body">
+            <span class="spec-val">X25519 + ChaCha20-Poly1305 / AES Zero-Knowledge</span>
+            <span class="spec-pill spec-pill-mauve">ENCLAVE</span>
+          </div>
+        </div>
       </div>
-      <div>
-        <dt>ORIGIN</dt>
-        <dd>MaxMind GeoLite2 Autonomous Country Engine</dd>
-      </div>
-      <div>
-        <dt>CIPHER</dt>
-        <dd>X25519 + ChaCha20-Poly1305 / AES Zero-Knowledge</dd>
-      </div>
-    </dl>
+    </div>
   </header>
 
   <!-- ── Monitored Nodes Ribbon ────────────────────────────── -->
