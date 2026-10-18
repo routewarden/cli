@@ -1907,6 +1907,26 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     .method-put { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .method-delete { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
 
+    .rule-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(244, 63, 94, 0.14);
+      color: #fda4af;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .rule-tag:hover {
+      background: rgba(244, 63, 94, 0.28);
+      border-color: rgba(244, 63, 94, 0.55);
+      color: #ffffff;
+    }
+
     /* Modal Inspector */
     .modal-overlay {
       position: fixed;
@@ -2432,11 +2452,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <thead>
           <tr>
             <th>Time</th>
-            <th>Verdict & Rule</th>
+            <th>Verdict</th>
             <th>Method</th>
             <th>Path</th>
             <th>Client IP</th>
             <th>Status</th>
+            <th>Rule</th>
             <th>Latency</th>
           </tr>
         </thead>
@@ -2698,10 +2719,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var verdictLabel = 'ALLOW';
       if (ev.verdict === 'BLOCK') {
         verdictClass = 'verdict-block';
-        verdictLabel = ev.rule ? '🛑 BLOCK: ' + ev.rule : '🛑 BLOCK';
+        verdictLabel = '🛑 BLOCK';
       } else if (ev.verdict === 'TARPIT') {
         verdictClass = 'verdict-tarpit';
-        verdictLabel = ev.rule ? '⏳ TARPIT: ' + ev.rule : '⏳ TARPIT';
+        verdictLabel = '⏳ TARPIT';
+      } else {
+        verdictLabel = '✅ ALLOW';
+      }
+
+      var ruleHTML = '<span style="color:#64748b; font-size:11px;">—</span>';
+      if (ev.rule) {
+        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule(\'' + ev.rule + '\')">🛡️ ' + ev.rule + '</span>';
       }
 
       var methodClass = 'method-get';
@@ -2723,11 +2751,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '<span style="margin-right:5px; font-size:13px;">' + flag + '</span>' + ev.client_ip + ' <span class="ip-info-btn">ℹ️</span>' +
         '</span></td>' +
         '<td>' + ev.status + '</td>' +
+        '<td>' + ruleHTML + '</td>' +
         '<td style="color:' + latencyColor + ';">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
       '</tr>';
     });
 
-    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="7" style="color:#64748b; text-align:center;">No matching events</td></tr>';
+    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:#64748b; text-align:center;">No matching events</td></tr>';
 
     if (autoScroll && streamContainer) {
       streamContainer.scrollTop = streamContainer.scrollHeight;
