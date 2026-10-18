@@ -1966,15 +1966,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 7px;
     }
     .rule-item {
-      cursor: pointer;
       padding: 5px 8px;
       border: 1px solid var(--line);
       background: var(--base);
       border-radius: 3px;
-      transition: border-color 0.12s ease;
-    }
-    .rule-item:hover {
-      border-color: var(--line-hi);
     }
     .rule-meta {
       display: flex;
@@ -2240,7 +2235,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       text-decoration: underline;
     }
     .rule-tag {
-      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
       color: var(--pink);
       padding: 1px 6px;
       border-radius: 3px;
@@ -2248,12 +2244,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: var(--pink-bg);
       font-size: 10.5px;
       text-shadow: var(--glow-text-pink);
-      transition: all 0.12s ease;
-    }
-    .rule-tag:hover {
-      background: var(--pink);
-      color: var(--base);
-      border-color: var(--pink);
     }
 
     /* ── Inspector Modals ────────────────────────────────── */
@@ -3244,7 +3234,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       var ruleHTML = '<span style="color:var(--overlay);">—</span>';
       if (ev.rule) {
-        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule(\'' + ev.rule + '\')">🛡️ ' + ev.rule + '</span>';
+        ruleHTML = '<span class="rule-tag">🛡️ ' + ev.rule + '</span>';
       }
 
       var methodClass = 'method-get';
@@ -3347,7 +3337,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var rHTML = '';
       stats.top_rules.forEach(function(r) {
         var pct = ((r.count / maxRuleCount) * 100).toFixed(1);
-        rHTML += '<div class="rule-item" onclick="filterByRule(\'' + r.name + '\')">' +
+        rHTML += '<div class="rule-item">' +
           '<div class="rule-meta">' +
             '<span class="rule-name">🛡️ ' + r.name + '</span>' +
             '<span class="rule-count">' + Number(r.count).toLocaleString() + ' hits</span>' +
@@ -3382,7 +3372,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var countryName = item.country || 'Unknown';
         ipHTML += '<tr>' +
           '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + '</span></td>' +
-          '<td><span style="cursor:pointer;" onclick="filterByCountry(\'' + countryName + '\')">' + flag + ' ' + countryName + '</span></td>' +
+          '<td>' + flag + ' ' + countryName + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td><div class="threat-breakdown-cell"><span class="tui-tag tag-pink">' + item.blocked + ' blk</span><span class="tui-tag tag-yellow">' + item.tarpit + ' tar</span>' +
           '<button class="tui-btn" style="padding:1px 6px; font-size:10px;" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></div></td>' +
@@ -3398,7 +3388,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var pHTML = '';
       stats.top_paths.forEach(function(item) {
         var ruleBadge = item.rule ? '<span class="tui-tag tag-pink">' + item.rule + '</span>' : '<span style="color:var(--overlay);">—</span>';
-        pHTML += '<tr onclick="filterByPath(\'' + item.name + '\')" style="cursor:pointer;">' +
+        pHTML += '<tr>' +
           '<td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">' + item.name + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td>' + ruleBadge + '</td>' +
