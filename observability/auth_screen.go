@@ -410,7 +410,7 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
       <h1 class="brand-title">
         <span class="bracket">[</span> ROUTEWARDEN SOC <span class="bracket">]</span>
       </h1>
-      <p class="brand-subtitle">Layer 7 Threat Defense & Telemetry Console</p>
+      <p class="brand-subtitle">Reverse Proxy Security & Traffic Monitor</p>
       <div class="brand-badge">
         🔒 RESTRICTED CONSOLE // AUTH REQUIRED
       </div>
@@ -429,13 +429,13 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
       <div class="card-body">
         <div class="auth-alert" id="auth-alert">
           <span id="alert-icon">🛑</span>
-          <span id="alert-text">ACCESS DENIED: Invalid credentials</span>
+          <span id="alert-text">Access Denied: Invalid username or password</span>
         </div>
 
         <form id="auth-form" onsubmit="handleAuthSubmit(event)">
           <div class="form-group">
             <label class="form-label" for="username">
-              <span><span class="prompt-char">&gt;</span> OPERATOR ID / USERNAME</span>
+              <span><span class="prompt-char">&gt;</span> USERNAME</span>
             </label>
             <div class="input-wrap">
               <span class="input-icon">👤</span>
@@ -455,7 +455,7 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
 
           <div class="form-group">
             <label class="form-label" for="password">
-              <span><span class="prompt-char">&gt;</span> ACCESS KEY / PASSWORD</span>
+              <span><span class="prompt-char">&gt;</span> PASSWORD</span>
             </label>
             <div class="input-wrap">
               <span class="input-icon">🔑</span>
@@ -478,17 +478,17 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
 
           <button type="submit" class="btn-submit" id="btn-submit">
             <span id="btn-icon">⚡</span>
-            <span id="btn-text">AUTHENTICATE & ENTER CONSOLE</span>
+            <span id="btn-text">SIGN IN TO DASHBOARD</span>
           </button>
         </form>
       </div>
     </div>
 
     <div class="auth-footer">
-      <div>Zero-Knowledge Ingestion & Telemetry Persistence</div>
+      <div>Encrypted Gateway Logs & Live Traffic Monitoring</div>
       <div class="footer-status">
         <span class="status-dot"></span>
-        <span>ROUTEWARDEN GATEWAY ENGINE ACTIVE</span>
+        <span>ROUTEWARDEN SECURITY RUNNING</span>
       </div>
     </div>
   </div>
@@ -509,7 +509,7 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
     function showAlert(msg) {
       var alertBox = document.getElementById('auth-alert');
       var alertText = document.getElementById('alert-text');
-      alertText.textContent = msg || 'ACCESS DENIED: Invalid credentials';
+      alertText.textContent = msg || 'Access Denied: Invalid username or password';
       alertBox.style.display = 'flex';
       // Retrigger shake animation
       alertBox.style.animation = 'none';

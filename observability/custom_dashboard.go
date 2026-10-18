@@ -3523,16 +3523,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <span class="hl">██╔══██╗██║   ██║██║   ██║   ██║   ██╔══╝  </span> <span class="sub">██║███╗██║██╔══██║██╔══██╗██║  ██║██╔══╝  ██║╚██╗██║</span>
 <span class="hl">██║  ██║╚██████╔╝╚██████╔╝   ██║   ███████╗</span> <span class="sub">╚███╔███╔╝██║  ██║██║  ██║██████╔╝███████╗██║ ╚████║</span>
 <span class="hl">╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝</span> <span class="sub"> ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═══╝</span></pre>
-      <p class="lede">Real-time Reverse Proxy Intrusion Telemetry & Threat Defense</p>
-      <p class="lede tight">Deterministic zero-knowledge cipher stream, edge tarpitting & active geo-surveillance.</p>
+      <p class="lede">Real-Time Reverse Proxy Security & Traffic Monitor</p>
+      <p class="lede tight">Live traffic monitoring, automated threat defense, and rate limiting.</p>
     </div>
 
     <div class="spec-card">
       <div class="spec-header">
         <div style="display:flex; align-items:center; gap:6px;">
-          <span>⚙️ SYSTEM RUNTIME SPECIFICATION</span>
+          <span>⚙️ SYSTEM DETAILS</span>
         </div>
-        <span class="tui-tag tag-green">● ACTIVE TELEMETRY</span>
+        <span class="tui-tag tag-green">● LIVE MONITORING</span>
       </div>
       <div class="spec-grid">
         <div class="spec-row">
@@ -3541,7 +3541,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">TARGET</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">Reverse Proxy Security Telemetry & Live SOC Stream</span>
+            <span class="spec-val">Reverse Proxy Security & Live Traffic</span>
             <span class="spec-pill spec-pill-teal">INGRESS</span>
           </div>
         </div>
@@ -3551,7 +3551,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.0.0 // Native SOC Ingress Parser</span>
+            <span class="spec-val">RouteWarden Core v5.0.0 // Traffic & Security Engine</span>
             <span class="spec-pill spec-pill-green">CORE v5.0.0</span>
           </div>
         </div>
@@ -3561,7 +3561,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ORIGIN</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">MaxMind GeoLite2 Autonomous Country Engine</span>
+            <span class="spec-val">MaxMind GeoLite2 Country Database</span>
             <span class="spec-pill spec-pill-yellow">GEO-RADAR</span>
           </div>
         </div>
@@ -3571,7 +3571,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">CIPHER</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">X25519 + ChaCha20-Poly1305 / AES Zero-Knowledge</span>
+            <span class="spec-val">Encrypted Zero-Knowledge Stream (X25519 + ChaCha20)</span>
             <span class="spec-pill spec-pill-mauve">ENCLAVE</span>
           </div>
         </div>
@@ -3581,23 +3581,23 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   <!-- ── Monitored Nodes Ribbon ────────────────────────────── -->
   <div class="sources-ribbon" id="sources-container">
-    <span style="font-weight: 600; color: var(--text-hi);">🌐 MONITORED NODES:</span>
-    <span style="color: var(--overlay); font-style: italic;">Discovering active containers & remote agents...</span>
+    <span style="font-weight: 600; color: var(--text-hi);">🌐 CONNECTED GATEWAYS & SERVERS:</span>
+    <span style="color: var(--overlay); font-style: italic;">Waiting for gateway logs & remote agents...</span>
   </div>
 
   <!-- ── Mobile Section Quick Jump Strip ───────────────────── -->
   <nav class="mobile-section-nav" aria-label="Section Navigation">
-    <a href="#sec-kpis" class="mobile-nav-chip active" data-target="sec-kpis"><span>01</span> KPIS</a>
-    <a href="#sec-stream" class="mobile-nav-chip" data-target="sec-stream"><span>02</span> STREAM</a>
-    <a href="#sec-geo" class="mobile-nav-chip" data-target="sec-geo"><span>03</span> GEO</a>
-    <a href="#sec-charts" class="mobile-nav-chip" data-target="sec-charts"><span>04</span> CHARTS</a>
-    <a href="#sec-intel" class="mobile-nav-chip" data-target="sec-intel"><span>05</span> INTEL</a>
+    <a href="#sec-kpis" class="mobile-nav-chip active" data-target="sec-kpis"><span>01</span> OVERVIEW</a>
+    <a href="#sec-stream" class="mobile-nav-chip" data-target="sec-stream"><span>02</span> LOGS</a>
+    <a href="#sec-geo" class="mobile-nav-chip" data-target="sec-geo"><span>03</span> MAP</a>
+    <a href="#sec-charts" class="mobile-nav-chip" data-target="sec-charts"><span>04</span> TRENDS</a>
+    <a href="#sec-intel" class="mobile-nav-chip" data-target="sec-intel"><span>05</span> THREATS</a>
   </nav>
 
   <!-- ── Section 01: KPI Spec Cards ────────────────────────── -->
   <section class="soc-section" id="sec-kpis">
   <div class="head">
-    <h2>01 // INGRESS TELEMETRY & ATTACK COUNTERS</h2>
+    <h2>01 // TRAFFIC & SECURITY OVERVIEW</h2>
     <div class="rule"></div>
     <span class="cmd">sys.stat.kpi</span>
   </div>
@@ -3605,12 +3605,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <div class="kpi-grid">
     <div class="kpi-card" style="border-top: 2px solid var(--teal);">
       <div class="kpi-top">
-        <span class="kpi-label">Total Ingress</span>
+        <span class="kpi-label">Total Requests</span>
         <span style="font-size:14px;">🛡️</span>
       </div>
       <div class="kpi-val" id="kpi-total">0</div>
       <div class="kpi-meter" id="kpi-meter-total">[████████████████] 100.0%</div>
-      <div class="kpi-sub">Gateway ingress events</div>
+      <div class="kpi-sub">Incoming traffic events</div>
     </div>
 
     <div class="kpi-card" style="border-top: 2px solid var(--pink);">
@@ -3620,27 +3620,27 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
       <div class="kpi-val" style="color: var(--pink);" id="kpi-blocked">0</div>
       <div class="kpi-meter" style="color: var(--pink);" id="kpi-meter-blocked">[░░░░░░░░░░░░░░░░] 0.0%</div>
-      <div class="kpi-sub"><span class="tui-tag tag-pink" id="kpi-block-rate">0.0% Rate</span> 403 Forbidden</div>
+      <div class="kpi-sub"><span class="tui-tag tag-pink" id="kpi-block-rate">0.0% Rate</span> 403 Blocked</div>
     </div>
 
     <div class="kpi-card" style="border-top: 2px solid var(--yellow);">
       <div class="kpi-top">
-        <span class="kpi-label">Throttled / Tarpit</span>
+        <span class="kpi-label">Slowed Down</span>
         <span style="font-size:14px;">⏳</span>
       </div>
       <div class="kpi-val" style="color: var(--yellow);" id="kpi-tarpit">0</div>
       <div class="kpi-meter" style="color: var(--yellow);" id="kpi-meter-tarpit">[░░░░░░░░░░░░░░░░] 0.0%</div>
-      <div class="kpi-sub"><span class="tui-tag tag-yellow">429 Slowed</span> Hostile bots</div>
+      <div class="kpi-sub"><span class="tui-tag tag-yellow">429 Slowed</span> Rate limited / slowed down</div>
     </div>
 
     <div class="kpi-card" style="border-top: 2px solid var(--green);">
       <div class="kpi-top">
-        <span class="kpi-label">Clean Ingress</span>
+        <span class="kpi-label">Normal Traffic</span>
         <span style="font-size:14px;">✅</span>
       </div>
       <div class="kpi-val" style="color: var(--green);" id="kpi-clean">0</div>
       <div class="kpi-meter" style="color: var(--green);" id="kpi-meter-clean">[████████████████] 100.0%</div>
-      <div class="kpi-sub"><span class="tui-tag tag-green">200 OK</span> Legitimate traffic</div>
+      <div class="kpi-sub"><span class="tui-tag tag-green">200 OK</span> Allowed requests passed through</div>
     </div>
   </div>
   </section>
@@ -3648,7 +3648,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <!-- ── Section 02: Real-Time SOC Security Event Stream ───── -->
   <section class="soc-section" id="sec-stream">
   <div class="head">
-    <h2>02 // SECURITY OPERATIONS LOG STREAM</h2>
+    <h2>02 // LIVE REQUEST LOG</h2>
     <div class="rule"></div>
     <span class="cmd">stream.audit.live</span>
   </div>
@@ -3657,8 +3657,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="console-toolbar">
       <div class="console-hud-bar">
         <div class="prompt-row">
-          <span class="prompt-user">rwarden@soc:~$</span>
-          <span class="prompt-cmd" id="prompt-stream-cmd">filter --stream=live</span>
+          <span class="prompt-user">rwarden@gateway:~$</span>
+          <span class="prompt-cmd" id="prompt-stream-cmd">Live request stream</span>
           <span class="prompt-cursor">█</span>
           <span id="pause-badge" style="display:none; margin-left:12px; padding:2px 8px; border-radius:3px; background:rgba(234,179,8,0.2); border:1px solid var(--yellow); color:var(--yellow); font-size:11px; font-weight:700; letter-spacing:0.05em;">⏸ STREAM PAUSED</span>
         </div>
@@ -3669,15 +3669,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="tab-count" id="count-tab-all">0</span>
           </button>
           <button class="tab-btn" data-filter-verdict="BLOCK">
-            <span>🛑 BLOCK</span>
+            <span>🛑 Blocked</span>
             <span class="tab-count" id="count-tab-block">0</span>
           </button>
           <button class="tab-btn" data-filter-verdict="TARPIT">
-            <span>⏳ TARPIT</span>
+            <span>⏳ Slowed</span>
             <span class="tab-count" id="count-tab-tarpit">0</span>
           </button>
           <button class="tab-btn" data-filter-verdict="ALLOW">
-            <span>✅ CLEAN</span>
+            <span>✅ Allowed</span>
             <span class="tab-count" id="count-tab-clean">0</span>
           </button>
         </div>
@@ -3809,7 +3809,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <!-- ── Section 03: World Map & Threat Geo-Distribution ───── -->
   <section class="soc-section" id="sec-geo">
   <div class="head">
-    <h2>03 // GEO-DISTRIBUTION & ATTACK MATRIX</h2>
+    <h2>03 // VISITOR & THREAT MAP</h2>
     <div class="rule"></div>
     <span class="cmd">geo.threat.matrix</span>
   </div>
@@ -3817,16 +3817,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <div class="term">
     <div class="cap">
       <div style="display:flex; align-items:center; gap:8px;">
-        <span>🌐 GLOBAL THREAT & INGRESS RADAR</span>
-        <span class="tui-tag tag-teal" id="map-country-count">0 Countries Detected</span>
+        <span>🌐 WORLD TRAFFIC & THREAT MAP</span>
+        <span class="tui-tag tag-teal" id="map-country-count">0 Countries Active</span>
       </div>
       <div style="display:flex; align-items:center; gap:12px;">
         <div style="display:flex; align-items:center; gap:10px; font-size:11px;">
-          <span><span style="color:var(--green);">●</span> Clean</span>
-          <span><span style="color:var(--pink);">■</span> Threats</span>
-          <span><span style="color:var(--yellow);">▲</span> Tarpit</span>
+          <span><span style="color:var(--green);">●</span> Normal</span>
+          <span><span style="color:var(--pink);">■</span> Blocked</span>
+          <span><span style="color:var(--yellow);">▲</span> Slowed</span>
         </div>
-        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET VIEW]</button>
+        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ Reset Map]</button>
       </div>
     </div>
 
@@ -3838,11 +3838,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <!-- Right Sidebar: Detected Countries Breakdown -->
       <div class="map-sidebar">
         <div class="map-sidebar-title">
-          <span>Detected Countries</span>
+          <span>Top Countries</span>
           <span style="color:var(--teal);">Real-Time</span>
         </div>
         <div id="map-countries-list" class="map-countries-list">
-          <div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">Awaiting parsed telemetry...</div>
+          <div style="color:var(--overlay); font-size:11px; font-style:italic; padding:10px;">Waiting for visitor locations...</div>
         </div>
       </div>
     </div>
@@ -3852,7 +3852,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <!-- ── Section 04: Telemetry Dynamics ────────────────────── -->
   <section class="soc-section" id="sec-charts">
   <div class="head">
-    <h2>04 // TELEMETRY DYNAMICS & THREAT SIGNATURES</h2>
+    <h2>04 // TRAFFIC TRENDS & SECURITY RULES</h2>
     <div class="rule"></div>
     <span class="cmd">sig.threat.timeline</span>
   </div>
@@ -3861,11 +3861,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <!-- Real-Time Timeline Curve -->
     <div class="chart-card">
       <div class="card-cap">
-        <span>📈 INGRESS VELOCITY & THREAT TIMELINE</span>
+        <span>📈 REQUEST TRAFFIC OVER TIME</span>
         <div class="timeline-legend">
-          <span class="legend-item" id="legend-clean"><span style="color:var(--green);">●</span> Clean</span>
+          <span class="legend-item" id="legend-clean"><span style="color:var(--green);">●</span> Normal</span>
           <span class="legend-item" id="legend-blocked"><span style="color:var(--pink);">■</span> Blocked</span>
-          <span class="legend-item" id="legend-tarpit"><span style="color:var(--yellow);">▲</span> Tarpit</span>
+          <span class="legend-item" id="legend-tarpit"><span style="color:var(--yellow);">▲</span> Slowed</span>
         </div>
       </div>
       <div class="timeline-container" id="timeline-box">
@@ -3899,7 +3899,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <!-- Threat Ratio & Signatures -->
     <div class="chart-card">
       <div class="card-cap">
-        <span>🎯 THREAT RATIO & SIGNATURES</span>
+        <span>🎯 TRAFFIC BREAKDOWN & RULES</span>
       </div>
       <div class="donut-wrap">
         <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
@@ -3909,14 +3909,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="var(--yellow)" stroke-width="12" stroke-dasharray="0 238.7"></circle>
         </svg>
         <div class="donut-legend">
-          <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
+          <div><span style="color:var(--green);">●</span> Normal: <span id="donut-clean-lbl">0%</span></div>
           <div><span style="color:var(--pink);">■</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
-          <div><span style="color:var(--yellow);">▲</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
+          <div><span style="color:var(--yellow);">▲</span> Slowed: <span id="donut-tarpit-lbl">0%</span></div>
         </div>
       </div>
-      <div style="font-size:10.5px; font-weight:700; color:var(--overlay); text-transform:uppercase; letter-spacing:0.5px; padding:0 14px;">Top Triggered Rules:</div>
+      <div style="font-size:10.5px; font-weight:700; color:var(--overlay); text-transform:uppercase; letter-spacing:0.5px; padding:0 14px;">Most Triggered Rules:</div>
       <div class="rules-list" id="rules-container">
-        <div style="color:var(--overlay); font-size:11px; font-style:italic;">Awaiting rule triggers...</div>
+        <div style="color:var(--overlay); font-size:11px; font-style:italic;">No rules triggered yet</div>
       </div>
     </div>
   </div>
@@ -3925,7 +3925,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <!-- ── Section 05: Intelligence Vectors ──────────────────── -->
   <section class="soc-section" id="sec-intel">
   <div class="head">
-    <h2>05 // INTELLIGENCE VECTORS & HOTSPOTS</h2>
+    <h2>05 // TOP THREATS & TARGETED PAGES</h2>
     <div class="rule"></div>
     <span class="cmd">intel.vectors.query</span>
   </div>
@@ -3933,20 +3933,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <div class="intel-grid">
     <div class="chart-card">
       <div class="card-cap">
-        <span>🚨 TOP ATTACKING CLIENT IPS</span>
+        <span>🚨 TOP SUSPICIOUS IPS</span>
       </div>
       <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
           <thead>
             <tr>
-              <th>Client IP</th>
-              <th>Origin</th>
-              <th>Hits</th>
-              <th>Threat Breakdown</th>
+              <th>Visitor IP</th>
+              <th>Location</th>
+              <th>Requests</th>
+              <th>Threat Details</th>
             </tr>
           </thead>
           <tbody id="top-ips-tbody">
-            <tr><td colspan="4" style="color:var(--overlay); text-align:center;">No threat IPs logged yet</td></tr>
+            <tr><td colspan="4" style="color:var(--overlay); text-align:center;">No suspicious IPs recorded yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -3954,19 +3954,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     <div class="chart-card">
       <div class="card-cap">
-        <span>🎯 TOP TARGETED ENDPOINTS</span>
+        <span>🎯 MOST TARGETED URL PATHS</span>
       </div>
       <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
           <thead>
             <tr>
-              <th>Target Path</th>
+              <th>URL Path</th>
               <th>Requests</th>
-              <th>Triggered Rule</th>
+              <th>Rule Triggered</th>
             </tr>
           </thead>
           <tbody id="top-paths-tbody">
-            <tr><td colspan="3" style="color:var(--overlay); text-align:center;">No endpoints logged yet</td></tr>
+            <tr><td colspan="3" style="color:var(--overlay); text-align:center;">No paths recorded yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -3980,7 +3980,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <div class="modal-overlay" id="event-modal">
   <div class="modal-card">
     <div class="modal-header">
-      <span class="modal-title">🔍 TELEMETRY EVENT INSPECTOR</span>
+      <span class="modal-title">🔍 Request Details</span>
       <span class="modal-close" id="modal-close-btn">&times;</span>
     </div>
     <div class="modal-body" id="modal-content"></div>
@@ -3991,7 +3991,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <div class="modal-overlay" id="ip-modal">
   <div class="ip-modal-card">
     <div class="modal-header">
-      <span class="modal-title">🌐 IP THREAT INTELLIGENCE & ABUSE HUB</span>
+      <span class="modal-title">🌐 IP Details & Threat Report</span>
       <span class="modal-close" id="ip-modal-close-btn">&times;</span>
     </div>
     <div id="ip-modal-content"></div>
@@ -5573,7 +5573,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       sources = lastSources;
     }
     if (!sources) return;
-    var sHTML = '<span style="font-weight: 600; color: var(--text-hi);">🌐 MONITORED NODES:</span>';
+    var sHTML = '<span style="font-weight: 600; color: var(--text-hi);">🌐 CONNECTED GATEWAYS & SERVERS:</span>';
     var count = 0;
     var nodeNames = [];
 
@@ -5669,9 +5669,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   function generateAbuseReport(ip, info, eventsForIP) {
-    var now = new Date().toISOString();
     var isp = (info && info.isp) ? info.isp : 'Network Provider';
-    var as = (info && info.as) ? info.as : 'Unknown AS';
+    var as = (info && info.as) ? info.as : 'Unknown Network';
     var loc = ((info && info.city) ? info.city + ', ' : '') + ((info && info.country) ? info.country : 'Unknown Location');
 
     var rulesSet = {};
@@ -5680,29 +5679,30 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     eventsForIP.forEach(function(ev) {
       if (ev.rule) rulesSet[ev.rule] = true;
       if (ev.path) pathsSet[ev.path] = true;
-      if (sampleLines.length < 6) {
+      if (sampleLines.length < 8) {
         sampleLines.push('[' + formatLocalTime(ev) + '] ' + ev.method + ' ' + ev.path + ' -> HTTP ' + ev.status + ' (' + ev.verdict + (ev.rule ? ' - Rule: ' + ev.rule : '') + ')');
       }
     });
 
-    var rulesList = Object.keys(rulesSet).join(', ') || 'Hostile Automated Scanning / Exploit Probing';
+    var rulesList = Object.keys(rulesSet).join(', ') || 'Suspicious automated scanning or unauthorized requests';
+    var pathsList = Object.keys(pathsSet).slice(0, 5).join(', ') || 'N/A';
 
-    var report = 'Subject: Abuse Report: Hostile Activity Originating from ' + ip + '\n\n' +
-      'Dear ' + isp + ' Abuse Team,\n\n' +
-      'We are writing to report malicious security incidents originating from an IP address assigned to your network:\n\n' +
-      '  * Offending IP: ' + ip + '\n' +
+    var report = 'Subject: Abuse Report: Suspicious or Hostile Activity Originating from IP ' + ip + '\n\n' +
+      'Hello ' + isp + ' Abuse Team,\n\n' +
+      'We are reporting suspicious or harmful network traffic originating from an IP address assigned to your network:\n\n' +
+      '  * Offending IP Address: ' + ip + '\n' +
       '  * Network Provider: ' + isp + ' (' + as + ')\n' +
-      '  * Origin Location: ' + loc + '\n' +
-      '  * Reported At: ' + new Date().toLocaleString() + '\n' +
-      '  * Attack Categories: ' + rulesList + '\n' +
-      '  * Target Gateway: RouteWarden SOC Protected Ingress\n\n' +
-      'Incident Summary:\n' +
-      'The aforementioned IP address engaged in unauthorized access attempts, vulnerability scanning, and hostile exploitation against our services.\n\n' +
-      'Sample Incident Logs:\n' +
-      (sampleLines.length > 0 ? sampleLines.join('\n') : '[Sample: Hostile vulnerability scan detected by RouteWarden]') + '\n\n' +
-      'Please investigate this activity and take appropriate administrative action to mitigate further abuse.\n\n' +
-      'Regards,\n' +
-      'Security Operations Center (RouteWarden Gateway Defense)';
+      '  * Estimated Location: ' + loc + '\n' +
+      '  * Report Generated: ' + new Date().toLocaleString() + '\n' +
+      '  * Triggered Security Rules: ' + rulesList + '\n' +
+      '  * Targeted Web Paths: ' + pathsList + '\n\n' +
+      'Summary of Activity:\n' +
+      'This IP address made repeated unauthorized requests, vulnerability probes, or abusive requests that violated our web application security rules.\n\n' +
+      'Log Excerpts:\n' +
+      (sampleLines.length > 0 ? sampleLines.join('\n') : '[No specific request lines available]') + '\n\n' +
+      'Please review this activity and take appropriate administrative action to prevent further abuse.\n\n' +
+      'Thank you,\n' +
+      'RouteWarden Security Team';
 
     return report;
   }
@@ -5711,7 +5711,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (!ip) return;
     var modal = document.getElementById('ip-modal');
     var content = document.getElementById('ip-modal-content');
-    content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--subtext);"><div class="pulse-dot" style="margin:0 auto 12px auto;"></div>Fetching IP geolocation & threat intelligence for <b>' + ip + '</b>...</div>';
+    content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--subtext);"><div class="pulse-dot" style="margin:0 auto 12px auto;"></div>Looking up location and security details for <b>' + ip + '</b>...</div>';
     modal.style.display = 'flex';
 
     var eventsForIP = allEvents.filter(function(e) { return e.client_ip === ip; });
@@ -5767,69 +5767,186 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var country = (info && info.country) || (isPrivate ? 'Local / Private Network' : 'Unknown Country');
     var city = (info && info.city) || (isPrivate ? 'Local Subnet' : 'Unknown City');
     var region = (info && info.region_name) || (info && info.regionName) || (info && info.region) || '';
-    var isp = (info && info.isp) || (isPrivate ? 'RFC 1918 / Loopback' : 'Unknown ISP');
+    var isp = (info && info.isp) || (isPrivate ? 'Private Network / Localhost' : 'Unknown Internet Provider');
     var org = (info && info.org) || (info && info.isp) || 'Unknown Organization';
     var asNum = (info && info.as) || 'N/A';
     var timezone = (info && info.timezone) || 'N/A';
     var latLon = (info && info.lat && info.lon) ? (info.lat + ', ' + info.lon) : 'N/A';
 
+    var cleanHits = Math.max(0, totalHits - blockedHits - tarpitHits);
+
+    // Determine Risk Assessment in plain English
+    var riskClass = 'risk-safe';
+    var riskIcon = '✅';
+    var riskTitle = 'Normal Traffic — Safe';
+    var riskDesc = 'This IP address has only made standard, allowed requests with no security rule violations.';
+    var riskBadge = '<span class="tui-tag tag-green">ALLOWED</span>';
+
+    if (blockedHits > 0) {
+      riskClass = 'risk-high';
+      riskIcon = '🛑';
+      riskTitle = 'High Risk — Blocked by Security Rules';
+      riskDesc = 'This IP made harmful requests (such as exploit attempts, unauthorized access, or malicious scanning) and was blocked.';
+      riskBadge = '<span class="tui-tag tag-pink">BLOCKED</span>';
+    } else if (tarpitHits > 0) {
+      riskClass = 'risk-med';
+      riskIcon = '⏳';
+      riskTitle = 'Suspicious — Rate Throttled';
+      riskDesc = 'This IP sent requests too fast or triggered rate limits, so its traffic was intentionally slowed down.';
+      riskBadge = '<span class="tui-tag tag-yellow">SLOWED</span>';
+    }
+
     var abuseReportText = generateAbuseReport(ip, info, eventsForIP);
 
-    var html = '<div class="ip-header-banner">' +
-      '<div>' +
-        '<div class="ip-title-address">' +
-          '<span>' + ip + '</span>' +
-          '<button class="tui-btn" style="padding:2px 6px; font-size:10.5px;" onclick="copyText(\'' + ip + '\', this)">📋 Copy</button>' +
+    // Collect targeted paths
+    var pathsMap = {};
+    eventsForIP.forEach(function(e) {
+      if (e.path) pathsMap[e.path] = (pathsMap[e.path] || 0) + 1;
+    });
+    var topPaths = Object.keys(pathsMap).sort(function(a, b) { return pathsMap[b] - pathsMap[a]; }).slice(0, 4).join(', ') || 'N/A';
+
+    // Recent requests rows (up to 5)
+    var recentEvents = eventsForIP.slice(0, 5);
+    var recentRowsHTML = '';
+    if (recentEvents.length === 0) {
+      recentRowsHTML = '<tr><td colspan="4" style="color:var(--overlay); text-align:center; padding:12px;">No logged requests for this IP yet.</td></tr>';
+    } else {
+      recentEvents.forEach(function(ev) {
+        var vTag = '<span class="tui-tag tag-green">Allowed</span>';
+        if (ev.verdict === 'BLOCK') vTag = '<span class="tui-tag tag-pink">Blocked</span>';
+        if (ev.verdict === 'TARPIT') vTag = '<span class="tui-tag tag-yellow">Slowed</span>';
+
+        recentRowsHTML += '<tr>' +
+          '<td style="color:var(--overlay); font-family:var(--mono); white-space:nowrap;">' + formatLocalTime(ev) + '</td>' +
+          '<td><span class="method-tag method-' + (ev.method || 'GET').toLowerCase() + '">' + (ev.method || 'GET') + '</span></td>' +
+          '<td style="color:var(--text); word-break:break-all; font-family:var(--mono);">' + (ev.path || '/') + '</td>' +
+          '<td>' + vTag + '</td>' +
+        '</tr>';
+      });
+    }
+
+    var abuseEmail = 'abuse@' + encodeURIComponent(isp.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com');
+
+    var html = '' +
+      '<div class="ip-header-banner">' +
+        '<div class="ip-header-main">' +
+          '<div class="ip-title-address">' +
+            '<span>' + ip + '</span>' +
+            '<button class="tui-btn" style="padding:3px 8px; font-size:11px;" onclick="copyText(\'' + ip + '\', this)">📋 Copy IP</button>' +
+          '</div>' +
+          '<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+            '<span class="ip-geo-badge">' + flag + ' ' + country + (city ? ' — ' + city : '') + '</span>' +
+            '<span class="ip-org-text">' + org + '</span>' +
+          '</div>' +
         '</div>' +
-        '<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
-          '<span class="ip-geo-badge">' + flag + ' ' + country + (city ? ' — ' + city : '') + '</span>' +
-          '<span style="font-size:11px; color:var(--subtext);">' + org + '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div style="display:flex; gap:8px;">' +
-        '<button class="tui-btn" onclick="filterAndCloseIP(\'' + ip + '\')">🔍 Filter Logs</button>' +
-      '</div>' +
-    '</div>' +
-
-    '<div class="ip-intel-grid">' +
-      '<div class="ip-box">' +
-        '<div class="ip-box-title">🌍 Geolocation & Network (MaxMind / IP-API)</div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Country:</span><span class="ip-kv-val">' + flag + ' ' + country + ' (' + (countryCode || 'N/A') + ')</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">City / Region:</span><span class="ip-kv-val">' + city + (region ? ', ' + region : '') + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">ISP:</span><span class="ip-kv-val">' + isp + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Autonomous System:</span><span class="ip-kv-val">' + asNum + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Coordinates:</span><span class="ip-kv-val">' + latLon + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Timezone:</span><span class="ip-kv-val">' + timezone + '</span></div>' +
-      '</div>' +
-
-      '<div class="ip-box">' +
-        '<div class="ip-box-title">🛡️ RouteWarden Gateway Telemetry</div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Observed Hits:</span><span class="ip-kv-val" style="color:var(--text-hi);">' + totalHits + ' requests</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Blocked (403):</span><span class="ip-kv-val" style="color:var(--pink);">' + blockedHits + ' threats</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Tarpitted (429):</span><span class="ip-kv-val" style="color:var(--yellow);">' + tarpitHits + ' throttled</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Triggered Rules:</span><span class="ip-kv-val" style="color:var(--text);">' + rulesList + '</span></div>' +
-        '<div class="ip-kv-row"><span class="ip-kv-label">Threat Severity:</span><span class="ip-kv-val">' + (blockedHits > 0 ? '<span class="tui-tag tag-pink">HOSTILE</span>' : (tarpitHits > 0 ? '<span class="tui-tag tag-yellow">SUSPICIOUS</span>' : '<span class="tui-tag tag-green">BENIGN</span>')) + '</span></div>' +
-      '</div>' +
-    '</div>' +
-
-    '<div class="abuse-section">' +
-      '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
-        '<span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--pink);">🚨 Abuse Reporting & External Intelligence</span>' +
-        '<div class="abuse-actions-row">' +
-          '<a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🚨 AbuseIPDB</a>' +
-          '<a href="https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🔬 VirusTotal</a>' +
-          '<a href="https://who.is/whois-ip/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🌐 WHOIS</a>' +
+        '<div class="ip-header-actions">' +
+          '<button class="tui-btn" onclick="filterAndCloseIP(\'' + ip + '\')" title="Show only requests from this IP in live log">🔍 Show in Request Log</button>' +
         '</div>' +
       '</div>' +
 
-      '<div style="font-size:10.5px; color:var(--subtext);">Standardized incident report generated from RouteWarden logs (ready to submit to host / CERT):</div>' +
-      '<textarea class="abuse-report-textarea" id="abuse-report-text" readonly>' + abuseReportText + '</textarea>' +
-
-      '<div style="display:flex; justify-content:flex-end; gap:8px; align-items:center; flex-wrap:wrap;">' +
-        '<button class="tui-btn" id="btn-copy-report" onclick="copyReport()"><span id="copy-report-icon">📋</span> Copy Incident Report</button>' +
-        '<a href="mailto:abuse@' + encodeURIComponent(isp.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com') + '?subject=' + encodeURIComponent('Abuse Report: Malicious Activity from ' + ip) + '&body=' + encodeURIComponent(abuseReportText) + '" class="tui-btn">📧 Mail Host Abuse Contact</a>' +
+      '<!-- Risk Status Alert Banner -->' +
+      '<div class="ip-risk-card ' + riskClass + '">' +
+        '<div class="risk-left">' +
+          '<div class="risk-icon">' + riskIcon + '</div>' +
+          '<div>' +
+            '<div class="risk-title">' + riskTitle + '</div>' +
+            '<div class="risk-desc">' + riskDesc + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div>' + riskBadge + '</div>' +
       '</div>' +
-    '</div>';
+
+      '<!-- Quick Numbers -->' +
+      '<div class="ip-stat-strip">' +
+        '<div class="ip-stat-card">' +
+          '<div class="ip-stat-label">Total Requests</div>' +
+          '<div class="ip-stat-val">' + totalHits + '</div>' +
+          '<div class="ip-stat-sub">From this visitor</div>' +
+        '</div>' +
+        '<div class="ip-stat-card">' +
+          '<div class="ip-stat-label">Blocked</div>' +
+          '<div class="ip-stat-val" style="color:var(--pink);">' + blockedHits + '</div>' +
+          '<div class="ip-stat-sub">403 Forbidden</div>' +
+        '</div>' +
+        '<div class="ip-stat-card">' +
+          '<div class="ip-stat-label">Slowed Down</div>' +
+          '<div class="ip-stat-val" style="color:var(--yellow);">' + tarpitHits + '</div>' +
+          '<div class="ip-stat-sub">429 Rate Throttled</div>' +
+        '</div>' +
+        '<div class="ip-stat-card">' +
+          '<div class="ip-stat-label">Passed Clean</div>' +
+          '<div class="ip-stat-val" style="color:var(--green);">' + cleanHits + '</div>' +
+          '<div class="ip-stat-sub">200 Normal Traffic</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<!-- Two Information Columns -->' +
+      '<div class="ip-intel-grid">' +
+        '<div class="ip-box">' +
+          '<div class="ip-box-title">🌍 Location & Internet Provider</div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Country:</span><span class="ip-kv-val">' + flag + ' ' + country + ' (' + (countryCode || 'N/A') + ')</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">City / Region:</span><span class="ip-kv-val">' + city + (region ? ', ' + region : '') + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Internet Provider:</span><span class="ip-kv-val">' + isp + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Network (ASN):</span><span class="ip-kv-val">' + asNum + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Coordinates:</span><span class="ip-kv-val">' + latLon + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Timezone:</span><span class="ip-kv-val">' + timezone + '</span></div>' +
+        '</div>' +
+
+        '<div class="ip-box">' +
+          '<div class="ip-box-title">🛡️ Security Summary & Activity</div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Triggered Rules:</span><span class="ip-kv-val" style="color:var(--text);">' + (rulesList === 'None' ? 'None (No rules violated)' : rulesList) + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Targeted Paths:</span><span class="ip-kv-val" style="font-family:var(--mono);">' + topPaths + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Observed Sessions:</span><span class="ip-kv-val">' + totalHits + ' total requests</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Threat Classification:</span><span class="ip-kv-val">' + (blockedHits > 0 ? '<span class="tui-tag tag-pink">HOSTILE</span>' : (tarpitHits > 0 ? '<span class="tui-tag tag-yellow">SUSPICIOUS</span>' : '<span class="tui-tag tag-green">BENIGN</span>')) + '</span></div>' +
+          '<div class="ip-kv-row"><span class="ip-kv-label">Enforcement Action:</span><span class="ip-kv-val">' + (blockedHits > 0 ? 'Blocked at edge' : (tarpitHits > 0 ? 'Throttled in tarpit' : 'Forwarded normally')) + '</span></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<!-- Recent Requests Box -->' +
+      '<div class="ip-recent-box">' +
+        '<div class="ip-box-title">📋 Recent Requests From This IP</div>' +
+        '<div style="overflow-x:auto;">' +
+          '<table class="ip-recent-table">' +
+            '<thead>' +
+              '<tr>' +
+                '<th>Time</th>' +
+                '<th>Method</th>' +
+                '<th>URL Path</th>' +
+                '<th>Result</th>' +
+              '</tr>' +
+            '</thead>' +
+            '<tbody>' + recentRowsHTML + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</div>' +
+
+      '<!-- Abuse Reporting Section -->' +
+      '<div class="abuse-section">' +
+        '<div class="abuse-header">' +
+          '<div>' +
+            '<div class="abuse-title">🚨 Report This IP & External Lookups</div>' +
+            '<div class="abuse-desc">If this visitor is attacking your application, you can check external threat databases or send a pre-filled incident report to their internet hosting provider.</div>' +
+          '</div>' +
+          '<div class="abuse-actions-row">' +
+            '<a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🚨 Check on AbuseIPDB</a>' +
+            '<a href="https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🔬 Check on VirusTotal</a>' +
+            '<a href="https://who.is/whois-ip/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="tui-btn">🌐 View WHOIS</a>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="abuse-report-card">' +
+          '<div class="abuse-report-header">' +
+            '<span>✉️ Ready-to-Send Incident Report</span>' +
+            '<button class="tui-btn" id="btn-copy-report" onclick="copyReport()"><span id="copy-report-icon">📋</span> Copy Incident Report</button>' +
+          '</div>' +
+          '<textarea class="abuse-report-textarea" id="abuse-report-text" readonly>' + abuseReportText + '</textarea>' +
+        '</div>' +
+
+        '<div class="abuse-footer-actions">' +
+          '<span class="abuse-email-hint">Provider abuse contact: <b>' + abuseEmail + '</b></span>' +
+          '<a href="mailto:' + abuseEmail + '?subject=' + encodeURIComponent('Abuse Report: Malicious Activity from ' + ip) + '&body=' + encodeURIComponent(abuseReportText) + '" class="tui-btn">📧 Email Hosting Provider</a>' +
+        '</div>' +
+      '</div>';
 
     content.innerHTML = html;
   }
