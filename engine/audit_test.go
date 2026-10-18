@@ -37,10 +37,10 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 	cfg.Enabled = false // RW-A001
 	cfg.EnableDefaultPatterns = false
 	cfg.BlockPatterns = []string{
-		".*",             // RW-A003: universal block
-		"/secret/.env",   // RW-A005: unescaped dot
-		"((a+)+)+",       // RW-A006: ReDoS
-		".*",             // RW-A007: duplicate
+		".*",           // RW-A003: universal block
+		"/secret/.env", // RW-A005: unescaped dot
+		"((a+)+)+",     // RW-A006: ReDoS
+		".*",           // RW-A007: duplicate
 	}
 	cfg.AllowPatterns = []string{
 		".*", // RW-A004: universal allow

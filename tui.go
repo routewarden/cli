@@ -167,6 +167,10 @@ func handleTUI(args []string) {
 		result := eng.EvaluateWithBody(activeMethod, testPath, queryToUse, activeHeaders, activeIP, activeBody)
 		renderEvaluationResult(testPath, activeMethod, activeIP, queryToUse, activeBody, statusCode, result)
 	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+	}
 }
 
 func printTUIBanner(configName string, cfg *engine.Config) {

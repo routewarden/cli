@@ -1519,4 +1519,3 @@ func (cfg *Config) GenerateTCPWardenYAML() string {
 	b.WriteString("        - \"spam.org\"\n")
 	return b.String()
 }
-

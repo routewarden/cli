@@ -30,15 +30,15 @@ type AuditIssue struct {
 
 // AuditReport holds the complete evaluation result of a configuration audit.
 type AuditReport struct {
-	ConfigFile     string            `json:"configFile,omitempty"`
-	TotalIssues    int               `json:"totalIssues"`
-	CriticalCount  int               `json:"criticalCount"`
-	WarningCount   int               `json:"warningCount"`
-	InfoCount      int               `json:"infoCount"`
-	SecurityScore  int               `json:"securityScore"`
-	Passed         bool              `json:"passed"`
-	Issues         []AuditIssue      `json:"issues"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	ConfigFile    string            `json:"configFile,omitempty"`
+	TotalIssues   int               `json:"totalIssues"`
+	CriticalCount int               `json:"criticalCount"`
+	WarningCount  int               `json:"warningCount"`
+	InfoCount     int               `json:"infoCount"`
+	SecurityScore int               `json:"securityScore"`
+	Passed        bool              `json:"passed"`
+	Issues        []AuditIssue      `json:"issues"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 // AuditConfig performs deep static analysis and linting on a RouteWarden configuration.

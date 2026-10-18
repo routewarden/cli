@@ -469,6 +469,9 @@ func watchAndStreamContainers(ctx context.Context, label string, specificContain
 						mu.Unlock()
 					}
 				}
+				if err := scanner.Err(); err != nil {
+					_ = err
+				}
 			}
 
 			go readPipe(stdout)
@@ -532,6 +535,9 @@ func tailFileToLog(ctx context.Context, filePath string, out *os.File) {
 		if line != "" {
 			_, _ = out.WriteString(line + "\n")
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = err
 	}
 	_ = out.Sync()
 }

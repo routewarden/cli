@@ -29,18 +29,18 @@ type ScalarDiff struct {
 
 // PolicyDiff represents the structural and security difference between two policies.
 type PolicyDiff struct {
-	BaseFile       string                 `json:"baseFile"`
-	CandidateFile  string                 `json:"candidateFile"`
-	Impact         DiffImpact             `json:"impact"`
-	ImpactReasons  []string               `json:"impactReasons"`
-	BlockPatterns  SliceDiff              `json:"blockPatterns"`
-	AllowPatterns  SliceDiff              `json:"allowPatterns"`
-	AllowedIPs     SliceDiff              `json:"allowedIps"`
-	TrustedProxies SliceDiff              `json:"trustedProxies"`
-	Methods        SliceDiff              `json:"methods"`
-	CheckHeaders   SliceDiff              `json:"checkHeaders"`
+	BaseFile       string                `json:"baseFile"`
+	CandidateFile  string                `json:"candidateFile"`
+	Impact         DiffImpact            `json:"impact"`
+	ImpactReasons  []string              `json:"impactReasons"`
+	BlockPatterns  SliceDiff             `json:"blockPatterns"`
+	AllowPatterns  SliceDiff             `json:"allowPatterns"`
+	AllowedIPs     SliceDiff             `json:"allowedIps"`
+	TrustedProxies SliceDiff             `json:"trustedProxies"`
+	Methods        SliceDiff             `json:"methods"`
+	CheckHeaders   SliceDiff             `json:"checkHeaders"`
 	Properties     map[string]ScalarDiff `json:"properties"`
-	HasDifferences bool                   `json:"hasDifferences"`
+	HasDifferences bool                  `json:"hasDifferences"`
 }
 
 // DiffConfigs compares two RouteWarden configurations and evaluates the security impact.

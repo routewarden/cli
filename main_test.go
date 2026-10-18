@@ -2100,7 +2100,3 @@ func TestCLI_Schema_HasConfigFile(t *testing.T) {
 		t.Errorf("expected schema properties to contain 'config_file'")
 	}
 }
-
-
-
-

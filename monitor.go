@@ -197,6 +197,9 @@ func handleMonitor(args []string) {
 		for scanner.Scan() {
 			msgChan <- streamMsg{Container: "", Line: scanner.Text()}
 		}
+		if err := scanner.Err(); err != nil {
+			_ = err
+		}
 		close(msgChan)
 	}()
 
@@ -312,6 +315,9 @@ func streamContainerLogs(ctx context.Context, target containerTarget, tailLines 
 				return
 			case out <- streamMsg{Container: target.Name, Line: scanner.Text()}:
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			_ = err
 		}
 	}
 
