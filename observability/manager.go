@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -568,189 +569,7 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	targetURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", wsPort))
 	wsProxy := httputil.NewSingleHostReverseProxy(targetURL)
 
-	var logMu sync.Mutex
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		_ = json.NewEncoder(w).Encode(getSourceInfo())
-	})
-
-	mux.HandleFunc("/api/v1/pubkey", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"public_key": serverPubStr,
-			"version":    "5.0.0",
-		})
-	})
-
-	mux.HandleFunc("/api/v1/register", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		token := extractAuthToken(r)
-		key, err := ValidateAgentToken(token, dir)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
-		registerOrTouchAgent(key.ID, key.Name, "", clientIP, 0)
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":     "registered",
-			"agent_id":   key.ID,
-			"agent_name": key.Name,
-			"public_key": serverPubStr,
-		})
-	})
-
-	mux.HandleFunc("/api/v1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		token := extractAuthToken(r)
-		key, err := ValidateAgentToken(token, dir)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		var hb struct {
-			Hostname string `json:"hostname"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&hb)
-
-		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
-		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-
-	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		token := extractAuthToken(r)
-		key, err := ValidateAgentToken(token, dir)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read body", http.StatusBadRequest)
-			return
-		}
-
-		// Try decrypting if payload is EncryptedPayload
-		var plaintext = bodyBytes
-		var encPayload crypto.EncryptedPayload
-		if err := json.Unmarshal(bodyBytes, &encPayload); err == nil && encPayload.Ciphertext != "" && encPayload.EphemeralPub != "" {
-			dec, err := crypto.Decrypt(serverPriv, &encPayload)
-			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
-				return
-			}
-			plaintext = dec
-		}
-
-		type EventPayload struct {
-			AgentID  string            `json:"agent_id"`
-			Hostname string            `json:"hostname"`
-			Events   []json.RawMessage `json:"events"`
-		}
-
-		var payload EventPayload
-		if err := json.Unmarshal(plaintext, &payload); err != nil {
-			var strList []string
-			if err2 := json.Unmarshal(plaintext, &strList); err2 == nil {
-				for _, s := range strList {
-					payload.Events = append(payload.Events, json.RawMessage([]byte(strconv.Quote(s))))
-				}
-			} else {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload format"})
-				return
-			}
-		}
-
-		// Convert and write events
-		count := 0
-		logMu.Lock()
-		for _, rawEv := range payload.Events {
-			evStr := string(rawEv)
-			if strings.HasPrefix(evStr, `"`) && strings.HasSuffix(evStr, `"`) {
-				var unq string
-				if err := json.Unmarshal(rawEv, &unq); err == nil {
-					evStr = unq
-				}
-			}
-			combined := toCombinedLog(evStr)
-			if combined != "" {
-				_, _ = logFile.WriteString(combined + "\n")
-				count++
-			}
-		}
-		_ = logFile.Sync()
-		logMu.Unlock()
-
-		clientIP := extractClientIP(r)
-		UpdateAgentLastSeen(key.ID, dir)
-		registerOrTouchAgent(key.ID, key.Name, payload.Hostname, clientIP, count)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":   "accepted",
-			"ingested": count,
-			"agent":    key.Name,
-		})
-	})
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Upgrade") == "websocket" || strings.HasPrefix(r.URL.Path, "/ws") {
-			wsProxy.ServeHTTP(w, r)
-			return
-		}
-
-		if _, err := os.Stat(reportPath); err == nil {
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			htmlBytes, err := os.ReadFile(reportPath)
-			if err != nil {
-				http.ServeFile(w, r, reportPath)
-				return
-			}
-			injected := bytes.Replace(htmlBytes, []byte("</body>"), []byte(sourceBadgeInjection+"</body>"), 1)
-			_, _ = w.Write(injected)
-			return
-		}
-
-		// Initial splash screen while report is being generated
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="1"><title>RouteWarden Dashboard</title></head><body style="background:#1a1d21;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;margin:0;"><h2 style="margin:0 0 10px 0;">🚀 RouteWarden Security Dashboard</h2><p style="color:#9ba1a6;">Initializing real-time GoAccess stream...</p></body></html>`))
-	})
+	mux := NewDashboardHandler(dir, serverPriv, serverPubStr, logFile, wsProxy, reportPath)
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -1061,4 +880,199 @@ func extractClientIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+// NewDashboardHandler constructs the HTTP handler for the dashboard, API endpoints, and GoAccess proxy.
+func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr string, logFile *os.File, wsProxy http.Handler, reportPath string) http.Handler {
+	var logMu sync.Mutex
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		_ = json.NewEncoder(w).Encode(getSourceInfo())
+	})
+
+	mux.HandleFunc("/api/v1/pubkey", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"public_key": serverPubStr,
+			"version":    "5.0.0",
+		})
+	})
+
+	mux.HandleFunc("/api/v1/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		UpdateAgentLastSeen(key.ID, dir)
+		clientIP := extractClientIP(r)
+		registerOrTouchAgent(key.ID, key.Name, "", clientIP, 0)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "registered",
+			"agent_id":   key.ID,
+			"agent_name": key.Name,
+			"public_key": serverPubStr,
+		})
+	})
+
+	mux.HandleFunc("/api/v1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		var hb struct {
+			Hostname string `json:"hostname"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&hb)
+
+		UpdateAgentLastSeen(key.ID, dir)
+		clientIP := extractClientIP(r)
+		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		token := extractAuthToken(r)
+		key, err := ValidateAgentToken(token, dir)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		// Try decrypting if payload is EncryptedPayload
+		var plaintext = bodyBytes
+		var encPayload crypto.EncryptedPayload
+		if err := json.Unmarshal(bodyBytes, &encPayload); err == nil && encPayload.Ciphertext != "" && encPayload.EphemeralPub != "" {
+			dec, err := crypto.Decrypt(serverPriv, &encPayload)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
+				return
+			}
+			plaintext = dec
+		}
+
+		type EventPayload struct {
+			AgentID  string            `json:"agent_id"`
+			Hostname string            `json:"hostname"`
+			Events   []json.RawMessage `json:"events"`
+		}
+
+		var payload EventPayload
+		if err := json.Unmarshal(plaintext, &payload); err != nil {
+			var strList []string
+			if err2 := json.Unmarshal(plaintext, &strList); err2 == nil {
+				for _, s := range strList {
+					payload.Events = append(payload.Events, json.RawMessage([]byte(strconv.Quote(s))))
+				}
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload format"})
+				return
+			}
+		}
+
+		// Convert and write events
+		count := 0
+		logMu.Lock()
+		for _, rawEv := range payload.Events {
+			evStr := string(rawEv)
+			if strings.HasPrefix(evStr, `"`) && strings.HasSuffix(evStr, `"`) {
+				var unq string
+				if err := json.Unmarshal(rawEv, &unq); err == nil {
+					evStr = unq
+				}
+			}
+			combined := toCombinedLog(evStr)
+			if combined != "" {
+				if logFile != nil {
+					_, _ = logFile.WriteString(combined + "\n")
+				}
+				count++
+			}
+		}
+		if logFile != nil {
+			_ = logFile.Sync()
+		}
+		logMu.Unlock()
+
+		clientIP := extractClientIP(r)
+		UpdateAgentLastSeen(key.ID, dir)
+		registerOrTouchAgent(key.ID, key.Name, payload.Hostname, clientIP, count)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "accepted",
+			"ingested": count,
+			"agent":    key.Name,
+		})
+	})
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if wsProxy != nil && (r.Header.Get("Upgrade") == "websocket" || strings.HasPrefix(r.URL.Path, "/ws")) {
+			wsProxy.ServeHTTP(w, r)
+			return
+		}
+
+		if reportPath != "" {
+			if _, err := os.Stat(reportPath); err == nil {
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				htmlBytes, err := os.ReadFile(reportPath)
+				if err != nil {
+					http.ServeFile(w, r, reportPath)
+					return
+				}
+				injected := bytes.Replace(htmlBytes, []byte("</body>"), []byte(sourceBadgeInjection+"</body>"), 1)
+				_, _ = w.Write(injected)
+				return
+			}
+		}
+
+		// Initial splash screen while report is being generated
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="1"><title>RouteWarden Dashboard</title></head><body style="background:#1a1d21;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column;justify-content:center;align-items:center;height:100vh;margin:0;"><h2 style="margin:0 0 10px 0;">🚀 RouteWarden Security Dashboard</h2><p style="color:#9ba1a6;">Initializing real-time GoAccess stream...</p></body></html>`))
+	})
+
+	return mux
 }

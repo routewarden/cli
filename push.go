@@ -173,47 +173,7 @@ func handlePush(args []string) {
 		}
 		batch := buffer
 		buffer = nil
-
-		payloadObj := pushPayload{
-			AgentID:  agentID,
-			Hostname: hostname,
-			Events:   batch,
-		}
-		payloadBytes, err := json.Marshal(payloadObj)
-		if err != nil {
-			return
-		}
-
-		bodyToSend := payloadBytes
-		if serverPubKey != nil {
-			encrypted, err := crypto.Encrypt(serverPubKey, payloadBytes)
-			if err == nil {
-				if encBytes, err := json.Marshal(encrypted); err == nil {
-					bodyToSend = encBytes
-				}
-			}
-		}
-
-		// Send with retry
-		backoff := 500 * time.Millisecond
-		for retries := 0; retries < 3; retries++ {
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, eventsURL, bytes.NewReader(bodyToSend))
-			if err != nil {
-				break
-			}
-			req.Header.Set("Authorization", "Bearer "+agentToken)
-			req.Header.Set("Content-Type", "application/json")
-
-			resp, err := client.Do(req)
-			if err == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
-					break
-				}
-			}
-			time.Sleep(backoff)
-			backoff *= 2
-		}
+		_ = sendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch)
 	}
 
 	for {
@@ -364,3 +324,64 @@ func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 		}
 	}
 }
+
+func sendBatchWithRetry(ctx context.Context, client *http.Client, eventsURL, agentToken, agentID, hostname string, serverPubKey *ecdh.PublicKey, batch []string) error {
+	if len(batch) == 0 {
+		return nil
+	}
+
+	payloadObj := pushPayload{
+		AgentID:  agentID,
+		Hostname: hostname,
+		Events:   batch,
+	}
+	payloadBytes, err := json.Marshal(payloadObj)
+	if err != nil {
+		return err
+	}
+
+	bodyToSend := payloadBytes
+	if serverPubKey != nil {
+		encrypted, err := crypto.Encrypt(serverPubKey, payloadBytes)
+		if err == nil {
+			if encBytes, err := json.Marshal(encrypted); err == nil {
+				bodyToSend = encBytes
+			}
+		}
+	}
+
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	backoff := 50 * time.Millisecond
+	var lastErr error
+	for retries := 0; retries < 3; retries++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, eventsURL, bytes.NewReader(bodyToSend))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+agentToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+	return lastErr
+}
+
