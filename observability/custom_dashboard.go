@@ -1181,35 +1181,121 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    (function() {
+      try {
+        var saved = localStorage.getItem('rw-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      } catch(e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
     /* ═══════════════════════════════════════════════════════════════
        Catppuccin Mocha Terminal Theme (claude-tui Inspired)
        ═══════════════════════════════════════════════════════════════ */
-    :root {
-      --crust: #11111b;
-      --base: #181825;
-      --panel: #1e1e2e;
-      --surface: #313244;
-      --surface-hi: #45475a;
-      --line: #282838;
-      --line-hi: #3b3b4f;
-      --overlay: #6c7086;
-      --subtext: #a6adc8;
-      --text: #cdd6f4;
+        /* ── Dark Theme (Default) ────────────────────────────────── */
+    :root, [data-theme="dark"] {
+      --crust: #07090e;
+      --base: #0c0f17;
+      --panel: #111522;
+      --surface: #182035;
+      --surface-hi: #222c4a;
+      --line: #1c243d;
+      --line-hi: #2d3b63;
+      --overlay: #64748b;
+      --subtext: #94a3b8;
+      --text: #e2e8f0;
       --text-hi: #ffffff;
 
-      --green: #a6e3a1;
+      /* Electric Phosphor Accents */
+      --green: #00ff9d;
       --teal: #00e5ff;
-      --yellow: #f9e2af;
-      --peach: #fab387;
-      --pink: #f38ba8;
-      --mauve: #cba6f7;
-      --blue: #89b4fa;
+      --yellow: #ffb800;
+      --peach: #ff8c42;
+      --pink: #ff3366;
+      --mauve: #b388ff;
+      --blue: #38bdf8;
 
-      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      --bar-bg: rgba(12, 15, 23, 0.96);
+      --map-tile-filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+      --map-bg: #07090e;
+      --marker-tag-bg: rgba(12, 15, 23, 0.94);
+      --marker-tag-border: var(--line-hi);
+      --marker-tag-text: var(--text-hi);
+      --modal-card-bg: var(--base);
+      --modal-overlay-bg: rgba(7, 9, 14, 0.85);
+
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
       --col: 1540px;
+    }
+
+    /* ── Light Theme (Automatic via System Preference & Manual Toggle) ── */
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --crust: #edf2f7;
+        --base: #ffffff;
+        --panel: #f8fafc;
+        --surface: #e2e8f0;
+        --surface-hi: #cbd5e1;
+        --line: #cbd5e1;
+        --line-hi: #94a3b8;
+        --overlay: #64748b;
+        --subtext: #475569;
+        --text: #0f172a;
+        --text-hi: #020617;
+
+        --green: #059669;
+        --teal: #0284c7;
+        --yellow: #d97706;
+        --peach: #ea580c;
+        --pink: #e11d48;
+        --mauve: #7c3aed;
+        --blue: #2563eb;
+
+        --bar-bg: rgba(255, 255, 255, 0.96);
+        --map-tile-filter: contrast(1.05) saturate(0.9);
+        --map-bg: #e2e8f0;
+        --marker-tag-bg: rgba(255, 255, 255, 0.96);
+        --marker-tag-border: #94a3b8;
+        --marker-tag-text: #0f172a;
+        --modal-card-bg: #ffffff;
+        --modal-overlay-bg: rgba(15, 23, 42, 0.65);
+      }
+    }
+
+    [data-theme="light"] {
+      --crust: #edf2f7;
+      --base: #ffffff;
+      --panel: #f8fafc;
+      --surface: #e2e8f0;
+      --surface-hi: #cbd5e1;
+      --line: #cbd5e1;
+      --line-hi: #94a3b8;
+      --overlay: #64748b;
+      --subtext: #475569;
+      --text: #0f172a;
+      --text-hi: #020617;
+
+      --green: #059669;
+      --teal: #0284c7;
+      --yellow: #d97706;
+      --peach: #ea580c;
+      --pink: #e11d48;
+      --mauve: #7c3aed;
+      --blue: #2563eb;
+
+      --bar-bg: rgba(255, 255, 255, 0.96);
+      --map-tile-filter: contrast(1.05) saturate(0.9);
+      --map-bg: #e2e8f0;
+      --marker-tag-bg: rgba(255, 255, 255, 0.96);
+      --marker-tag-border: #94a3b8;
+      --marker-tag-text: #0f172a;
+      --modal-card-bg: #ffffff;
+      --modal-overlay-bg: rgba(15, 23, 42, 0.65);
     }
 
     *, *::before, *::after {
@@ -1594,12 +1680,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     #leaflet-map {
       width: 100%;
       height: 430px;
-      background: #07090e !important;
+      background: var(--map-bg) !important;
     }
 
     /* OSM Dark Inversion Filter for Retro Terminal Map */
     .leaflet-tile-pane {
-      filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+      filter: var(--map-tile-filter);
     }
     .leaflet-container {
       font-family: var(--mono) !important;
@@ -1643,15 +1729,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       top: 24px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(24, 24, 37, 0.9);
-      border: 1px solid var(--line-hi);
-      padding: 1px 5px;
+      background: var(--marker-tag-bg);
+      border: 1px solid var(--marker-tag-border);
+      padding: 1px 6px;
       border-radius: 3px;
       font-size: 10px;
       font-weight: 600;
       white-space: nowrap;
-      color: var(--text-hi);
+      color: var(--marker-tag-text);
       pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     }
 
     /* ASCII Tooltip Floating Box */
@@ -2106,7 +2193,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(17, 17, 27, 0.85);
+      background: var(--modal-overlay-bg);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       display: none;
@@ -2116,7 +2203,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       padding: 20px;
     }
     .modal-card {
-      background: var(--base);
+      background: var(--modal-card-bg);
       border: 1px solid var(--line-hi);
       border-radius: 4px;
       width: 100%;
@@ -2128,7 +2215,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       flex-direction: column;
     }
     .ip-modal-card {
-      background: var(--base);
+      background: var(--modal-card-bg);
       border: 1px solid var(--line-hi);
       border-radius: 4px;
       width: 100%;
@@ -2323,6 +2410,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <span id="utc-clock">00:00:00 UTC</span>
   </div>
   <div class="bar-right">
+    <button class="tui-btn" id="btn-toggle-theme" onclick="toggleTheme()" title="Toggle Theme (System / Light / Dark)">
+      <span id="theme-btn-icon">🌓</span> <span id="theme-btn-text">AUTO</span>
+    </button>
     <button class="tui-btn" id="btn-toggle-scroll">⏸ Pause</button>
     <button class="tui-btn" id="btn-export-json">📥 Export</button>
     <button class="tui-btn" id="btn-clear-logs">🗑 Clear</button>
@@ -2695,6 +2785,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <!-- ── Terminal Keybindings Status Footer ────────────────────── -->
 <div class="tui-footer">
   <div class="footer-keys">
+    <span class="footer-key-item"><span class="key-cap">T</span> Theme</span>
     <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
     <span class="footer-key-item"><span class="key-cap">P</span> Filter Path</span>
     <span class="footer-key-item"><span class="key-cap">I</span> Inspect IP</span>
@@ -2757,6 +2848,66 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var modal = document.getElementById('event-modal');
   var modalContent = document.getElementById('modal-content');
   var modalClose = document.getElementById('modal-close-btn');
+
+  // ═══════════════════════════════════════════════════════════════
+  // Theme Management (System theme by default with override)
+  // ═══════════════════════════════════════════════════════════════
+  function getSystemTheme() {
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+
+  function applyTheme(themeMode) {
+    var root = document.documentElement;
+    var icon = document.getElementById('theme-btn-icon');
+    var text = document.getElementById('theme-btn-text');
+
+    if (themeMode === 'light') {
+      root.setAttribute('data-theme', 'light');
+      if (icon) icon.textContent = '☀️';
+      if (text) text.textContent = 'LIGHT';
+    } else if (themeMode === 'dark') {
+      root.setAttribute('data-theme', 'dark');
+      if (icon) icon.textContent = '🌙';
+      if (text) text.textContent = 'DARK';
+    } else {
+      root.removeAttribute('data-theme');
+      var sys = getSystemTheme();
+      if (icon) icon.textContent = sys === 'light' ? '☀️' : '🌙';
+      if (text) text.textContent = 'AUTO';
+    }
+  }
+
+  window.toggleTheme = function() {
+    var currentStored = localStorage.getItem('rw-theme') || 'auto';
+    var next = 'auto';
+    if (currentStored === 'auto') {
+      next = getSystemTheme() === 'light' ? 'dark' : 'light';
+    } else if (currentStored === 'dark') {
+      next = 'light';
+    } else if (currentStored === 'light') {
+      next = 'auto';
+    }
+    try {
+      localStorage.setItem('rw-theme', next);
+    } catch(e) {}
+    applyTheme(next);
+  };
+
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
+      var currentStored = localStorage.getItem('rw-theme') || 'auto';
+      if (currentStored === 'auto') {
+        applyTheme('auto');
+      }
+    });
+  }
+
+  // Initial theme initialization
+  var savedTheme = 'auto';
+  try {
+    savedTheme = localStorage.getItem('rw-theme') || 'auto';
+  } catch(e) {}
+  applyTheme(savedTheme);
 
   // Live UTC Clock
   function updateClock() {
@@ -2891,6 +3042,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       modal.style.display = 'none';
       var ipModal = document.getElementById('ip-modal');
       if (ipModal) ipModal.style.display = 'none';
+    } else if (e.key === 't' || e.key === 'T') {
+      toggleTheme();
     } else if (e.key === 'r' || e.key === 'R') {
       resetAllFilters();
     } else if (e.key === 'f' || e.key === 'F') {
