@@ -3626,13 +3626,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
   };
 
-  if (btnToggleScroll) {
-    btnToggleScroll.addEventListener('click', function(e) {
-      e.preventDefault();
-      toggleStreamPause();
-    });
-  }
-
   window.jumpToLatest = function() {
     if (streamContainer) {
       streamContainer.scrollTo({ top: 0, behavior: 'smooth' });
