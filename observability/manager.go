@@ -394,9 +394,292 @@ table.table tr:hover td {
   gap: 8px;
   font-size: 13px;
 }
+
+/* ==========================================================================
+   Advanced Visual Aesthetics for GoAccess SVG / D3 Charts & Graphs
+   ========================================================================== */
+
+/* Chart Containers */
+.wrap-chart,
+.chart-container,
+div.chart,
+div.d3-chart,
+article .wrap-chart {
+  background: rgba(10, 15, 29, 0.65) !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  padding: 16px 14px 10px 14px !important;
+  margin: 14px 0 16px 0 !important;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.3) !important;
+  position: relative !important;
+}
+
+svg.chart,
+svg.d3-chart,
+svg.map,
+svg.area-chart {
+  overflow: visible !important;
+}
+
+/* SVG Axes & Domain Lines */
+svg .axis path,
+svg .axis line,
+svg path.domain,
+.axis path,
+.axis line {
+  stroke: rgba(255, 255, 255, 0.12) !important;
+  stroke-width: 1px !important;
+  shape-rendering: crispEdges !important;
+}
+
+/* Subtle Dotted Grid Lines */
+svg .grid line,
+svg .grid .tick line,
+.grid line {
+  stroke: rgba(255, 255, 255, 0.04) !important;
+  stroke-dasharray: 3, 3 !important;
+}
+svg .grid path {
+  display: none !important;
+}
+
+/* Monospace Tick Labels */
+svg .axis text,
+.axis text,
+svg text.label,
+text.tick {
+  fill: #94a3b8 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+
+/* Area Chart Smooth Gradient Fills */
+svg path.area,
+.area-chart path,
+.area {
+  fill: url(#rw-hits-grad) !important;
+  opacity: 0.88 !important;
+  transition: opacity 0.2s ease !important;
+}
+svg path.area:nth-of-type(2),
+svg path.area.visitors {
+  fill: url(#rw-visitors-grad) !important;
+}
+
+/* High-Contrast Neon Spline Curves */
+svg path.line,
+.line-chart path,
+path.line {
+  stroke: var(--rw-accent-blue) !important;
+  stroke-width: 2.5px !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+  fill: none !important;
+  filter: drop-shadow(0 2px 8px rgba(56, 189, 248, 0.35)) !important;
+}
+svg path.line:nth-of-type(2),
+svg path.line.visitors {
+  stroke: var(--rw-accent-green) !important;
+  filter: drop-shadow(0 2px 8px rgba(16, 185, 129, 0.35)) !important;
+}
+svg path.line:nth-of-type(3),
+svg path.line.bytes {
+  stroke: var(--rw-accent-amber) !important;
+  filter: drop-shadow(0 2px 8px rgba(245, 158, 11, 0.35)) !important;
+}
+
+/* Data Points & Dots */
+svg circle.dot,
+svg circle.point,
+svg circle.node,
+svg circle.focus {
+  fill: #38bdf8 !important;
+  stroke: #0b0f19 !important;
+  stroke-width: 2px !important;
+  r: 4px !important;
+  transition: r 0.15s ease, fill 0.15s ease !important;
+}
+svg circle.dot:hover,
+svg circle.point:hover {
+  r: 6.5px !important;
+  fill: #7dd3fc !important;
+  filter: drop-shadow(0 0 8px #38bdf8) !important;
+}
+
+/* Bar Charts (Pill Rounded Columns with Smooth Glow) */
+svg rect.bar,
+g.bar rect,
+.bars rect,
+svg rect {
+  rx: 4px !important;
+  ry: 4px !important;
+  fill: var(--rw-accent-indigo) !important;
+  opacity: 0.88 !important;
+  transition: opacity 0.2s ease, fill 0.2s ease !important;
+}
+svg rect.bar:hover,
+g.bar rect:hover,
+.bars rect:hover {
+  opacity: 1 !important;
+  fill: var(--rw-accent-blue) !important;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.45)) !important;
+}
+
+/* Modern Glassmorphic Tooltips */
+.chart-tooltip-wrap,
+.d3-tip,
+.tooltip,
+#chart-tooltip {
+  background: rgba(15, 23, 42, 0.95) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.55), 0 0 15px rgba(56, 189, 248, 0.18) !important;
+  color: #f8fafc !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 12px !important;
+  padding: 8px 14px !important;
+  line-height: 1.5 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+}
+
+/* Table Inline Volume & Progress Bars */
+td .bar,
+table.table .bar,
+.progress-bar,
+.bar-inner,
+div.bar {
+  border-radius: 6px !important;
+  height: 6px !important;
+  background: linear-gradient(90deg, #6366f1, #38bdf8) !important;
+  box-shadow: 0 1px 6px rgba(99, 102, 241, 0.35) !important;
+}
+table.table td.row-idx {
+  color: #64748b !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 11px !important;
+}
+table.table td.percent,
+table.table span.percent {
+  color: #94a3b8 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+.cell-hl.b1, .cell-hl.b2 {
+  background: rgba(99, 102, 241, 0.25) !important;
+  color: #c7d2fe !important;
+  border: 1px solid rgba(99, 102, 241, 0.4) !important;
+  border-radius: 4px !important;
+  font-weight: 600 !important;
+}
+.span-hl.g5 {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+  border-radius: 3px !important;
+}
+
+/* Chart Toggles and Control Buttons */
+.btn-default,
+.btn-group .btn,
+.panel-controls .btn,
+.chart-controls .btn,
+.nav-bars,
+.nav-gears {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #cbd5e1 !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  transition: all 0.2s ease !important;
+}
+.btn-default:hover,
+.btn-group .btn:hover,
+.panel-controls .btn:hover,
+.chart-controls .btn:hover {
+  background: rgba(56, 189, 248, 0.15) !important;
+  border-color: rgba(56, 189, 248, 0.4) !important;
+  color: #38bdf8 !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2) !important;
+}
+.btn-group .btn.active,
+.btn-default.active {
+  background: rgba(99, 102, 241, 0.3) !important;
+  border-color: #6366f1 !important;
+  color: #ffffff !important;
+}
+
+/* Geo Location Map Visuals */
+svg.map path.country,
+svg.map path.land {
+  fill: #1e293b !important;
+  stroke: rgba(255, 255, 255, 0.07) !important;
+  stroke-width: 0.6px !important;
+  transition: fill 0.2s ease !important;
+}
+svg.map path.country:hover {
+  fill: #38bdf8 !important;
+  cursor: pointer !important;
+}
+svg.map circle.city,
+svg.map circle.bubble {
+  fill: #f43f5e !important;
+  fill-opacity: 0.8 !important;
+  stroke: #ffffff !important;
+  stroke-width: 1px !important;
+}
+.legend-svg text {
+  fill: #94a3b8 !important;
+  font-size: 10px !important;
+}
 </style>
 <script>
 (function() {
+  function injectSVGDefs() {
+    var defsId = 'rw-svg-defs-elem';
+    if (document.getElementById(defsId)) return;
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = defsId;
+    svg.style.position = 'absolute';
+    svg.style.width = '0';
+    svg.style.height = '0';
+    svg.style.overflow = 'hidden';
+    svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = '<defs>' +
+      '<linearGradient id="rw-hits-grad" x1="0%" y1="0%" x2="0%" y2="100%">' +
+        '<stop offset="0%" stop-color="#38bdf8" stop-opacity="0.45"/>' +
+        '<stop offset="60%" stop-color="#38bdf8" stop-opacity="0.15"/>' +
+        '<stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0"/>' +
+      '</linearGradient>' +
+      '<linearGradient id="rw-visitors-grad" x1="0%" y1="0%" x2="0%" y2="100%">' +
+        '<stop offset="0%" stop-color="#10b981" stop-opacity="0.45"/>' +
+        '<stop offset="60%" stop-color="#10b981" stop-opacity="0.15"/>' +
+        '<stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>' +
+      '</linearGradient>' +
+      '<linearGradient id="rw-bar-grad" x1="0%" y1="0%" x2="100%" y2="0%">' +
+        '<stop offset="0%" stop-color="#6366f1"/>' +
+        '<stop offset="100%" stop-color="#38bdf8"/>' +
+      '</linearGradient>' +
+    '</defs>';
+    if (document.body) {
+      document.body.appendChild(svg);
+    }
+  }
+
+  function enhanceCharts() {
+    injectSVGDefs();
+    var rects = document.querySelectorAll('svg rect.bar, g.bar rect, .bars rect');
+    for (var i = 0; i < rects.length; i++) {
+      if (!rects[i].getAttribute('rx')) {
+        rects[i].setAttribute('rx', '4');
+        rects[i].setAttribute('ry', '4');
+      }
+    }
+  }
+
   function renderHeader(data) {
     var container = document.getElementById('rw-dashboard-header');
     if (!container) {
@@ -478,6 +761,7 @@ table.table tr:hover td {
     sourcesHTML += '</div>';
 
     container.innerHTML = kpiHTML + sourcesHTML;
+    enhanceCharts();
   }
 
   function fetchSources() {
@@ -494,10 +778,21 @@ table.table tr:hover td {
     xhr.send();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', fetchSources);
-  } else {
+  function init() {
     fetchSources();
+    enhanceCharts();
+    if (window.MutationObserver && document.body) {
+      var observer = new MutationObserver(function() {
+        enhanceCharts();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
   }
   setInterval(fetchSources, 3000);
 })();
