@@ -4861,7 +4861,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     es.onerror = function() {
       var el = document.getElementById('stream-status');
       if (el && !isPaused) el.textContent = 'RECONNECTING...';
-    });
+    };
   }
 
   // Initial startup
