@@ -286,3 +286,28 @@ func TestEventStore_CountryStats(t *testing.T) {
 	}
 }
 
+func TestCustomDashboard_TimeRangeFilterElements(t *testing.T) {
+	html := observability.CustomSOCDashboardHTML
+	elements := []string{
+		`id="select-time-range"`,
+		`value="1m"`,
+		`value="5m"`,
+		`value="15m"`,
+		`value="30m"`,
+		`value="1h"`,
+		`value="6h"`,
+		`value="24h"`,
+		`value="custom"`,
+		`id="custom-time-row"`,
+		`id="custom-time-start"`,
+		`id="custom-time-end"`,
+		`id="btn-apply-custom-time"`,
+		`id="prompt-stream-cmd"`,
+	}
+	for _, el := range elements {
+		if !strings.Contains(html, el) {
+			t.Errorf("expected dashboard HTML to contain %s", el)
+		}
+	}
+}
+

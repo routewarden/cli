@@ -2191,6 +2191,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     .filter-select:focus, .search-box:focus {
       border-color: var(--teal);
     }
+    input[type="datetime-local"].filter-select {
+      color-scheme: dark;
+    }
+    [data-theme="light"] input[type="datetime-local"].filter-select {
+      color-scheme: light;
+    }
     .search-box {
       min-width: 200px;
       flex: 1;
@@ -2681,16 +2687,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <div class="kpi-meter" style="color: var(--green);" id="kpi-meter-clean">[████████████████] 100.0%</div>
       <div class="kpi-sub"><span class="tui-tag tag-green">200 OK</span> Legitimate traffic</div>
     </div>
-
-    <div class="kpi-card" style="border-top: 2px solid var(--mauve);">
-      <div class="kpi-top">
-        <span class="kpi-label">Telemetry Cipher</span>
-        <span style="font-size:14px;">🔒</span>
-      </div>
-      <div class="kpi-val" style="font-size: 18px; margin-top: 4px; color: var(--mauve);">X25519 + AES</div>
-      <div class="kpi-meter" style="color: var(--mauve);">[ENCLAVE: ACTIVE]</div>
-      <div class="kpi-sub"><span class="tui-tag tag-teal">Zero-Knowledge</span> ECDH Stream</div>
-    </div>
   </div>
 
   <!-- ── Section 02: Real-Time SOC Security Event Stream ───── -->
@@ -2704,7 +2700,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="console-toolbar">
       <div class="prompt-row">
         <span>rwarden@soc:~$</span>
-        <span style="color:var(--text);">filter --stream=live</span>
+        <span style="color:var(--text);" id="prompt-stream-cmd">filter --stream=live</span>
       </div>
 
       <div class="filters-row">
@@ -2714,6 +2710,18 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <button class="tab-btn" data-filter-verdict="TARPIT">[⏳ TARPIT: <span id="count-tab-tarpit">0</span>]</button>
           <button class="tab-btn" data-filter-verdict="ALLOW">[✅ CLEAN: <span id="count-tab-clean">0</span>]</button>
         </div>
+
+        <select class="filter-select" id="select-time-range" title="Filter log stream by time range">
+          <option value="ALL">⏱️ All Time (Live)</option>
+          <option value="1m">⏱️ Last 1 min</option>
+          <option value="5m">⏱️ Last 5 mins</option>
+          <option value="15m">⏱️ Last 15 mins</option>
+          <option value="30m">⏱️ Last 30 mins</option>
+          <option value="1h">⏱️ Last 1 hour</option>
+          <option value="6h">⏱️ Last 6 hours</option>
+          <option value="24h">⏱️ Last 24 hours</option>
+          <option value="custom">⏱️ Custom Range...</option>
+        </select>
 
         <select class="filter-select" id="select-country">
           <option value="ALL">All Countries</option>
@@ -2741,6 +2749,18 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         </select>
 
         <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
+      </div>
+
+      <div id="custom-time-row" style="display:none; align-items:center; gap:8px; margin-top:8px; padding:6px 12px; background:var(--surface); border:1px solid var(--line); border-radius:3px; flex-wrap:wrap;">
+        <span style="font-size:11px; font-weight:700; color:var(--text-hi); display:flex; align-items:center; gap:4px;">
+          <span>⏱️</span> CUSTOM TIME RANGE:
+        </span>
+        <label for="custom-time-start" style="font-size:10.5px; color:var(--overlay);">FROM</label>
+        <input type="datetime-local" class="filter-select" id="custom-time-start">
+        <label for="custom-time-end" style="font-size:10.5px; color:var(--overlay);">TO</label>
+        <input type="datetime-local" class="filter-select" id="custom-time-end">
+        <button class="tui-btn" id="btn-apply-custom-time" style="padding:2px 10px; cursor:pointer;">Apply</button>
+        <button class="tui-btn" id="btn-cancel-custom-time" style="padding:2px 8px; color:var(--overlay); cursor:pointer;">Cancel</button>
       </div>
 
       <div class="active-chips-bar" id="active-chips-container" style="display:none;">
@@ -2964,6 +2984,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <div class="tui-footer">
   <div class="footer-keys">
     <span class="footer-key-item"><span class="key-cap">T</span> Theme</span>
+    <span class="footer-key-item"><span class="key-cap">W</span> Time Range</span>
     <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
     <span class="footer-key-item"><span class="key-cap">P</span> Filter Path</span>
     <span class="footer-key-item"><span class="key-cap">I</span> Inspect IP</span>
@@ -2982,6 +3003,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   // Active Filter State
   var filters = {
     verdict: 'ALL',
+    timeRange: 'ALL',
+    customStart: null,
+    customEnd: null,
     country: 'ALL',
     method: 'ALL',
     status: 'ALL',
@@ -3017,6 +3041,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var btnExportJSON = document.getElementById('btn-export-json');
   var btnResetFilters = document.getElementById('btn-reset-filters');
   var searchInput = document.getElementById('search-input');
+  var selectTimeRange = document.getElementById('select-time-range');
+  var customTimeRow = document.getElementById('custom-time-row');
+  var customTimeStart = document.getElementById('custom-time-start');
+  var customTimeEnd = document.getElementById('custom-time-end');
+  var btnApplyCustomTime = document.getElementById('btn-apply-custom-time');
+  var btnCancelCustomTime = document.getElementById('btn-cancel-custom-time');
   var selectCountry = document.getElementById('select-country');
   var selectMethod = document.getElementById('select-method');
   var selectStatus = document.getElementById('select-status');
@@ -3143,6 +3173,126 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     });
   });
 
+  function parseEventTime(ev) {
+    if (!ev) return null;
+    var raw = ev.timestamp || ev.time;
+    if (raw) {
+      if (typeof raw === 'number') return raw;
+      var d = new Date(raw);
+      var ms = d.getTime();
+      if (!isNaN(ms)) return ms;
+      var dt = new Date(String(raw).replace(' ', 'T'));
+      if (!isNaN(dt.getTime())) return dt.getTime();
+      var clfMatch = String(raw).match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/);
+      if (clfMatch) {
+        var months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+        var mIdx = months[clfMatch[2]];
+        if (mIdx !== undefined) {
+          var clfDate = new Date(parseInt(clfMatch[3], 10), mIdx, parseInt(clfMatch[1], 10),
+            parseInt(clfMatch[4], 10), parseInt(clfMatch[5], 10), parseInt(clfMatch[6], 10));
+          if (!isNaN(clfDate.getTime())) return clfDate.getTime();
+        }
+      }
+    }
+    if (ev.time_str && typeof ev.time_str === 'string') {
+      var parts = ev.time_str.split(':');
+      if (parts.length >= 2) {
+        var now = new Date();
+        var d2 = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+          parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2] || 0, 10));
+        if (!isNaN(d2.getTime())) return d2.getTime();
+      }
+    }
+    return null;
+  }
+
+  function toDateTimeLocalString(d) {
+    var pad = function(n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' +
+      pad(d.getMonth() + 1) + '-' +
+      pad(d.getDate()) + 'T' +
+      pad(d.getHours()) + ':' +
+      pad(d.getMinutes());
+  }
+
+  function updatePromptCommand() {
+    var cmd = 'filter --stream=live';
+    if (filters.timeRange && filters.timeRange !== 'ALL') {
+      if (filters.timeRange === 'custom') {
+        cmd += ' --time=custom';
+      } else {
+        cmd += ' --time=' + filters.timeRange;
+      }
+    }
+    if (filters.verdict !== 'ALL') cmd += ' --verdict=' + filters.verdict.toLowerCase();
+    if (filters.country !== 'ALL') cmd += ' --country=' + filters.country;
+    if (filters.method !== 'ALL') cmd += ' --method=' + filters.method;
+    if (filters.status !== 'ALL') cmd += ' --status=' + filters.status;
+    if (filters.rule !== 'ALL') cmd += ' --rule=' + filters.rule;
+    if (filters.ip) cmd += ' --ip=' + filters.ip;
+    if (filters.path) cmd += ' --path=' + filters.path;
+    if (filters.search) cmd += ' --grep="' + filters.search + '"';
+    var promptEl = document.getElementById('prompt-stream-cmd');
+    if (promptEl) {
+      promptEl.textContent = cmd;
+    }
+  }
+
+  if (selectTimeRange) {
+    selectTimeRange.addEventListener('change', function(e) {
+      var val = e.target.value;
+      filters.timeRange = val;
+      if (val === 'custom') {
+        if (customTimeRow) {
+          customTimeRow.style.display = 'flex';
+          var now = new Date();
+          if (!customTimeEnd.value) customTimeEnd.value = toDateTimeLocalString(now);
+          if (!customTimeStart.value) customTimeStart.value = toDateTimeLocalString(new Date(now.getTime() - 60 * 60 * 1000));
+        }
+      } else {
+        if (customTimeRow) customTimeRow.style.display = 'none';
+        filters.customStart = null;
+        filters.customEnd = null;
+        renderActiveChips();
+        renderTable();
+      }
+    });
+  }
+
+  if (btnApplyCustomTime) {
+    btnApplyCustomTime.addEventListener('click', function() {
+      var startVal = customTimeStart.value;
+      var endVal = customTimeEnd.value;
+      if (startVal) {
+        var sDate = new Date(startVal);
+        filters.customStart = !isNaN(sDate.getTime()) ? sDate.getTime() : null;
+      } else {
+        filters.customStart = null;
+      }
+      if (endVal) {
+        var eDate = new Date(endVal);
+        filters.customEnd = !isNaN(eDate.getTime()) ? eDate.getTime() : null;
+      } else {
+        filters.customEnd = null;
+      }
+      filters.timeRange = 'custom';
+      renderActiveChips();
+      renderTable();
+    });
+  }
+
+  if (btnCancelCustomTime) {
+    btnCancelCustomTime.addEventListener('click', function() {
+      if (customTimeRow) customTimeRow.style.display = 'none';
+      filters.timeRange = 'ALL';
+      filters.customStart = null;
+      filters.customEnd = null;
+      if (selectTimeRange) selectTimeRange.value = 'ALL';
+      renderActiveChips();
+      renderTable();
+    });
+  }
+
   selectCountry.addEventListener('change', function(e) {
     filters.country = e.target.value;
     renderActiveChips();
@@ -3211,6 +3361,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   function resetAllFilters() {
     filters.verdict = 'ALL';
+    filters.timeRange = 'ALL';
+    filters.customStart = null;
+    filters.customEnd = null;
     filters.country = 'ALL';
     filters.method = 'ALL';
     filters.status = 'ALL';
@@ -3223,6 +3376,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var allBtn = document.querySelector('[data-filter-verdict="ALL"]');
     if (allBtn) allBtn.classList.add('active');
 
+    if (selectTimeRange) selectTimeRange.value = 'ALL';
+    if (customTimeRow) customTimeRow.style.display = 'none';
+    if (customTimeStart) customTimeStart.value = '';
+    if (customTimeEnd) customTimeEnd.value = '';
     selectCountry.value = 'ALL';
     selectMethod.value = 'ALL';
     selectStatus.value = 'ALL';
@@ -3262,6 +3419,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (ipModal) ipModal.style.display = 'none';
     } else if (e.key === 't' || e.key === 'T') {
       toggleTheme();
+    } else if (e.key === 'w' || e.key === 'W') {
+      if (selectTimeRange) selectTimeRange.focus();
     } else if (e.key === 'r' || e.key === 'R') {
       resetAllFilters();
     } else if (e.key === 'f' || e.key === 'F') {
@@ -3273,6 +3432,29 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   function renderActiveChips() {
     var chips = [];
+    if (filters.timeRange !== 'ALL') {
+      var timeLabel = 'Time: ' + filters.timeRange;
+      if (filters.timeRange === '1m') timeLabel = 'Time: Last 1m';
+      else if (filters.timeRange === '5m') timeLabel = 'Time: Last 5m';
+      else if (filters.timeRange === '15m') timeLabel = 'Time: Last 15m';
+      else if (filters.timeRange === '30m') timeLabel = 'Time: Last 30m';
+      else if (filters.timeRange === '1h') timeLabel = 'Time: Last 1h';
+      else if (filters.timeRange === '6h') timeLabel = 'Time: Last 6h';
+      else if (filters.timeRange === '24h') timeLabel = 'Time: Last 24h';
+      else if (filters.timeRange === 'custom') {
+        timeLabel = 'Time: Custom Range';
+      }
+      chips.push({
+        label: timeLabel,
+        clear: function() {
+          filters.timeRange = 'ALL';
+          filters.customStart = null;
+          filters.customEnd = null;
+          if (selectTimeRange) selectTimeRange.value = 'ALL';
+          if (customTimeRow) customTimeRow.style.display = 'none';
+        }
+      });
+    }
     if (filters.verdict !== 'ALL') chips.push({ label: 'Verdict: ' + filters.verdict, clear: function() {
       filters.verdict = 'ALL';
       document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
@@ -3286,6 +3468,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (filters.search) chips.push({ label: 'Search: "' + filters.search + '"', clear: function() { filters.search = ''; searchInput.value = ''; }});
     if (filters.ip) chips.push({ label: 'IP: ' + filters.ip, clear: function() { filters.ip = ''; }});
     if (filters.path) chips.push({ label: 'Path: ' + filters.path, clear: function() { filters.path = ''; }});
+
+    updatePromptCommand();
 
     if (chips.length > 0) {
       chipsContainer.style.display = 'flex';
@@ -3310,6 +3494,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   function getFilteredEvents() {
+    var now = Date.now();
+    var timeLimitMs = 0;
+    if (filters.timeRange === '1m') timeLimitMs = 60 * 1000;
+    else if (filters.timeRange === '5m') timeLimitMs = 5 * 60 * 1000;
+    else if (filters.timeRange === '15m') timeLimitMs = 15 * 60 * 1000;
+    else if (filters.timeRange === '30m') timeLimitMs = 30 * 60 * 1000;
+    else if (filters.timeRange === '1h') timeLimitMs = 60 * 60 * 1000;
+    else if (filters.timeRange === '6h') timeLimitMs = 6 * 60 * 60 * 1000;
+    else if (filters.timeRange === '24h') timeLimitMs = 24 * 60 * 60 * 1000;
+
     return allEvents.filter(function(ev) {
       if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
       if (filters.country !== 'ALL' && ev.country !== filters.country && ev.country_code !== filters.country) return false;
@@ -3317,6 +3511,22 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (filters.rule !== 'ALL' && (ev.rule || '') !== filters.rule) return false;
       if (filters.ip && ev.client_ip !== filters.ip) return false;
       if (filters.path && ev.path !== filters.path) return false;
+
+      // Time range filtering
+      if (timeLimitMs > 0) {
+        var evTime = parseEventTime(ev);
+        if (evTime !== null) {
+          var diff = now - evTime;
+          // allow events within timeLimit, with 30s tolerance for clock drift
+          if (diff > timeLimitMs || diff < -30000) return false;
+        }
+      } else if (filters.timeRange === 'custom') {
+        var evTime = parseEventTime(ev);
+        if (evTime !== null) {
+          if (filters.customStart && evTime < filters.customStart) return false;
+          if (filters.customEnd && evTime > filters.customEnd) return false;
+        }
+      }
 
       if (filters.status !== 'ALL') {
         var s = ev.status;
@@ -3377,7 +3587,23 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       '</tr>';
     });
 
-    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:var(--overlay); text-align:center; padding:20px;">No matching events</td></tr>';
+    var emptyMessage = 'No matching events';
+    if (filters.timeRange !== 'ALL') {
+      var tDesc = filters.timeRange;
+      if (filters.timeRange === '1m') tDesc = 'last 1 minute';
+      else if (filters.timeRange === '5m') tDesc = 'last 5 minutes';
+      else if (filters.timeRange === '15m') tDesc = 'last 15 minutes';
+      else if (filters.timeRange === '30m') tDesc = 'last 30 minutes';
+      else if (filters.timeRange === '1h') tDesc = 'last 1 hour';
+      else if (filters.timeRange === '6h') tDesc = 'last 6 hours';
+      else if (filters.timeRange === '24h') tDesc = 'last 24 hours';
+      else if (filters.timeRange === 'custom') tDesc = 'custom time window';
+      emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">⏱️</div>NO LOGS IN SELECTED TIME RANGE (' + tDesc.toUpperCase() + ')<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Select a broader time window or reset filters to view earlier security events.</div>';
+    } else if (filters.search || filters.country !== 'ALL' || filters.method !== 'ALL' || filters.status !== 'ALL' || filters.rule !== 'ALL') {
+      emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">🔍</div>NO EVENTS MATCHING ACTIVE FILTERS<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Click [RESET ALL FILTERS] to clear query parameters.</div>';
+    }
+
+    streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:var(--overlay); text-align:center; padding:28px 12px; font-family:var(--mono);">' + emptyMessage + '</td></tr>';
 
     if (streamContainer) {
       if (autoScroll && streamContainer.scrollTop <= 30) {
@@ -3385,6 +3611,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
     }
   }
+
+  // Periodically refresh table if time filter is active (so time window naturally rolls forward)
+  setInterval(function() {
+    if (filters.timeRange !== 'ALL' && filters.timeRange !== 'custom' && autoScroll) {
+      renderTable();
+    }
+  }, 5000);
 
   window.inspectEvent = function(id) {
     var found = allEvents.find(function(e) { return e.id === id; });
