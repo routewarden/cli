@@ -83,6 +83,7 @@ type EventStore struct {
 	timeline      map[string]*TimelinePoint // keyed by HH:MM
 	timelineKeys  []string
 	startTime     time.Time
+	sqlite        *SQLiteStore
 }
 
 var globalStore = NewEventStore()
@@ -108,6 +109,30 @@ func GlobalStore() *EventStore {
 	return globalStore
 }
 
+// AttachSQLite connects a persistent SQLiteStore to the EventStore.
+// It also preloads the latest events from SQLite into memory.
+func (s *EventStore) AttachSQLite(sq *SQLiteStore) {
+	s.mu.Lock()
+	s.sqlite = sq
+	s.mu.Unlock()
+
+	if sq != nil {
+		if recent, err := sq.GetRecent(500); err == nil && len(recent) > 0 {
+			// Populate from oldest to newest so s.events ends up in chronological order
+			for i := len(recent) - 1; i >= 0; i-- {
+				s.ingestInternal(recent[i], false)
+			}
+		}
+	}
+}
+
+// SQLite returns the attached SQLiteStore, if any.
+func (s *EventStore) SQLite() *SQLiteStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sqlite
+}
+
 // Subscribe returns a channel that receives newly ingested security events.
 func (s *EventStore) Subscribe() (chan *SecurityEvent, func()) {
 	s.mu.Lock()
@@ -125,13 +150,22 @@ func (s *EventStore) Subscribe() (chan *SecurityEvent, func()) {
 
 // Add adds a structured security event to the store and broadcasts it.
 func (s *EventStore) Add(ev *SecurityEvent) {
+	s.ingestInternal(ev, true)
+}
+
+func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 	if ev == nil {
 		return
 	}
 	s.mu.Lock()
 
-	s.nextID++
-	ev.ID = s.nextID
+	if ev.ID <= 0 {
+		s.nextID++
+		ev.ID = s.nextID
+	} else if ev.ID > s.nextID {
+		s.nextID = ev.ID
+	}
+
 	if ev.TimeStr == "" {
 		if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
 			ev.TimeStr = t.Local().Format("15:04:05")
@@ -158,6 +192,9 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 
 	// Timeline bucket (HH:MM)
 	bucketKey := time.Now().Format("15:04")
+	if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+		bucketKey = t.Local().Format("15:04")
+	}
 	tb, exists := s.timeline[bucketKey]
 	if !exists {
 		tb = &TimelinePoint{Time: bucketKey}
@@ -274,7 +311,13 @@ func (s *EventStore) Add(ev *SecurityEvent) {
 		}
 	}
 
+	sq := s.sqlite
 	s.mu.Unlock()
+
+	// Persist asynchronously to SQLite if enabled
+	if persist && sq != nil {
+		sq.Insert(ev)
+	}
 }
 
 // ParseAndIngest parses a raw line (JSON or Combined Log) into a SecurityEvent and ingests it.
@@ -582,7 +625,7 @@ func (s *EventStore) GetStats() DashboardStats {
 // SeedDemoData adds initial sample gateway telemetry if store is empty.
 func (s *EventStore) SeedDemoData() {
 	s.mu.RLock()
-	hasData := len(s.events) > 0
+	hasData := len(s.events) > 0 || (s.sqlite != nil && s.sqlite.Count() > 0)
 	s.mu.RUnlock()
 	if hasData {
 		return

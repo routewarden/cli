@@ -369,6 +369,14 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		updateSourceInfo("docker", "", targets)
 	}
 
+	// Initialize embedded SQLite persistence for long-term telemetry retention
+	dbPath := filepath.Join(dir, "events.db")
+	if sqStore, err := NewSQLiteStore(dbPath); err == nil {
+		globalStore.AttachSQLite(sqStore)
+		_, _ = sqStore.PruneOlderThan(30) // 30-day retention
+		defer sqStore.Close()
+	}
+
 	// Prime access.log and globalStore with initial logs from targets
 	if len(targets) > 0 {
 		for _, target := range targets {
@@ -431,6 +439,9 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		fmt.Println("🐳 Auto-Discovery:     Listening for containers with label 'routewarden=true'")
 	}
 	fmt.Printf("🔑 Server Public Key:  %s\n", serverPubStr[:min(20, len(serverPubStr))]+"...")
+	if sq := globalStore.SQLite(); sq != nil {
+		fmt.Printf("💾 SQLite Persistence: %s (persisted: %d events)\n", sq.DBPath(), sq.Count())
+	}
 	if IsMaxMindLoaded() {
 		fmt.Printf("🌍 MaxMind Database:   %s\n", MaxMindDBPath())
 	} else {
@@ -740,6 +751,67 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		stats := globalStore.GetStats()
 		stats.Sources = getSourceInfo()
 		_ = json.NewEncoder(w).Encode(stats)
+	})
+
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+		sq := globalStore.SQLite()
+		if sq == nil {
+			stats := globalStore.GetStats()
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"events": stats.RecentEvents,
+				"total":  len(stats.RecentEvents),
+				"count":  len(stats.RecentEvents),
+			})
+			return
+		}
+
+		limit := 250
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+
+		offset := 0
+		if oStr := r.URL.Query().Get("offset"); oStr != "" {
+			if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+				offset = o
+			}
+		}
+
+		filter := LogQueryFilter{
+			StartTime: strings.TrimSpace(r.URL.Query().Get("start")),
+			EndTime:   strings.TrimSpace(r.URL.Query().Get("end")),
+			Verdict:   strings.TrimSpace(r.URL.Query().Get("verdict")),
+			ClientIP:  strings.TrimSpace(r.URL.Query().Get("ip")),
+			Country:   strings.TrimSpace(r.URL.Query().Get("country")),
+			Method:    strings.TrimSpace(r.URL.Query().Get("method")),
+			Rule:      strings.TrimSpace(r.URL.Query().Get("rule")),
+			Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+			Limit:     limit,
+			Offset:    offset,
+		}
+		if sStr := r.URL.Query().Get("status"); sStr != "" {
+			if st, err := strconv.Atoi(sStr); err == nil {
+				filter.Status = st
+			}
+		}
+
+		events, err := sq.Query(filter)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"events": events,
+			"total":  sq.Count(),
+			"count":  len(events),
+		})
 	})
 
 	mux.HandleFunc("/api/stream", func(w http.ResponseWriter, r *http.Request) {
