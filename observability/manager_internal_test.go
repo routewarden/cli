@@ -25,9 +25,23 @@ func TestToCombinedLog(t *testing.T) {
 	if !strings.Contains(combined, " 403 0 ") {
 		t.Errorf("expected status code 403, got %s", combined)
 	}
-	// Verify rule as user-agent
-	if !strings.Contains(combined, `"sqli-detect"`) {
-		t.Errorf("expected rule in user-agent, got %s", combined)
+	// Verify structured threat verdict in user-agent
+	if !strings.Contains(combined, `"[BLOCK: sqli-detect]"`) {
+		t.Errorf("expected [BLOCK: sqli-detect] in user-agent, got %s", combined)
+	}
+
+	// Test TARPIT verdict
+	tarpitLine := `{"time":"2026-10-17T12:00:01Z","client_ip":"198.51.100.43","method":"GET","path":"/api/scan","verdict":"TARPIT","rule":"slow-bot"}`
+	tarpitCombined := toCombinedLog(tarpitLine)
+	if !strings.Contains(tarpitCombined, `"[TARPIT: slow-bot]"`) || !strings.Contains(tarpitCombined, " 429 0 ") {
+		t.Errorf("expected [TARPIT: slow-bot] with 429 status, got %s", tarpitCombined)
+	}
+
+	// Test clean ALLOW verdict
+	cleanLine := `{"time":"2026-10-17T12:00:02Z","client_ip":"198.51.100.44","method":"GET","path":"/home","verdict":"ALLOW"}`
+	cleanCombined := toCombinedLog(cleanLine)
+	if !strings.Contains(cleanCombined, `"RouteWarden/1.5 (Clean)"`) || !strings.Contains(cleanCombined, " 200 0 ") {
+		t.Errorf("expected clean allow format, got %s", cleanCombined)
 	}
 
 	// Arbitrary debug text should be dropped

@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -72,18 +73,34 @@ type RemoteAgentInfo struct {
 }
 
 type SourceInfo struct {
-	Mode    string             `json:"mode"`
-	File    string             `json:"file,omitempty"`
-	Targets []containerTarget  `json:"targets,omitempty"`
-	Agents  []*RemoteAgentInfo `json:"agents,omitempty"`
+	Mode         string             `json:"mode"`
+	File         string             `json:"file,omitempty"`
+	Targets      []containerTarget  `json:"targets,omitempty"`
+	Agents       []*RemoteAgentInfo `json:"agents,omitempty"`
+	TotalEvents  int64              `json:"total_events"`
+	BlockedCount int64              `json:"blocked_count"`
+	TarpitCount  int64              `json:"tarpit_count"`
 }
 
 var (
-	sourceMu   sync.RWMutex
-	currSource SourceInfo
-	agentMu    sync.RWMutex
-	agents     = make(map[string]*RemoteAgentInfo)
+	sourceMu     sync.RWMutex
+	currSource   SourceInfo
+	agentMu      sync.RWMutex
+	agents       = make(map[string]*RemoteAgentInfo)
+	totalEvents  int64
+	blockedCount int64
+	tarpitCount  int64
 )
+
+func recordMetric(status int, verdict string) {
+	atomic.AddInt64(&totalEvents, 1)
+	v := strings.ToUpper(verdict)
+	if status == 403 || v == "BLOCK" {
+		atomic.AddInt64(&blockedCount, 1)
+	} else if status == 429 || v == "TARPIT" {
+		atomic.AddInt64(&tarpitCount, 1)
+	}
+}
 
 func registerOrTouchAgent(id, name, hostname, remoteIP string, eventCount int) *RemoteAgentInfo {
 	agentMu.Lock()
@@ -150,28 +167,183 @@ func getSourceInfo() SourceInfo {
 	defer sourceMu.RUnlock()
 	s := currSource
 	s.Agents = getActiveAgents()
+	s.TotalEvents = atomic.LoadInt64(&totalEvents)
+	s.BlockedCount = atomic.LoadInt64(&blockedCount)
+	s.TarpitCount = atomic.LoadInt64(&tarpitCount)
 	return s
 }
 
 const sourceBadgeInjection = `
 <style>
+/* RouteWarden Executive Security Dashboard Styling */
+:root {
+  --rw-bg: #0b0f19;
+  --rw-card-bg: rgba(17, 24, 39, 0.78);
+  --rw-card-border: rgba(255, 255, 255, 0.08);
+  --rw-accent-blue: #38bdf8;
+  --rw-accent-indigo: #6366f1;
+  --rw-accent-green: #10b981;
+  --rw-accent-red: #f43f5e;
+  --rw-accent-amber: #f59e0b;
+  --rw-accent-purple: #a855f7;
+}
+
+body {
+  background-color: var(--rw-bg) !important;
+  color: #f1f5f9 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 96% !important;
+  margin: 0 auto !important;
+}
+
+/* Glassmorphic Panel Cards */
+.wrap-panel {
+  background: var(--rw-card-bg) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid var(--rw-card-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35) !important;
+  margin-bottom: 24px !important;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.wrap-panel:hover {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* Table Enhancements */
+table.table th {
+  background: rgba(15, 23, 42, 0.75) !important;
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.05em !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+table.table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  color: #cbd5e1 !important;
+  font-size: 12px !important;
+}
+table.table tr:hover td {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* RouteWarden Dashboard Container */
+#rw-dashboard-header {
+  margin: 14px 0 22px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Security KPI Cards Grid */
+.rw-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.rw-kpi-card {
+  background: var(--rw-card-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--rw-card-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.rw-kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.rw-kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.rw-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.rw-kpi-icon {
+  font-size: 16px;
+  opacity: 0.9;
+}
+.rw-kpi-val {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #f8fafc;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.rw-kpi-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rw-pill-blocked {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.rw-pill-tarpit {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.rw-pill-secure {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Monitored Sources Bar */
 #rw-status-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  background: rgba(22, 25, 34, 0.85);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 8px 14px;
-  margin: 12px 0 16px 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 10px 16px;
   font-size: 13px;
   color: #e2e8f0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  transition: all 0.2s ease-in-out;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 .rw-pulse {
   width: 8px;
@@ -198,13 +370,17 @@ const sourceBadgeInjection = `
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 3px 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 4px 10px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: #93c5fd;
+  transition: background 0.15s ease;
+}
+.rw-tag:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 .rw-tag-id {
   color: #94a3b8;
@@ -215,59 +391,93 @@ const sourceBadgeInjection = `
   color: #cbd5e1;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  font-size: 13px;
 }
 </style>
 <script>
 (function() {
-  function createOrUpdateBar(data) {
-    var bar = document.getElementById('rw-status-bar');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'rw-status-bar';
+  function renderHeader(data) {
+    var container = document.getElementById('rw-dashboard-header');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'rw-dashboard-header';
       var titleElem = document.getElementById('report-title');
       if (titleElem && titleElem.parentNode) {
-        titleElem.parentNode.insertBefore(bar, titleElem.nextSibling);
+        titleElem.parentNode.insertBefore(container, titleElem.nextSibling);
       } else {
-        var container = document.querySelector('.container') || document.body;
-        container.insertBefore(bar, container.firstChild);
+        var parent = document.querySelector('.container') || document.body;
+        parent.insertBefore(container, parent.firstChild);
       }
     }
+
+    var total = data.total_events || 0;
+    var blocked = data.blocked_count || 0;
+    var tarpit = data.tarpit_count || 0;
+    var blockRate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
 
     var totalSources = 0;
     if (data.targets) totalSources += data.targets.length;
     if (data.agents) totalSources += data.agents.length;
 
-    var content = '';
-    content += '<div class="rw-label"><span class="rw-pulse"></span> Monitored Sources:</div>';
+    var kpiHTML = '<div class="rw-kpi-grid">' +
+      '<div class="rw-kpi-card" style="border-top: 3px solid #38bdf8;">' +
+        '<div class="rw-kpi-top"><span class="rw-kpi-label">Total Ingested</span><span class="rw-kpi-icon">🛡️</span></div>' +
+        '<div class="rw-kpi-val">' + Number(total).toLocaleString() + '</div>' +
+        '<div class="rw-kpi-sub">Real-time gateway events</div>' +
+      '</div>' +
+      '<div class="rw-kpi-card" style="border-top: 3px solid #f43f5e;">' +
+        '<div class="rw-kpi-top"><span class="rw-kpi-label">Threats Blocked</span><span class="rw-kpi-icon">🛑</span></div>' +
+        '<div class="rw-kpi-val" style="color: #fb7185;">' + Number(blocked).toLocaleString() + '</div>' +
+        '<div class="rw-kpi-sub"><span class="rw-pill-blocked">' + blockRate + ' block rate</span> 403 Forbidden</div>' +
+      '</div>' +
+      '<div class="rw-kpi-card" style="border-top: 3px solid #f59e0b;">' +
+        '<div class="rw-kpi-top"><span class="rw-kpi-label">Throttled / Tarpit</span><span class="rw-kpi-icon">⏳</span></div>' +
+        '<div class="rw-kpi-val" style="color: #fcd34d;">' + Number(tarpit).toLocaleString() + '</div>' +
+        '<div class="rw-kpi-sub"><span class="rw-pill-tarpit">429 Slowed</span> Hostile bots</div>' +
+      '</div>' +
+      '<div class="rw-kpi-card" style="border-top: 3px solid #10b981;">' +
+        '<div class="rw-kpi-top"><span class="rw-kpi-label">Active Sources</span><span class="rw-kpi-icon">🌐</span></div>' +
+        '<div class="rw-kpi-val" style="color: #6ee7b7;">' + totalSources + '</div>' +
+        '<div class="rw-kpi-sub"><span class="rw-pulse"></span> Nodes connected</div>' +
+      '</div>' +
+      '<div class="rw-kpi-card" style="border-top: 3px solid #a855f7;">' +
+        '<div class="rw-kpi-top"><span class="rw-kpi-label">Telemetry Cipher</span><span class="rw-kpi-icon">🔒</span></div>' +
+        '<div class="rw-kpi-val" style="font-size: 16px; margin-top: 4px; color: #d8b4fe;">X25519 + AES</div>' +
+        '<div class="rw-kpi-sub"><span class="rw-pill-secure">Zero-Knowledge</span> ECDH Stream</div>' +
+      '</div>' +
+    '</div>';
+
+    var sourcesHTML = '<div id="rw-status-bar">' +
+      '<div class="rw-label"><span class="rw-pulse"></span> Monitored Nodes:</div>';
 
     if (data.mode === 'file') {
-      content += '<span class="rw-tag">📁 ' + (data.file || 'Local Log File') + '</span>';
+      sourcesHTML += '<span class="rw-tag">📁 ' + (data.file || 'Local Log File') + '</span>';
     }
 
     if (data.targets && data.targets.length > 0) {
       data.targets.forEach(function(t) {
         var shortID = (t.id && t.id.length > 12) ? t.id.substring(0, 12) : t.id;
-        content += '<span class="rw-tag">🐳 ' + t.name + ' <span class="rw-tag-id">(' + shortID + ')</span></span>';
+        sourcesHTML += '<span class="rw-tag">🐳 ' + t.name + ' <span class="rw-tag-id">(' + shortID + ')</span></span>';
       });
     }
 
     if (data.agents && data.agents.length > 0) {
       data.agents.forEach(function(ag) {
         var statusDot = ag.status === 'online' ? '<span class="rw-pulse"></span>' : '<span class="rw-pulse-idle"></span>';
-        var extra = ag.event_count > 0 ? ' • ' + Number(ag.event_count).toLocaleString() + ' events' : '';
-        content += '<span class="rw-tag">' + statusDot + ' 🌐 ' + ag.name + ' <span class="rw-tag-id">(' + (ag.remote_ip || 'remote') + extra + ')</span> <span style="color:#a78bfa;font-size:10px;">🔒 Encrypted</span></span>';
+        var extra = ag.event_count > 0 ? ' • ' + Number(ag.event_count).toLocaleString() + ' ev' : '';
+        sourcesHTML += '<span class="rw-tag">' + statusDot + ' 🌐 ' + ag.name + ' <span class="rw-tag-id">(' + (ag.remote_ip || 'remote') + extra + ')</span> <span style="color:#a78bfa;font-size:10px;">🔒 Encrypted</span></span>';
       });
     }
 
     if (totalSources === 0 && data.mode !== 'file') {
-      content = '<div class="rw-label"><span class="rw-pulse-idle"></span> Ingestion Active:</div>' +
-        '<span style="color:#94a3b8; font-style:italic; font-size:12px;">Waiting for local Docker containers or remote agents (<code>rwarden push</code>)...</span>';
+      sourcesHTML += '<span style="color:#94a3b8; font-style:italic; font-size:12px;">Waiting for local Docker containers or remote agents (<code>rwarden push</code>)...</span>';
     } else {
-      content += '<span style="color:#64748b; font-size:11px; margin-left:auto;">' + totalSources + ' active source' + (totalSources > 1 ? 's' : '') + '</span>';
+      sourcesHTML += '<span style="color:#64748b; font-size:11px; margin-left:auto;">' + totalSources + ' active source' + (totalSources > 1 ? 's' : '') + '</span>';
     }
+    sourcesHTML += '</div>';
 
-    bar.innerHTML = content;
+    container.innerHTML = kpiHTML + sourcesHTML;
   }
 
   function fetchSources() {
@@ -277,7 +487,7 @@ const sourceBadgeInjection = `
       if (xhr.readyState === 4 && xhr.status === 200) {
         try {
           var data = JSON.parse(xhr.responseText);
-          createOrUpdateBar(data);
+          renderHeader(data);
         } catch(e) {}
       }
     };
@@ -328,7 +538,9 @@ func toCombinedLog(line string) string {
 		return ""
 	}
 	// Already combined format
-	if combinedLogRegex.MatchString(line) {
+	if match := combinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
+		statusCode, _ := strconv.Atoi(match[5])
+		recordMetric(statusCode, "")
 		return line
 	}
 
@@ -385,6 +597,8 @@ func toCombinedLog(line string) string {
 			}
 		}
 
+		recordMetric(status, ev.Verdict)
+
 		t := time.Now().UTC()
 		if ev.Timestamp != "" {
 			if parsed, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
@@ -401,12 +615,24 @@ func toCombinedLog(line string) string {
 		if rule == "" {
 			rule = ev.MatchedRuleAlt
 		}
-		if rule == "" {
-			rule = "RouteWarden"
-		}
 		rule = strings.ReplaceAll(rule, `"`, `'`)
+		verdict := strings.ToUpper(ev.Verdict)
 
-		return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, rule)
+		userAgent := "RouteWarden"
+		if rule != "" {
+			if verdict != "" && verdict != "ALLOW" {
+				userAgent = fmt.Sprintf("[%s: %s]", verdict, rule)
+			} else {
+				userAgent = fmt.Sprintf("[RULE: %s]", rule)
+			}
+		} else if verdict != "" && verdict != "ALLOW" {
+			userAgent = fmt.Sprintf("[%s]", verdict)
+		} else if verdict == "ALLOW" {
+			userAgent = "RouteWarden/1.5 (Clean)"
+		}
+		userAgent = strings.ReplaceAll(userAgent, `"`, `'`)
+
+		return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, userAgent)
 	}
 
 	// Drop arbitrary non-HTTP and debug log lines
