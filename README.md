@@ -471,17 +471,21 @@ curl -i -H "X-Forwarded-For: 192.168.1.50" http://localhost:8080/.env
 
 ### 6. Security Observability Dashboard (`dashboard`)
 
-RouteWarden provides a turnkey, ultra-lightweight real-time security dashboard powered by [GoAccess](https://goaccess.io/) and `rwarden monitor`. It provides an instantaneous, in-memory dashboard consuming only **~15MB of RAM**.
+RouteWarden includes a turnkey, ultra-lightweight real-time security dashboard powered by RouteWarden's embedded Go server and SQLite persistence. It provides an instantaneous, live executive SOC dashboard consuming only **~8MB of RAM** with zero external dependencies.
 
-The dashboard automatically discovers Docker containers tagged with `routewarden=true` (or `routewarden.logs=true`), multiplexes their logs concurrently, and presents a live web UI with zero manual configuration.
+The dashboard automatically discovers Docker containers tagged with `routewarden=true` (or `routewarden.logs=true`), multiplexes their logs concurrently, and presents a live terminal-styled web UI with zero manual configuration.
 
 #### Architecture & Highlights
 
-- **Ultra-lightweight footprint**: Consumes ~15MB RAM with sub-second startup.
-- **Single URL**: Serves real-time HTML and WebSocket streaming directly on `http://localhost:7890`.
-- **Zero Configuration**: Auto-discovers containers labeled `routewarden=true` without writing configs.
-- **Threat Analytics**: Real-time HTTP 403 blocks, 429 tarpits, GeoIP offender locations, and top attack paths (`/.env`, `/.git`, `/wp-login.php`).
-- **Flexible Execution**: Runs using the local `goaccess` CLI or an official 10MB GoAccess Docker container if not installed.
+- **Ultra-lightweight footprint**: Consumes ~8MB RAM with sub-second startup and zero external dependencies.
+- **Embedded SQLite Persistence**: Long-term log retention (`~/.routewarden/dashboard/events.db`) using high-throughput WAL mode and asynchronous batch writing. Telemetry survives restarts with automatic 30-day pruning.
+- **Live SOC Stream (`stream.audit.live`)**: Real-time Server-Sent Events (SSE) feed with instant filter tabs (`ALL`, `BLOCK` 🛑, `TARPIT` ⏳, `ALLOW` 🛡️).
+- **Stream Freeze / Resume**: Click **⏸ Pause** or hit <kbd>Space</kbd> to freeze the log table for forensic inspection. Incoming logs are buffered with a counter badge (`⏸ PAUSED (+N new)`).
+- **Time Window Filtering**: Rapid rolling time ranges (`1m`, `5m`, `15m`, `30m`, `Custom Date Range`) querying SQLite directly via `GET /api/logs`.
+- **Threat Intelligence & IP Modal**: Top Attacking Client IPs with breakdown ratios. Click any IP to inspect autonomous systems (ASN), reverse DNS, origin country, CIDR prefix, and AbuseIPDB records.
+- **Global Threat Geography**: Interactive world map visualizing attack origins using RouteWarden's autonomous country engine (built-in CIDR & RIR + MaxMind GeoLite2 discovery).
+- **Theme Switching**: Built-in Auto (system preference), Light, and Dark terminal themes (<kbd>T</kbd>).
+- **Encrypted Remote Ingest**: Accepts logs from remote edge nodes via `rwarden push` using **X25519 + ChaCha20-Poly1305** zero-knowledge encryption (`/api/v1/events`).
 
 #### Quickstart with CLI
 
@@ -504,13 +508,13 @@ rwarden dashboard status
 # 6. Stop background dashboard containers
 rwarden dashboard down
 
-# 7. Export standalone Docker Compose and GoAccess config files
+# 7. Export standalone Docker Compose and configuration files
 rwarden dashboard export ./dashboard
 ```
 
 #### Standalone Docker Compose Deployment
 
-If you prefer running without the CLI binary in production, export the embedded GoAccess stack:
+If you prefer running without the CLI binary in production, export the embedded stack:
 
 ```bash
 # Export configuration files
@@ -549,15 +553,15 @@ services:
 
 | Command / Flag | Type | Default | Description |
 |:---|:---|:---|:---|
-| `up` | subcommand | — | Launch GoAccess real-time security dashboard (default subcommand) |
+| `up` | subcommand | — | Launch real-time SOC security dashboard (default subcommand) |
 | `down` | subcommand | — | Stop running dashboard containers |
 | `status` | subcommand | — | Check status of dashboard containers |
-| `export [dir]` | subcommand | `./dashboard` | Export compose and GoAccess configs to disk |
-| `--port` | int | `7890` | Port for GoAccess dashboard UI and WebSocket |
+| `export [dir]` | subcommand | `./dashboard` | Export compose and configuration assets to disk |
+| `--port` | int | `7890` | Port for dashboard web UI and SSE stream |
 | `-f`, `--file` | string | `""` | Log file to monitor (default: auto-discovered Docker containers) |
 | `-c`, `--container` | string | `""` | Tail a specific Docker container by name or ID |
 | `-l`, `--label` | string | `routewarden=true` | Docker label to filter containers |
-| `--dir` | string | `~/.routewarden/dashboard` | Directory storing dashboard configuration |
+| `--dir` | string | `~/.routewarden/dashboard` | Working directory storing SQLite `events.db` and keys |
 | `--no-open` | bool | `false` | Do not automatically launch the system default browser |
 
 ---
