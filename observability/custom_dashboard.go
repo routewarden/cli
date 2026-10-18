@@ -1869,6 +1869,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: #060913 !important;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
+    .leaflet-tile-pane {
+      filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
+    }
     .leaflet-bar {
       border: 1px solid rgba(255, 255, 255, 0.12) !important;
       box-shadow: 0 4px 14px rgba(0,0,0,0.6) !important;
@@ -3205,9 +3208,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       L.control.zoom({ position: 'topright' }).addTo(leafletMap);
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        subdomains: 'abcd',
-        maxZoom: 19
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>'
       }).addTo(leafletMap);
 
       mapMarkersLayer = L.layerGroup().addTo(leafletMap);
