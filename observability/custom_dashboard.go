@@ -2963,7 +2963,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       var ruleHTML = '<span style="color:var(--overlay);">—</span>';
       if (ev.rule) {
-        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule('' + ev.rule + '')">🛡️ ' + ev.rule + '</span>';
+        ruleHTML = '<span class="rule-tag" title="Filter by rule: ' + ev.rule + '" onclick="event.stopPropagation(); filterByRule(\'' + ev.rule + '\')">🛡️ ' + ev.rule + '</span>';
       }
 
       var methodClass = 'method-get';
@@ -2980,7 +2980,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         '<td><span class="bracket-badge ' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
         '<td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
-        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP('' + ev.client_ip + '')">' +
+        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' +
           '<span style="margin-right:5px;">' + flag + '</span>' + ev.client_ip +
         '</span></td>' +
         '<td>[' + ev.status + ']</td>' +
@@ -3002,7 +3002,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--line); padding-bottom:10px;">' +
       '<div>SOURCE IP: <b style="color:var(--teal);">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') + '</div>' +
-      '<button class="tui-btn" onclick="inspectIP('' + found.client_ip + '')">🌐 IP INTEL & ABUSE HUB</button>' +
+      '<button class="tui-btn" onclick="inspectIP(\'' + found.client_ip + '\')">🌐 IP INTEL & ABUSE HUB</button>' +
     '</div>' +
     '<pre style="margin:0; overflow-x:auto; background:var(--crust); padding:12px; border-radius:3px; border:1px solid var(--line);">' + JSON.stringify(found, null, 2) + '</pre>';
     modal.style.display = 'flex';
@@ -3064,7 +3064,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var rHTML = '';
       stats.top_rules.forEach(function(r) {
         var pct = ((r.count / maxRuleCount) * 100).toFixed(1);
-        rHTML += '<div class="rule-item" onclick="filterByRule('' + r.name + '')">' +
+        rHTML += '<div class="rule-item" onclick="filterByRule(\'' + r.name + '\')">' +
           '<div class="rule-meta">' +
             '<span class="rule-name">🛡️ ' + r.name + '</span>' +
             '<span class="rule-count">' + Number(r.count).toLocaleString() + ' hits</span>' +
@@ -3098,11 +3098,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var flag = getFlagEmoji(item.country_code);
         var countryName = item.country || 'Unknown';
         ipHTML += '<tr>' +
-          '<td><span class="ip-clickable" onclick="inspectIP('' + item.name + '')">' + item.name + '</span></td>' +
-          '<td><span style="cursor:pointer;" onclick="filterByCountry('' + countryName + '')">' + flag + ' ' + countryName + '</span></td>' +
+          '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + '</span></td>' +
+          '<td><span style="cursor:pointer;" onclick="filterByCountry(\'' + countryName + '\')">' + flag + ' ' + countryName + '</span></td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td><span class="tui-tag tag-pink">' + item.blocked + ' blk</span> <span class="tui-tag tag-yellow">' + item.tarpit + ' tar</span> ' +
-          '<button class="tui-btn" style="padding:1px 6px; font-size:10px; margin-left:6px;" onclick="inspectIP('' + item.name + '')">🚨 Report</button></td>' +
+          '<button class="tui-btn" style="padding:1px 6px; font-size:10px; margin-left:6px;" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></td>' +
         '</tr>';
       });
       if (topIpsTbody.innerHTML !== ipHTML) {
@@ -3115,7 +3115,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var pHTML = '';
       stats.top_paths.forEach(function(item) {
         var ruleBadge = item.rule ? '<span class="tui-tag tag-pink">' + item.rule + '</span>' : '<span style="color:var(--overlay);">—</span>';
-        pHTML += '<tr onclick="filterByPath('' + item.name + '')" style="cursor:pointer;">' +
+        pHTML += '<tr onclick="filterByPath(\'' + item.name + '\')" style="cursor:pointer;">' +
           '<td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">' + item.name + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td>' + ruleBadge + '</td>' +
@@ -3468,18 +3468,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var clean = Math.max(0, total - blocked - tarpit);
         var rate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
 
-        var tip = '┌─ [ ' + flag + ' ' + found.name.toUpperCase() + ' ] ────────────────┐
-' +
-          '│ Hits:    ' + Number(total).toLocaleString().padEnd(12) + ' │
-' +
-          '│ Threats: ' + (blocked + ' (' + rate + ')').padEnd(12) + ' │
-' +
-          '│ Tarpit:  ' + String(tarpit).padEnd(12) + ' │
-' +
-          '│ Clean:   ' + String(clean).padEnd(12) + ' │
-' +
-          '│ Click to filter telemetry       │
-' +
+        var tip = '┌─ [ ' + flag + ' ' + found.name.toUpperCase() + ' ] ────────────────┐\n' +
+          '│ Hits:    ' + Number(total).toLocaleString().padEnd(12) + ' │\n' +
+          '│ Threats: ' + (blocked + ' (' + rate + ')').padEnd(12) + ' │\n' +
+          '│ Tarpit:  ' + String(tarpit).padEnd(12) + ' │\n' +
+          '│ Clean:   ' + String(clean).padEnd(12) + ' │\n' +
+          '│ Click to filter telemetry       │\n' +
           '└─────────────────────────────────┘';
 
         asciiTip.textContent = tip;
@@ -3687,7 +3681,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
         var barColor = blocked > 0 ? 'var(--pink)' : (tarpit > 0 ? 'var(--yellow)' : 'var(--green)');
 
-        listHTML += '<div class="map-country-item' + (isFilterActive ? ' active' : '') + '" onclick="filterByCountry('' + c.name + '')">' +
+        listHTML += '<div class="map-country-item' + (isFilterActive ? ' active' : '') + '" onclick="filterByCountry(\'' + c.name + '\')">' +
           '<div style="display:flex; justify-content:space-between; align-items:center;">' +
             '<span style="font-weight:600; color:var(--text);">' + flag + ' ' + c.name + '</span>' +
             '<span style="font-weight:700; color:' + (blocked > 0 ? 'var(--pink)' : 'var(--teal)') + ';">' + Number(total).toLocaleString() + '</span>' +
@@ -4100,7 +4094,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       '<div>' +
         '<div class="ip-title-address">' +
           '<span>' + ip + '</span>' +
-          '<button class="tui-btn" style="padding:2px 6px; font-size:10.5px;" onclick="copyText('' + ip + '', this)">📋 Copy</button>' +
+          '<button class="tui-btn" style="padding:2px 6px; font-size:10.5px;" onclick="copyText(\'' + ip + '\', this)">📋 Copy</button>' +
         '</div>' +
         '<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
           '<span class="ip-geo-badge">' + flag + ' ' + country + (city ? ' — ' + city : '') + '</span>' +
@@ -4108,7 +4102,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         '</div>' +
       '</div>' +
       '<div style="display:flex; gap:8px;">' +
-        '<button class="tui-btn" onclick="filterAndCloseIP('' + ip + '')">🔍 Filter Logs</button>' +
+        '<button class="tui-btn" onclick="filterAndCloseIP(\'' + ip + '\')">🔍 Filter Logs</button>' +
       '</div>' +
     '</div>' +
 
