@@ -83,7 +83,8 @@ Commands:
   push        Stream encrypted logs from a remote node to the central dashboard
                 e.g. rwarden push
                 e.g. rwarden push --docker
-                e.g. rwarden push --file /var/log/nginx/access.log
+                e.g. rwarden push -f /var/log/nginx/access.log -f /var/log/caddy/access.log
+                e.g. rwarden push --docker -f /var/log/nginx/*.log -c custom-gateway
   cleanup     Stop and remove any running RouteWarden sandbox containers
   completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
                 e.g. source <(rwarden completion bash)

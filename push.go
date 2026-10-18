@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,16 +36,23 @@ func handlePush(args []string) {
 	fs.StringVar(keyFlag, "k", "", "Alias for --key")
 	configPath := fs.String("config", "", "Custom path to agent configuration (default: ~/.routewarden/agent.json)")
 	dockerMode := fs.Bool("docker", false, "Auto-discover and tail Docker containers with label 'routewarden=true'")
-	containerName := fs.String("container", "", "Tail a specific Docker container by name or ID")
-	fs.StringVar(containerName, "c", "", "Alias for --container")
-	filePath := fs.String("file", "", "Log file to monitor and push")
-	fs.StringVar(filePath, "f", "", "Alias for --file")
+	fs.BoolVar(dockerMode, "d", false, "Alias for --docker")
+	var containerFlags stringSlice
+	fs.Var(&containerFlags, "container", "Tail specific Docker container(s) by name or ID (repeatable or comma-separated)")
+	fs.Var(&containerFlags, "c", "Alias for --container")
+	var fileFlags stringSlice
+	fs.Var(&fileFlags, "file", "Log file(s) to monitor and push (repeatable, comma-separated, or glob pattern)")
+	fs.Var(&fileFlags, "f", "Alias for --file")
 	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
 	fs.StringVar(customLabel, "l", "", "Alias for --label")
-	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s)")
+	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
 	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
 	_ = parseFlagsLenient(fs, args)
+
+	filesToMonitor := resolveFileList(fileFlags, fs.Args())
+	containersToTail := resolveContainerList(containerFlags)
+	runDockerDiscovery := *dockerMode || (len(filesToMonitor) == 0 && len(containersToTail) == 0)
 
 	// Load configuration
 	agentCfg, err := loadAgentConfig(*configPath)
@@ -118,16 +126,25 @@ func handlePush(args []string) {
 	const maxRingBuffer = 2000
 	eventChan := make(chan string, maxRingBuffer)
 
-	// Start collector
-	if *filePath != "" {
-		fmt.Printf("  Monitoring File: %s\n", *filePath)
-		go tailFileToChan(ctx, *filePath, eventChan)
-	} else if *containerName != "" {
-		fmt.Printf("  Container:       %s\n", *containerName)
-		go tailContainerToChan(ctx, *containerName, *tailLines, eventChan)
-	} else {
-		_ = dockerMode
-		fmt.Println("  Auto-Discovery:  Watching Docker containers with label 'routewarden=true'")
+	// Start collector(s)
+	if len(filesToMonitor) > 0 {
+		for _, f := range filesToMonitor {
+			fmt.Printf("  Monitoring File: %s\n", f)
+			go tailFileToChan(ctx, f, *tailLines, eventChan)
+		}
+	}
+	if len(containersToTail) > 0 {
+		for _, c := range containersToTail {
+			fmt.Printf("  Container:       %s\n", c)
+			go tailContainerToChan(ctx, c, *tailLines, eventChan)
+		}
+	}
+	if runDockerDiscovery {
+		labelDesc := "'routewarden=true'"
+		if *customLabel != "" {
+			labelDesc = fmt.Sprintf("'%s'", *customLabel)
+		}
+		fmt.Printf("  Auto-Discovery:  Watching Docker containers with label %s\n", labelDesc)
 		go watchDockerContainersToChan(ctx, *customLabel, *tailLines, eventChan)
 	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
@@ -195,8 +212,11 @@ func handlePush(args []string) {
 	}
 }
 
-func tailFileToChan(ctx context.Context, path string, out chan<- string) {
-	cmd := exec.CommandContext(ctx, "tail", "-F", "-n", "50", path)
+func tailFileToChan(ctx context.Context, path, tailLines string, out chan<- string) {
+	if tailLines == "" {
+		tailLines = "50"
+	}
+	cmd := exec.CommandContext(ctx, "tail", "-F", "-n", tailLines, path)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return
@@ -383,5 +403,66 @@ func sendBatchWithRetry(ctx context.Context, client *http.Client, eventsURL, age
 		backoff *= 2
 	}
 	return lastErr
+}
+
+func resolveFileList(flags []string, positionalArgs []string) []string {
+	var results []string
+	seen := make(map[string]bool)
+
+	addPath := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		// Check if it's a glob pattern
+		if strings.ContainsAny(p, "*?[]") {
+			matches, err := filepath.Glob(p)
+			if err == nil && len(matches) > 0 {
+				for _, m := range matches {
+					if !seen[m] {
+						seen[m] = true
+						results = append(results, m)
+					}
+				}
+				return
+			}
+		}
+		if !seen[p] {
+			seen[p] = true
+			results = append(results, p)
+		}
+	}
+
+	for _, item := range flags {
+		parts := strings.Split(item, ",")
+		for _, part := range parts {
+			addPath(part)
+		}
+	}
+
+	for _, arg := range positionalArgs {
+		parts := strings.Split(arg, ",")
+		for _, part := range parts {
+			addPath(part)
+		}
+	}
+
+	return results
+}
+
+func resolveContainerList(flags []string) []string {
+	var results []string
+	seen := make(map[string]bool)
+	for _, item := range flags {
+		parts := strings.Split(item, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" && !seen[part] {
+				seen[part] = true
+				results = append(results, part)
+			}
+		}
+	}
+	return results
 }
 

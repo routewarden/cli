@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/routewarden/cli/crypto"
 	"github.com/routewarden/cli/observability"
@@ -532,4 +533,103 @@ func TestIntegration_ZeroSocket_FullHandshakeAndPushLifecycle(t *testing.T) {
 		t.Errorf("agent prod-gateway-fra not found in /api/sources")
 	}
 }
+
+func TestIntegration_MultiSource_FileAndDockerConcurrentStreaming(t *testing.T) {
+	clusterDir, serverPubStr, logFile, handler, cleanup := setupIntegrationCluster(t)
+	defer cleanup()
+
+	mockClient := &http.Client{
+		Transport: &mockTransport{handler: handler},
+	}
+
+	// 1. Create agent key and register
+	rawToken, keyMeta, err := observability.CreateAgentKey("multi-source-node", clusterDir)
+	if err != nil {
+		t.Fatalf("failed to create agent key: %v", err)
+	}
+	recipientPub, _ := crypto.DecodePublicKey(serverPubStr)
+
+	// 2. Create 2 distinct log files on disk (simulating Nginx and Traefik)
+	tmpDir := t.TempDir()
+	nginxLogPath := filepath.Join(tmpDir, "nginx_access.log")
+	traefikLogPath := filepath.Join(tmpDir, "traefik_access.log")
+
+	nginxLines := []string{
+		`192.168.1.10 - - [18/Oct/2026:12:00:00 +0000] "GET /api/v1/users HTTP/1.1" 200 1024 "-" "curl/8.0"`,
+		`192.168.1.11 - - [18/Oct/2026:12:00:01 +0000] "POST /api/v1/login HTTP/1.1" 200 512 "-" "Mozilla/5.0"`,
+	}
+	traefikLines := []string{
+		`{"ClientHost":"10.0.0.5","RequestMethod":"GET","RequestPath":"/healthz","DownstreamStatus":200,"Duration":1500000}`,
+		`{"ClientHost":"10.0.0.6","RequestMethod":"GET","RequestPath":"/metrics","DownstreamStatus":200,"Duration":2500000}`,
+	}
+	dockerLines := []string{
+		`172.17.0.2 - - [18/Oct/2026:12:00:02 +0000] "GET /status HTTP/1.1" 200 64 "-" "DockerApp"`,
+	}
+
+	_ = os.WriteFile(nginxLogPath, []byte(strings.Join(nginxLines, "\n")+"\n"), 0600)
+	_ = os.WriteFile(traefikLogPath, []byte(strings.Join(traefikLines, "\n")+"\n"), 0600)
+
+	// 3. Resolve files using resolveFileList and verify multi-file glob resolution
+	filesToMonitor := resolveFileList([]string{filepath.Join(tmpDir, "*_access.log")}, nil)
+	if len(filesToMonitor) != 2 {
+		t.Fatalf("expected 2 files resolved from glob, got %d: %v", len(filesToMonitor), filesToMonitor)
+	}
+
+	// 4. Setup shared ring buffer channel
+	eventChan := make(chan string, 100)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Concurrently tail both files
+	for _, f := range filesToMonitor {
+		go tailFileToChan(ctx, f, "10", eventChan)
+	}
+
+	// Concurrently inject Docker events into the same ring buffer
+	go func() {
+		for _, dl := range dockerLines {
+			select {
+			case <-ctx.Done():
+				return
+			case eventChan <- dl:
+			}
+		}
+	}()
+
+	// 5. Read all 5 events from shared eventChan with timeout
+	var collected []string
+	expectedTotal := len(nginxLines) + len(traefikLines) + len(dockerLines)
+	deadline := time.After(1500 * time.Millisecond)
+
+collectLoop:
+	for len(collected) < expectedTotal {
+		select {
+		case line := <-eventChan:
+			collected = append(collected, line)
+		case <-deadline:
+			break collectLoop
+		}
+	}
+
+	if len(collected) < expectedTotal {
+		t.Fatalf("expected %d total collected events, got %d: %v", expectedTotal, len(collected), collected)
+	}
+
+	// 6. Encrypt batch and push to server
+	err = sendBatchWithRetry(context.Background(), mockClient, "http://routewarden.internal:7890/api/v1/events", rawToken, keyMeta.ID, "multi-node-host", recipientPub, collected)
+	if err != nil {
+		t.Fatalf("failed to push multi-source batch: %v", err)
+	}
+
+	// 7. Verify all entries are present in server central log
+	logBytes, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		t.Fatalf("read central log: %v", err)
+	}
+	serverLogLines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	if len(serverLogLines) != expectedTotal {
+		t.Fatalf("expected %d entries in central log, got %d:\n%s", expectedTotal, len(serverLogLines), string(logBytes))
+	}
+}
+
 
