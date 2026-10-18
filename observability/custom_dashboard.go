@@ -2132,64 +2132,191 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       flex-direction: column;
       gap: 10px;
     }
-    .prompt-row {
+    /* ── Cyber SOC Filter Console Toolbar ─────────────── */
+    .console-toolbar {
+      padding: 10px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
       display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .console-hud-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .prompt-row {
+      display: inline-flex;
       align-items: center;
       gap: 8px;
       font-size: 11.5px;
-      color: var(--green);
-      font-weight: 600;
+      background: var(--base);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 5px 10px;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+      max-width: 100%;
+      overflow: hidden;
     }
-    .filters-row {
+    .prompt-user {
+      color: var(--green);
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      user-select: none;
+      flex-shrink: 0;
+    }
+    .prompt-cmd {
+      color: var(--teal);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .prompt-cursor {
+      color: var(--green);
+      font-size: 10px;
+      animation: blinkCursor 1s step-end infinite;
+      flex-shrink: 0;
+    }
+    @keyframes blinkCursor {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    /* Verdict Tabs (Segmented Control) */
+    .filter-tabs {
+      display: inline-flex;
+      align-items: center;
+      background: var(--base);
+      border: 1px solid var(--line-hi);
+      border-radius: 4px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .tab-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      padding: 4px 9px;
+      color: var(--subtext);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.14s ease;
+      user-select: none;
+    }
+    .tab-btn:hover {
+      background: var(--surface-hi);
+      color: var(--text-hi);
+    }
+    .tab-count {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 10px;
+      background: var(--surface-hi);
+      color: var(--overlay);
+      line-height: 1.2;
+    }
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--text-hi);
+      border-color: var(--line-hi);
+      font-weight: 700;
+    }
+    .tab-btn[data-filter-verdict="ALL"].active {
+      color: var(--teal);
+      border-color: var(--teal-border);
+      background: var(--teal-bg);
+    }
+    .tab-btn[data-filter-verdict="ALL"].active .tab-count {
+      background: var(--teal);
+      color: var(--crust);
+    }
+    .tab-btn[data-filter-verdict="BLOCK"].active {
+      color: var(--pink);
+      border-color: var(--pink-border);
+      background: var(--pink-bg);
+    }
+    .tab-btn[data-filter-verdict="BLOCK"].active .tab-count {
+      background: var(--pink);
+      color: #ffffff;
+    }
+    .tab-btn[data-filter-verdict="TARPIT"].active {
+      color: var(--yellow);
+      border-color: var(--yellow-border);
+      background: var(--yellow-bg);
+    }
+    .tab-btn[data-filter-verdict="TARPIT"].active .tab-count {
+      background: var(--yellow);
+      color: #000000;
+    }
+    .tab-btn[data-filter-verdict="ALLOW"].active {
+      color: var(--green);
+      border-color: var(--green-border);
+      background: var(--green-bg);
+    }
+    .tab-btn[data-filter-verdict="ALLOW"].active .tab-count {
+      background: var(--green);
+      color: var(--crust);
+    }
+
+    /* Filters Matrix: Controls Grid */
+    .filters-matrix {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
     }
-    .filter-tabs {
+    .filter-item {
+      position: relative;
       display: inline-flex;
-      border: 1px solid var(--line-hi);
-      background: var(--panel);
-      border-radius: 3px;
-      overflow: hidden;
+      align-items: center;
     }
-    .tab-btn {
+    .filter-select {
       font-family: var(--mono);
       font-size: 11px;
-      background: transparent;
-      border: none;
-      padding: 4px 10px;
-      color: var(--subtext);
-      cursor: pointer;
-      border-right: 1px solid var(--line-hi);
-      transition: all 0.12s ease;
-    }
-    .tab-btn:last-child {
-      border-right: none;
-    }
-    .tab-btn:hover {
-      background: var(--surface);
-      color: var(--text-hi);
-    }
-    .tab-btn.active {
-      background: var(--surface);
-      color: var(--teal);
-      font-weight: 600;
-    }
-
-    .filter-select, .search-box {
-      font-family: var(--mono);
-      font-size: 11px;
-      background: var(--panel);
+      font-weight: 500;
+      height: 30px;
+      background-color: var(--base);
       border: 1px solid var(--line-hi);
       color: var(--text);
-      padding: 4px 8px;
-      border-radius: 3px;
+      padding: 0 28px 0 10px;
+      border-radius: 4px;
       outline: none;
-      transition: border-color 0.12s ease;
+      transition: all 0.15s ease;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%238892b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 9px center;
     }
-    .filter-select:focus, .search-box:focus {
+    [data-theme="light"] .filter-select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%23475569' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    }
+    .filter-select:hover {
+      border-color: var(--overlay);
+      background-color: var(--surface);
+    }
+    .filter-select:focus {
       border-color: var(--teal);
+      box-shadow: 0 0 0 2px var(--teal-bg);
+      color: var(--text-hi);
+    }
+    .filter-select.filter-active {
+      border-color: var(--teal);
+      color: var(--teal);
+      font-weight: 600;
+      background-color: var(--teal-bg);
     }
     input[type="datetime-local"].filter-select {
       color-scheme: dark;
@@ -2197,46 +2324,136 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     [data-theme="light"] input[type="datetime-local"].filter-select {
       color-scheme: light;
     }
-    .search-box {
-      min-width: 200px;
+
+    /* Enhanced Search Box */
+    .search-wrap {
       flex: 1;
+      min-width: 220px;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .search-icon {
+      position: absolute;
+      left: 9px;
+      font-size: 11px;
+      color: var(--overlay);
+      pointer-events: none;
+      line-height: 1;
+    }
+    .search-box {
+      width: 100%;
+      height: 30px;
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--base);
+      border: 1px solid var(--line-hi);
+      color: var(--text);
+      padding: 0 46px 0 28px;
+      border-radius: 4px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    .search-box:hover {
+      border-color: var(--overlay);
+    }
+    .search-box:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 2px var(--teal-bg);
+      color: var(--text-hi);
+    }
+    .search-kbd-hint {
+      position: absolute;
+      right: 8px;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      color: var(--overlay);
+      background: var(--surface-hi);
+      border: 1px solid var(--line-hi);
+      padding: 1px 5px;
+      border-radius: 3px;
+      pointer-events: none;
+      line-height: 1.2;
+    }
+    .search-clear-btn {
+      position: absolute;
+      right: 26px;
+      background: none;
+      border: none;
+      color: var(--overlay);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 50%;
+    }
+    .search-clear-btn:hover {
+      color: var(--pink);
     }
 
+    /* Active Filter Chips Bar */
     .active-chips-bar {
       display: flex;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
       font-size: 11px;
+      padding-top: 4px;
+      border-top: 1px dashed var(--line);
+    }
+    .active-chips-label {
+      color: var(--overlay);
+      font-weight: 700;
+      font-size: 10px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
     .filter-chip {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      background: var(--panel);
+      gap: 6px;
+      background: var(--base);
       border: 1px solid var(--line-hi);
-      padding: 2px 7px;
+      padding: 3px 8px;
       border-radius: 3px;
-      color: var(--text);
+      color: var(--text-hi);
+      font-weight: 600;
+      font-size: 10.5px;
+      box-shadow: var(--card-shadow);
+      transition: all 0.12s ease;
+    }
+    .filter-chip:hover {
+      border-color: var(--teal);
     }
     .chip-close {
       cursor: pointer;
       color: var(--overlay);
+      font-size: 13px;
+      line-height: 1;
+      transition: color 0.12s ease;
     }
     .chip-close:hover {
       color: var(--pink);
     }
     .btn-clear-all {
       font-family: var(--mono);
-      background: transparent;
-      border: none;
+      background: var(--pink-bg);
+      border: 1px solid var(--pink-border);
       color: var(--pink);
-      font-size: 11px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
       cursor: pointer;
-      padding: 2px 4px;
+      padding: 3px 8px;
+      border-radius: 3px;
+      transition: all 0.12s ease;
     }
     .btn-clear-all:hover {
-      text-decoration: underline;
+      background: var(--pink);
+      color: #ffffff;
     }
 
     .table-container {
@@ -2697,73 +2914,103 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   <div class="term">
     <div class="console-toolbar">
-      <div class="prompt-row">
-        <span>rwarden@soc:~$</span>
-        <span style="color:var(--text);" id="prompt-stream-cmd">filter --stream=live</span>
-      </div>
-
-      <div class="filters-row">
-        <div class="filter-tabs">
-          <button class="tab-btn active" data-filter-verdict="ALL">[ALL: <span id="count-tab-all">0</span>]</button>
-          <button class="tab-btn" data-filter-verdict="BLOCK">[🛑 BLOCKED: <span id="count-tab-block">0</span>]</button>
-          <button class="tab-btn" data-filter-verdict="TARPIT">[⏳ TARPIT: <span id="count-tab-tarpit">0</span>]</button>
-          <button class="tab-btn" data-filter-verdict="ALLOW">[✅ CLEAN: <span id="count-tab-clean">0</span>]</button>
+      <div class="console-hud-bar">
+        <div class="prompt-row">
+          <span class="prompt-user">rwarden@soc:~$</span>
+          <span class="prompt-cmd" id="prompt-stream-cmd">filter --stream=live</span>
+          <span class="prompt-cursor">█</span>
         </div>
 
-        <select class="filter-select" id="select-time-range" title="Filter log stream by time range">
-          <option value="ALL">⏱️ All Time (Live)</option>
-          <option value="1m">⏱️ Last 1 min</option>
-          <option value="5m">⏱️ Last 5 mins</option>
-          <option value="15m">⏱️ Last 15 mins</option>
-          <option value="30m">⏱️ Last 30 mins</option>
-          <option value="1h">⏱️ Last 1 hour</option>
-          <option value="6h">⏱️ Last 6 hours</option>
-          <option value="24h">⏱️ Last 24 hours</option>
-          <option value="custom">⏱️ Custom Range...</option>
-        </select>
-
-        <select class="filter-select" id="select-country">
-          <option value="ALL">All Countries</option>
-        </select>
-
-        <select class="filter-select" id="select-method">
-          <option value="ALL">All Methods</option>
-          <option value="GET">GET</option>
-          <option value="POST">POST</option>
-          <option value="PUT">PUT</option>
-          <option value="DELETE">DELETE</option>
-        </select>
-
-        <select class="filter-select" id="select-status">
-          <option value="ALL">All Statuses</option>
-          <option value="2xx">2xx Success</option>
-          <option value="403">403 Forbidden</option>
-          <option value="429">429 Tarpit</option>
-          <option value="4xx">4xx Client Errors</option>
-          <option value="5xx">5xx Server Errors</option>
-        </select>
-
-        <select class="filter-select" id="select-rule">
-          <option value="ALL">All Threat Rules</option>
-        </select>
-
-        <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
+        <div class="filter-tabs">
+          <button class="tab-btn active" data-filter-verdict="ALL">
+            <span>ALL</span>
+            <span class="tab-count" id="count-tab-all">0</span>
+          </button>
+          <button class="tab-btn" data-filter-verdict="BLOCK">
+            <span>🛑 BLOCK</span>
+            <span class="tab-count" id="count-tab-block">0</span>
+          </button>
+          <button class="tab-btn" data-filter-verdict="TARPIT">
+            <span>⏳ TARPIT</span>
+            <span class="tab-count" id="count-tab-tarpit">0</span>
+          </button>
+          <button class="tab-btn" data-filter-verdict="ALLOW">
+            <span>✅ CLEAN</span>
+            <span class="tab-count" id="count-tab-clean">0</span>
+          </button>
+        </div>
       </div>
 
-      <div id="custom-time-row" style="display:none; align-items:center; gap:8px; margin-top:8px; padding:6px 12px; background:var(--surface); border:1px solid var(--line); border-radius:3px; flex-wrap:wrap;">
-        <span style="font-size:11px; font-weight:700; color:var(--text-hi); display:flex; align-items:center; gap:4px;">
+      <div class="filters-matrix">
+        <div class="filter-item">
+          <select class="filter-select" id="select-time-range" title="Filter log stream by time range">
+            <option value="ALL">⏱️ All Time (Live)</option>
+            <option value="1m">⏱️ Last 1 min</option>
+            <option value="5m">⏱️ Last 5 mins</option>
+            <option value="15m">⏱️ Last 15 mins</option>
+            <option value="30m">⏱️ Last 30 mins</option>
+            <option value="1h">⏱️ Last 1 hour</option>
+            <option value="6h">⏱️ Last 6 hours</option>
+            <option value="24h">⏱️ Last 24 hours</option>
+            <option value="custom">⏱️ Custom Range...</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <select class="filter-select" id="select-country" title="Filter by country origin">
+            <option value="ALL">🌍 All Countries</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <select class="filter-select" id="select-method" title="Filter by HTTP method">
+            <option value="ALL">📡 All Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <select class="filter-select" id="select-status" title="Filter by HTTP status code">
+            <option value="ALL">⚡ All Statuses</option>
+            <option value="2xx">2xx Success</option>
+            <option value="403">403 Forbidden</option>
+            <option value="429">429 Tarpit</option>
+            <option value="4xx">4xx Client Errors</option>
+            <option value="5xx">5xx Server Errors</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <select class="filter-select" id="select-rule" title="Filter by threat rule">
+            <option value="ALL">🛡️ All Threat Rules</option>
+          </select>
+        </div>
+
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
+          <button class="search-clear-btn" id="search-clear-btn" title="Clear search" type="button" style="display:none;">&times;</button>
+          <span class="search-kbd-hint">/</span>
+        </div>
+      </div>
+
+      <div id="custom-time-row" style="display:none; align-items:center; gap:8px; margin-top:2px; padding:7px 12px; background:var(--base); border:1px solid var(--line-hi); border-radius:4px; flex-wrap:wrap; box-shadow:var(--card-shadow);">
+        <span style="font-size:11px; font-weight:700; color:var(--text-hi); display:flex; align-items:center; gap:5px;">
           <span>⏱️</span> CUSTOM TIME RANGE:
         </span>
-        <label for="custom-time-start" style="font-size:10.5px; color:var(--overlay);">FROM</label>
+        <label for="custom-time-start" style="font-size:10.5px; color:var(--overlay); font-weight:600;">FROM</label>
         <input type="datetime-local" class="filter-select" id="custom-time-start">
-        <label for="custom-time-end" style="font-size:10.5px; color:var(--overlay);">TO</label>
+        <label for="custom-time-end" style="font-size:10.5px; color:var(--overlay); font-weight:600;">TO</label>
         <input type="datetime-local" class="filter-select" id="custom-time-end">
-        <button class="tui-btn" id="btn-apply-custom-time" style="padding:2px 10px; cursor:pointer;">Apply</button>
-        <button class="tui-btn" id="btn-cancel-custom-time" style="padding:2px 8px; color:var(--overlay); cursor:pointer;">Cancel</button>
+        <button class="tui-btn" id="btn-apply-custom-time" style="padding:4px 12px; font-weight:700; background:var(--teal); color:var(--crust); border-color:var(--teal); cursor:pointer;">Apply</button>
+        <button class="tui-btn" id="btn-cancel-custom-time" style="padding:4px 10px; color:var(--overlay); cursor:pointer;">Cancel</button>
       </div>
 
       <div class="active-chips-bar" id="active-chips-container" style="display:none;">
-        <span style="color:var(--overlay);">ACTIVE FILTERS:</span>
+        <span class="active-chips-label">🎯 Active Filters:</span>
         <div id="chips-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
         <button class="btn-clear-all" id="btn-reset-filters">[RESET ALL FILTERS]</button>
       </div>
@@ -2983,9 +3230,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <div class="footer-keys">
     <span class="footer-key-item"><span class="key-cap">T</span> Theme</span>
     <span class="footer-key-item"><span class="key-cap">W</span> Time Range</span>
+    <span class="footer-key-item"><span class="key-cap">/</span> Search</span>
     <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
-    <span class="footer-key-item"><span class="key-cap">P</span> Filter Path</span>
-    <span class="footer-key-item"><span class="key-cap">I</span> Inspect IP</span>
     <span class="footer-key-item"><span class="key-cap">R</span> Reset Filters</span>
     <span class="footer-key-item"><span class="key-cap">ESC</span> Close Modal</span>
   </div>
@@ -3038,6 +3284,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var btnExportJSON = document.getElementById('btn-export-json');
   var btnResetFilters = document.getElementById('btn-reset-filters');
   var searchInput = document.getElementById('search-input');
+  var searchClearBtn = document.getElementById('search-clear-btn');
   var selectTimeRange = document.getElementById('select-time-range');
   var customTimeRow = document.getElementById('custom-time-row');
   var customTimeStart = document.getElementById('custom-time-start');
@@ -3316,9 +3563,23 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   searchInput.addEventListener('input', function(e) {
     filters.search = e.target.value.toLowerCase().trim();
+    if (searchClearBtn) {
+      searchClearBtn.style.display = e.target.value ? 'inline-block' : 'none';
+    }
     renderActiveChips();
     renderTable();
   });
+
+  if (searchClearBtn) {
+    searchClearBtn.addEventListener('click', function() {
+      searchInput.value = '';
+      filters.search = '';
+      searchClearBtn.style.display = 'none';
+      renderActiveChips();
+      renderTable();
+      searchInput.focus();
+    });
+  }
 
   btnToggleScroll.addEventListener('click', function() {
     autoScroll = !autoScroll;
@@ -3377,6 +3638,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     selectStatus.value = 'ALL';
     selectRule.value = 'ALL';
     searchInput.value = '';
+    if (searchClearBtn) searchClearBtn.style.display = 'none';
 
     renderActiveChips();
     renderTable();
@@ -3413,6 +3675,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       toggleTheme();
     } else if (e.key === 'w' || e.key === 'W') {
       if (selectTimeRange) selectTimeRange.focus();
+    } else if (e.key === '/') {
+      e.preventDefault();
+      searchInput.focus();
     } else if (e.key === 'r' || e.key === 'R') {
       resetAllFilters();
     } else if (e.key === 'f' || e.key === 'F') {
@@ -3457,9 +3722,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (filters.method !== 'ALL') chips.push({ label: 'Method: ' + filters.method, clear: function() { filters.method = 'ALL'; selectMethod.value = 'ALL'; }});
     if (filters.status !== 'ALL') chips.push({ label: 'Status: ' + filters.status, clear: function() { filters.status = 'ALL'; selectStatus.value = 'ALL'; }});
     if (filters.rule !== 'ALL') chips.push({ label: 'Rule: ' + filters.rule, clear: function() { filters.rule = 'ALL'; selectRule.value = 'ALL'; }});
-    if (filters.search) chips.push({ label: 'Search: "' + filters.search + '"', clear: function() { filters.search = ''; searchInput.value = ''; }});
+    if (filters.search) chips.push({ label: 'Search: "' + filters.search + '"', clear: function() {
+      filters.search = '';
+      searchInput.value = '';
+      if (searchClearBtn) searchClearBtn.style.display = 'none';
+    }});
     if (filters.ip) chips.push({ label: 'IP: ' + filters.ip, clear: function() { filters.ip = ''; }});
     if (filters.path) chips.push({ label: 'Path: ' + filters.path, clear: function() { filters.path = ''; }});
+
+    if (selectTimeRange) selectTimeRange.classList.toggle('filter-active', filters.timeRange !== 'ALL');
+    if (selectCountry) selectCountry.classList.toggle('filter-active', filters.country !== 'ALL');
+    if (selectMethod) selectMethod.classList.toggle('filter-active', filters.method !== 'ALL');
+    if (selectStatus) selectStatus.classList.toggle('filter-active', filters.status !== 'ALL');
+    if (selectRule) selectRule.classList.toggle('filter-active', filters.rule !== 'ALL');
 
     updatePromptCommand();
 
