@@ -876,6 +876,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 14px;
+      min-width: 0;
     }
     .card-header {
       display: flex;
@@ -883,6 +884,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       align-items: center;
       justify-content: space-between;
       gap: 10px;
+      min-height: 28px;
     }
     .card-title {
       font-size: 13px;
@@ -902,6 +904,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 14px;
       font-size: 11px;
       font-weight: 600;
+      flex-wrap: wrap;
     }
     .legend-item {
       display: inline-flex;
@@ -922,44 +925,53 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     .timeline-container {
       width: 100%;
-      height: 250px;
+      height: 260px;
       position: relative;
+      overflow: hidden;
+      border-radius: 10px;
+      background: rgba(5, 8, 16, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.04);
     }
     .timeline-svg {
       width: 100%;
       height: 100%;
-      overflow: visible;
+      display: block;
     }
 
-    /* Floating Tooltip */
+    /* Non-Overlapping HUD Chart Tooltip */
     .chart-tooltip {
       position: absolute;
       display: none;
       pointer-events: none;
       background: rgba(15, 23, 42, 0.95);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.4);
       border-radius: 8px;
-      padding: 10px 14px;
+      padding: 8px 14px;
       font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(56, 189, 248, 0.15);
-      z-index: 100;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), 0 0 15px rgba(56, 189, 248, 0.2);
+      z-index: 50;
       line-height: 1.5;
-      transform: translate(-50%, -115%);
+      transform: translateX(-50%);
+      top: 12px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
 
     /* Donut & Rules Stack */
     .donut-wrap {
       display: flex;
       align-items: center;
-      justify-content: space-around;
-      gap: 16px;
-      padding: 6px 0;
+      justify-content: center;
+      gap: 20px;
+      padding: 8px 0;
+      flex-wrap: wrap;
     }
     .donut-svg {
-      width: 130px;
-      height: 130px;
+      width: 120px;
+      height: 120px;
       transform: rotate(-90deg);
+      flex-shrink: 0;
     }
     .donut-legend {
       display: flex;
@@ -967,43 +979,65 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 8px;
       font-size: 11px;
       font-family: 'JetBrains Mono', monospace;
+      min-width: 120px;
     }
 
     /* Rules Progress Bars */
     .rules-list {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      justify-content: center;
+      gap: 8px;
+      max-height: 190px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .rules-list::-webkit-scrollbar {
+      width: 4px;
+    }
+    .rules-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
     }
     .rule-item {
       display: flex;
       flex-direction: column;
       gap: 4px;
       cursor: pointer;
-      padding: 4px 6px;
+      padding: 6px 8px;
       border-radius: 6px;
-      transition: background 0.15s ease;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      transition: background 0.15s ease, border-color 0.15s ease;
     }
     .rule-item:hover {
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(56, 189, 248, 0.08);
+      border-color: rgba(56, 189, 248, 0.25);
     }
     .rule-meta {
       display: flex;
       justify-content: space-between;
+      align-items: center;
+      gap: 8px;
       font-size: 11px;
       font-family: 'JetBrains Mono', monospace;
     }
     .rule-name {
       color: #e2e8f0;
       font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+      min-width: 0;
     }
     .rule-count {
       color: #94a3b8;
+      flex-shrink: 0;
+      font-size: 10px;
     }
     .rule-bar-wrap {
       width: 100%;
-      height: 6px;
+      height: 5px;
       background: rgba(255, 255, 255, 0.06);
       border-radius: 4px;
       overflow: hidden;
@@ -1027,8 +1061,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
     }
 
+    .table-responsive {
+      width: 100%;
+      overflow-x: auto;
+    }
+
     .intel-table {
       width: 100%;
+      min-width: 360px;
       border-collapse: collapse;
       font-size: 12px;
     }
@@ -1041,12 +1081,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       letter-spacing: 0.05em;
       color: var(--text-muted);
       border-bottom: 1px solid var(--card-border);
+      white-space: nowrap;
     }
     .intel-table td {
       padding: 8px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       color: #cbd5e1;
       font-family: 'JetBrains Mono', monospace;
+      white-space: nowrap;
     }
     .intel-table tr:hover td {
       background: rgba(255, 255, 255, 0.04);
@@ -1065,6 +1107,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 14px;
+      min-width: 0;
     }
 
     .console-toolbar {
@@ -1082,6 +1125,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     .filter-tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: 6px;
     }
     .tab-btn {
@@ -1093,6 +1137,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
+      white-space: nowrap;
       transition: all 0.2s ease;
     }
     .tab-btn:hover {
@@ -1106,7 +1151,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
 
     .filter-select {
-      background: rgba(15, 23, 42, 0.9);
+      background: rgba(15, 23, 42, 0.95);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 6px;
       color: #e2e8f0;
@@ -1115,6 +1160,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-family: 'JetBrains Mono', monospace;
       outline: none;
       cursor: pointer;
+      max-width: 200px;
       transition: border-color 0.2s;
     }
     .filter-select:focus {
@@ -1130,8 +1176,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 12px;
       font-family: 'JetBrains Mono', monospace;
       outline: none;
-      min-width: 220px;
-      flex: 1;
+      min-width: 180px;
+      flex: 1 1 200px;
       transition: border-color 0.2s ease;
     }
     .search-box:focus {
@@ -1145,10 +1191,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       align-items: center;
       gap: 8px;
       font-size: 11px;
+      padding: 8px 12px;
+      background: rgba(56, 189, 248, 0.05);
+      border: 1px dashed rgba(56, 189, 248, 0.22);
+      border-radius: 8px;
     }
     .filter-chip {
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.3);
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.35);
       color: #7dd3fc;
       padding: 3px 8px;
       border-radius: 5px;
@@ -1156,6 +1206,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       align-items: center;
       gap: 6px;
       font-family: 'JetBrains Mono', monospace;
+      white-space: nowrap;
     }
     .chip-close {
       cursor: pointer;
@@ -1173,10 +1224,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 11px;
       font-weight: 600;
       text-decoration: underline;
+      margin-left: auto;
     }
 
     .table-container {
       max-height: 480px;
+      overflow-x: auto;
       overflow-y: auto;
       border: 1px solid var(--card-border);
       border-radius: 10px;
@@ -1184,6 +1237,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     table.soc-table {
       width: 100%;
+      min-width: 900px;
       border-collapse: collapse;
       font-size: 12px;
       text-align: left;
@@ -1404,11 +1458,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
           <defs>
             <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#10b981" stop-opacity="0.4"/>
+              <stop offset="0%" stop-color="#10b981" stop-opacity="0.2"/>
               <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
             </linearGradient>
             <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.55"/>
+              <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.3"/>
               <stop offset="100%" stop-color="#f43f5e" stop-opacity="0.0"/>
             </linearGradient>
           </defs>
@@ -1418,8 +1472,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
           <path id="path-clean-line" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"></path>
           <path id="path-blocked-line" fill="none" stroke="#f43f5e" stroke-width="2.5" stroke-linecap="round"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-dasharray="4,3"></path>
+          <g id="points-group"></g>
           <line id="crosshair-line" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,3" style="display:none;"></line>
+          <circle id="crosshair-dot" r="4.5" fill="#38bdf8" stroke="#0f172a" stroke-width="2" style="display:none;"></circle>
           <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
         </svg>
       </div>
@@ -1457,18 +1513,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span class="card-title">🚨 Top Attacking Client IPs</span>
         <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
       </div>
-      <table class="intel-table">
-        <thead>
-          <tr>
-            <th>Client IP</th>
-            <th>Total Hits</th>
-            <th>Threat Breakdown</th>
-          </tr>
-        </thead>
-        <tbody id="top-ips-tbody">
-          <tr><td colspan="3" style="color:#64748b; text-align:center;">No threat IPs logged yet</td></tr>
-        </tbody>
-      </table>
+      <div class="table-responsive">
+        <table class="intel-table">
+          <thead>
+            <tr>
+              <th>Client IP</th>
+              <th>Total Hits</th>
+              <th>Threat Breakdown</th>
+            </tr>
+          </thead>
+          <tbody id="top-ips-tbody">
+            <tr><td colspan="3" style="color:#64748b; text-align:center;">No threat IPs logged yet</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="chart-card">
@@ -1476,18 +1534,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span class="card-title">🎯 Top Targeted Endpoints</span>
         <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
       </div>
-      <table class="intel-table">
-        <thead>
-          <tr>
-            <th>Target Path</th>
-            <th>Requests</th>
-            <th>Triggered Rule</th>
-          </tr>
-        </thead>
-        <tbody id="top-paths-tbody">
-          <tr><td colspan="3" style="color:#64748b; text-align:center;">No endpoints logged yet</td></tr>
-        </tbody>
-      </table>
+      <div class="table-responsive">
+        <table class="intel-table">
+          <thead>
+            <tr>
+              <th>Target Path</th>
+              <th>Requests</th>
+              <th>Triggered Rule</th>
+            </tr>
+          </thead>
+          <tbody id="top-paths-tbody">
+            <tr><td colspan="3" style="color:#64748b; text-align:center;">No endpoints logged yet</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -1961,16 +2021,18 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var tarpitLine = document.getElementById('path-tarpit-line');
     var gridGroup = document.getElementById('grid-group');
     var axesGroup = document.getElementById('axes-group');
+    var pointsGroup = document.getElementById('points-group');
     var overlay = document.getElementById('chart-overlay');
     var crosshair = document.getElementById('crosshair-line');
+    var crosshairDot = document.getElementById('crosshair-dot');
     var tooltip = document.getElementById('timeline-tooltip');
 
     var w = 800;
     var h = 240;
-    var padLeft = 45;
+    var padLeft = 55;
     var padRight = 20;
     var padTop = 20;
-    var padBottom = 30;
+    var padBottom = 32;
 
     var chartW = w - padLeft - padRight;
     var chartH = h - padTop - padBottom;
@@ -1991,19 +2053,37 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var y = padTop + chartH - (i / yTicks) * chartH;
       // Dotted horizontal gridline
       gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3,3" />';
-      // Y-axis tick text
-      axesHTML += '<text x="' + (padLeft - 8) + '" y="' + (y + 4) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
+      // Y-axis tick text with guaranteed padding from axis line
+      axesHTML += '<text x="' + (padLeft - 10) + '" y="' + (y + 4) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
     }
 
-    // 2. Draw X-Axis Ticks & Labels
+    // 2. Draw X-Axis Ticks & Labels (Deduplicated, Evenly Distributed, Zero Overlap)
     var step = chartW / Math.max(1, data.length - 1);
-    var xInterval = Math.max(1, Math.floor(data.length / 6));
-    data.forEach(function(d, i) {
-      if (i % xInterval === 0 || i === data.length - 1) {
-        var x = padLeft + i * step;
-        axesHTML += '<text x="' + x + '" y="' + (h - 8) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">' + (d.time || '') + '</text>';
-        gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.03)" />';
+    var tickIndices = [];
+    if (data.length === 1) {
+      tickIndices = [0];
+    } else if (data.length <= 5) {
+      for (var k = 0; k < data.length; k++) tickIndices.push(k);
+    } else {
+      var numTicks = 5;
+      for (var t = 0; t < numTicks; t++) {
+        var idx = Math.round((t / (numTicks - 1)) * (data.length - 1));
+        if (tickIndices.indexOf(idx) === -1) {
+          tickIndices.push(idx);
+        }
       }
+    }
+
+    tickIndices.forEach(function(idx) {
+      var d = data[idx];
+      if (!d) return;
+      var x = padLeft + idx * step;
+      var anchor = 'middle';
+      if (idx === 0) anchor = 'start';
+      else if (idx === data.length - 1) anchor = 'end';
+
+      axesHTML += '<text x="' + x + '" y="' + (h - 8) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="' + anchor + '">' + (d.time || '') + '</text>';
+      gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.03)" />';
     });
 
     gridGroup.innerHTML = gridHTML;
@@ -2015,22 +2095,34 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var ptsTarpit = [];
     var pointMap = [];
 
-    data.forEach(function(d, i) {
-      var x = padLeft + i * step;
-      var yClean = padTop + chartH - (d.clean / maxVal) * chartH;
-      var yBlocked = padTop + chartH - (d.blocked / maxVal) * chartH;
-      var yTarpit = padTop + chartH - (d.tarpit / maxVal) * chartH;
-      ptsClean.push({ x: x, y: yClean });
-      ptsBlocked.push({ x: x, y: yBlocked });
-      ptsTarpit.push({ x: x, y: yTarpit });
-      pointMap.push({ x: x, data: d });
-    });
+    if (data.length === 1) {
+      var single = data[0];
+      var yC = padTop + chartH - (single.clean / maxVal) * chartH;
+      var yB = padTop + chartH - (single.blocked / maxVal) * chartH;
+      var yT = padTop + chartH - (single.tarpit / maxVal) * chartH;
+      ptsClean.push({ x: padLeft, y: yC }, { x: w - padRight, y: yC });
+      ptsBlocked.push({ x: padLeft, y: yB }, { x: w - padRight, y: yB });
+      ptsTarpit.push({ x: padLeft, y: yT }, { x: w - padRight, y: yT });
+      pointMap.push({ x: (padLeft + w - padRight) / 2, yTotal: yC, data: single });
+    } else {
+      data.forEach(function(d, i) {
+        var x = padLeft + i * step;
+        var yClean = padTop + chartH - (d.clean / maxVal) * chartH;
+        var yBlocked = padTop + chartH - (d.blocked / maxVal) * chartH;
+        var yTarpit = padTop + chartH - (d.tarpit / maxVal) * chartH;
+        var yTot = padTop + chartH - (d.total / maxVal) * chartH;
+        ptsClean.push({ x: x, y: yClean });
+        ptsBlocked.push({ x: x, y: yBlocked });
+        ptsTarpit.push({ x: x, y: yTarpit });
+        pointMap.push({ x: x, yTotal: yTot, data: d });
+      });
+    }
 
     function makePath(pts) {
       if (pts.length === 0) return '';
-      var p = 'M ' + pts[0].x + ' ' + pts[0].y;
+      var p = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
       for (var i = 1; i < pts.length; i++) {
-        p += ' L ' + pts[i].x + ' ' + pts[i].y;
+        p += ' L ' + pts[i].x.toFixed(1) + ' ' + pts[i].y.toFixed(1);
       }
       return p;
     }
@@ -2038,7 +2130,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (visibleSeries.clean) {
       cleanLine.setAttribute('d', makePath(ptsClean));
       cleanLine.style.display = 'inline';
-      var areaClean = makePath(ptsClean) + ' L ' + ptsClean[ptsClean.length - 1].x + ' ' + (padTop + chartH) + ' L ' + ptsClean[0].x + ' ' + (padTop + chartH) + ' Z';
+      var areaClean = makePath(ptsClean) + ' L ' + ptsClean[ptsClean.length - 1].x.toFixed(1) + ' ' + (padTop + chartH) + ' L ' + ptsClean[0].x.toFixed(1) + ' ' + (padTop + chartH) + ' Z';
       cleanArea.setAttribute('d', areaClean);
       cleanArea.style.display = 'inline';
     } else {
@@ -2049,7 +2141,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (visibleSeries.blocked) {
       blockedLine.setAttribute('d', makePath(ptsBlocked));
       blockedLine.style.display = 'inline';
-      var areaBlocked = makePath(ptsBlocked) + ' L ' + ptsBlocked[ptsBlocked.length - 1].x + ' ' + (padTop + chartH) + ' L ' + ptsBlocked[0].x + ' ' + (padTop + chartH) + ' Z';
+      var areaBlocked = makePath(ptsBlocked) + ' L ' + ptsBlocked[ptsBlocked.length - 1].x.toFixed(1) + ' ' + (padTop + chartH) + ' L ' + ptsBlocked[0].x.toFixed(1) + ' ' + (padTop + chartH) + ' Z';
       blockedArea.setAttribute('d', areaBlocked);
       blockedArea.style.display = 'inline';
     } else {
@@ -2064,12 +2156,29 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       tarpitLine.style.display = 'none';
     }
 
+    // Data points indicator (circles)
+    if (pointsGroup) {
+      var ptsHTML = '';
+      if (data.length <= 30) {
+        data.forEach(function(d, i) {
+          if (i < ptsClean.length && visibleSeries.clean && d.clean > 0) {
+            ptsHTML += '<circle cx="' + ptsClean[i].x.toFixed(1) + '" cy="' + ptsClean[i].y.toFixed(1) + '" r="3" fill="#10b981" stroke="#070b14" stroke-width="1.5" />';
+          }
+          if (i < ptsBlocked.length && visibleSeries.blocked && d.blocked > 0) {
+            ptsHTML += '<circle cx="' + ptsBlocked[i].x.toFixed(1) + '" cy="' + ptsBlocked[i].y.toFixed(1) + '" r="3" fill="#f43f5e" stroke="#070b14" stroke-width="1.5" />';
+          }
+        });
+      }
+      pointsGroup.innerHTML = ptsHTML;
+    }
+
     // 4. Interactive Crosshair & Tooltip Hover
     overlay.onmousemove = function(e) {
       var rect = overlay.getBoundingClientRect();
       var mouseX = (e.clientX - rect.left) * (w / rect.width);
       if (mouseX < padLeft || mouseX > w - padRight) {
         crosshair.style.display = 'none';
+        if (crosshairDot) crosshairDot.style.display = 'none';
         tooltip.style.display = 'none';
         return;
       }
@@ -2093,22 +2202,37 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       crosshair.setAttribute('y2', padTop + chartH);
       crosshair.style.display = 'inline';
 
+      if (crosshairDot) {
+        crosshairDot.setAttribute('cx', closest.x);
+        crosshairDot.setAttribute('cy', closest.yTotal || padTop);
+        crosshairDot.style.display = 'inline';
+      }
+
       var d = closest.data;
       var rate = d.total > 0 ? ((d.blocked / d.total) * 100).toFixed(1) + '%' : '0.0%';
-      var toolHTML = '<div style="font-weight:700; color:#38bdf8; margin-bottom:4px;">⏱ ' + d.time + ' UTC</div>' +
-        '<div style="color:#ffffff;">Total Ingress: <b>' + d.total + '</b></div>' +
-        '<div style="color:#10b981;">Clean: <b>' + d.clean + '</b></div>' +
-        '<div style="color:#f43f5e;">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></div>' +
-        '<div style="color:#f59e0b;">Tarpit: <b>' + d.tarpit + '</b></div>';
+      var toolHTML = '<span style="color:#38bdf8; font-weight:700;">⏱ ' + d.time + ' UTC</span> &nbsp;|&nbsp; ' +
+        '<span style="color:#ffffff;">Total: <b>' + d.total + '</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:#10b981;">Clean: <b>' + d.clean + '</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:#f43f5e;">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></span> &nbsp;|&nbsp; ' +
+        '<span style="color:#f59e0b;">Tarpit: <b>' + d.tarpit + '</b></span>';
 
       tooltip.innerHTML = toolHTML;
-      tooltip.style.left = (closest.x * (rect.width / w)) + 'px';
-      tooltip.style.top = (padTop + 20) + 'px';
+
+      // Position HUD banner neatly centered at top of chart without overflowing card title
+      var box = document.getElementById('timeline-box');
+      var boxW = box ? box.clientWidth : 800;
+      var clientX = (closest.x / w) * boxW;
+      var halfTip = 160;
+      if (clientX < halfTip + 12) clientX = halfTip + 12;
+      if (clientX > boxW - halfTip - 12) clientX = boxW - halfTip - 12;
+      tooltip.style.left = clientX + 'px';
+      tooltip.style.top = '10px';
       tooltip.style.display = 'block';
     };
 
     overlay.onmouseleave = function() {
       crosshair.style.display = 'none';
+      if (crosshairDot) crosshairDot.style.display = 'none';
       tooltip.style.display = 'none';
     };
   }
