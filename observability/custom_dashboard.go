@@ -1177,7 +1177,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RouteWarden — SOC INTELLIGENCE & Gateway Threat Defense</title>
+  <meta name="description" content="RouteWarden SOC INTELLIGENCE & Threat Defense Console">
+  <title>[ 🛡️ ROUTEWARDEN ]</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -2398,9 +2399,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <!-- ── Sticky Top Terminal Bar ─────────────────────────────── -->
 <div class="bar">
   <div class="bar-left">
-    <span>[ 🛡️ ROUTEWARDEN SOC INTELLIGENCE ]</span>
-    <span style="color:var(--overlay);">//</span>
-    <span style="font-weight:500; color:var(--subtext);">v5.0-TUI</span>
+    <span>[ 🛡️ ROUTEWARDEN ]</span>
   </div>
   <div class="bar-mid">
     <div style="display:flex; align-items:center; gap:6px;">
