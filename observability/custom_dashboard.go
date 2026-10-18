@@ -1214,12 +1214,29 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       /* Electric Phosphor Accents */
       --green: #00ff9d;
+      --green-bg: rgba(0, 255, 157, 0.08);
+      --green-border: rgba(0, 255, 157, 0.3);
       --teal: #00e5ff;
+      --teal-bg: rgba(0, 229, 255, 0.1);
+      --teal-border: rgba(0, 229, 255, 0.3);
       --yellow: #ffb800;
+      --yellow-bg: rgba(255, 184, 0, 0.12);
+      --yellow-border: rgba(255, 184, 0, 0.4);
       --peach: #ff8c42;
       --pink: #ff3366;
+      --pink-bg: rgba(255, 51, 102, 0.12);
+      --pink-border: rgba(255, 51, 102, 0.4);
       --mauve: #b388ff;
+      --mauve-bg: rgba(179, 136, 255, 0.12);
       --blue: #38bdf8;
+      --blue-bg: rgba(56, 189, 248, 0.1);
+      --blue-border: rgba(56, 189, 248, 0.3);
+
+      --glow-text-green: 0 0 10px rgba(0, 255, 157, 0.45);
+      --glow-text-teal: 0 0 10px rgba(0, 229, 255, 0.45);
+      --glow-text-pink: 0 0 8px rgba(255, 51, 102, 0.45);
+      --glow-text-yellow: 0 0 8px rgba(255, 184, 0, 0.45);
+      --card-shadow: none;
 
       --bar-bg: rgba(12, 15, 23, 0.96);
       --map-tile-filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
@@ -1237,66 +1254,102 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     /* ── Light Theme (Automatic via System Preference & Manual Toggle) ── */
     @media (prefers-color-scheme: light) {
       :root:not([data-theme="dark"]) {
-        --crust: #edf2f7;
+        --crust: #f1f5f9;
         --base: #ffffff;
-        --panel: #f8fafc;
-        --surface: #e2e8f0;
-        --surface-hi: #cbd5e1;
-        --line: #cbd5e1;
-        --line-hi: #94a3b8;
+        --panel: #ffffff;
+        --surface: #f8fafc;
+        --surface-hi: #e2e8f0;
+        --line: #e2e8f0;
+        --line-hi: #cbd5e1;
         --overlay: #64748b;
         --subtext: #475569;
-        --text: #0f172a;
-        --text-hi: #020617;
+        --text: #1e293b;
+        --text-hi: #0f172a;
 
+        /* Crisp Executive Security Accents */
         --green: #059669;
+        --green-bg: rgba(5, 150, 105, 0.1);
+        --green-border: rgba(5, 150, 105, 0.28);
         --teal: #0284c7;
+        --teal-bg: rgba(2, 132, 199, 0.1);
+        --teal-border: rgba(2, 132, 199, 0.28);
         --yellow: #d97706;
+        --yellow-bg: rgba(217, 119, 6, 0.1);
+        --yellow-border: rgba(217, 119, 6, 0.28);
         --peach: #ea580c;
         --pink: #e11d48;
+        --pink-bg: rgba(225, 29, 72, 0.1);
+        --pink-border: rgba(225, 29, 72, 0.28);
         --mauve: #7c3aed;
+        --mauve-bg: rgba(124, 58, 237, 0.1);
         --blue: #2563eb;
+        --blue-bg: rgba(37, 99, 235, 0.1);
+        --blue-border: rgba(37, 99, 235, 0.28);
 
-        --bar-bg: rgba(255, 255, 255, 0.96);
-        --map-tile-filter: contrast(1.05) saturate(0.9);
+        --glow-text-green: none;
+        --glow-text-teal: none;
+        --glow-text-pink: none;
+        --glow-text-yellow: none;
+        --card-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+
+        --bar-bg: rgba(255, 255, 255, 0.94);
+        --map-tile-filter: contrast(1.02) saturate(0.9);
         --map-bg: #e2e8f0;
         --marker-tag-bg: rgba(255, 255, 255, 0.96);
         --marker-tag-border: #94a3b8;
         --marker-tag-text: #0f172a;
         --modal-card-bg: #ffffff;
-        --modal-overlay-bg: rgba(15, 23, 42, 0.65);
+        --modal-overlay-bg: rgba(15, 23, 42, 0.55);
       }
     }
 
     [data-theme="light"] {
-      --crust: #edf2f7;
+      --crust: #f1f5f9;
       --base: #ffffff;
-      --panel: #f8fafc;
-      --surface: #e2e8f0;
-      --surface-hi: #cbd5e1;
-      --line: #cbd5e1;
-      --line-hi: #94a3b8;
+      --panel: #ffffff;
+      --surface: #f8fafc;
+      --surface-hi: #e2e8f0;
+      --line: #e2e8f0;
+      --line-hi: #cbd5e1;
       --overlay: #64748b;
       --subtext: #475569;
-      --text: #0f172a;
-      --text-hi: #020617;
+      --text: #1e293b;
+      --text-hi: #0f172a;
 
+      /* Crisp Executive Security Accents */
       --green: #059669;
+      --green-bg: rgba(5, 150, 105, 0.1);
+      --green-border: rgba(5, 150, 105, 0.28);
       --teal: #0284c7;
+      --teal-bg: rgba(2, 132, 199, 0.1);
+      --teal-border: rgba(2, 132, 199, 0.28);
       --yellow: #d97706;
+      --yellow-bg: rgba(217, 119, 6, 0.1);
+      --yellow-border: rgba(217, 119, 6, 0.28);
       --peach: #ea580c;
       --pink: #e11d48;
+      --pink-bg: rgba(225, 29, 72, 0.1);
+      --pink-border: rgba(225, 29, 72, 0.28);
       --mauve: #7c3aed;
+      --mauve-bg: rgba(124, 58, 237, 0.1);
       --blue: #2563eb;
+      --blue-bg: rgba(37, 99, 235, 0.1);
+      --blue-border: rgba(37, 99, 235, 0.28);
 
-      --bar-bg: rgba(255, 255, 255, 0.96);
-      --map-tile-filter: contrast(1.05) saturate(0.9);
+      --glow-text-green: none;
+      --glow-text-teal: none;
+      --glow-text-pink: none;
+      --glow-text-yellow: none;
+      --card-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+
+      --bar-bg: rgba(255, 255, 255, 0.94);
+      --map-tile-filter: contrast(1.02) saturate(0.9);
       --map-bg: #e2e8f0;
       --marker-tag-bg: rgba(255, 255, 255, 0.96);
       --marker-tag-border: #94a3b8;
       --marker-tag-text: #0f172a;
       --modal-card-bg: #ffffff;
-      --modal-overlay-bg: rgba(15, 23, 42, 0.65);
+      --modal-overlay-bg: rgba(15, 23, 42, 0.55);
     }
 
     *, *::before, *::after {
@@ -1435,8 +1488,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       overflow-x: auto;
       scrollbar-width: none;
     }
-    .wordmark .hl { color: var(--green); text-shadow: 0 0 14px rgba(0, 255, 157, 0.45); }
-    .wordmark .sub { color: var(--teal); text-shadow: 0 0 14px rgba(0, 229, 255, 0.45); }
+    .wordmark .hl { color: var(--green); text-shadow: var(--glow-text-green); }
+    .wordmark .sub { color: var(--teal); text-shadow: var(--glow-text-teal); }
 
     .lede {
       color: var(--subtext);
@@ -1517,11 +1570,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 11.5px;
       letter-spacing: 1.5px;
       text-transform: uppercase;
-      color: var(--green);
+      color: var(--teal);
       margin: 0;
       font-weight: 700;
       white-space: nowrap;
-      text-shadow: 0 0 10px rgba(0, 255, 157, 0.35);
+      text-shadow: var(--glow-text-teal);
     }
     .head .rule {
       flex: 1;
@@ -1541,6 +1594,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       border-radius: 4px;
       overflow: hidden;
       margin-bottom: 20px;
+      box-shadow: var(--card-shadow);
     }
     .term .cap {
       display: flex;
@@ -1575,10 +1629,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       flex-direction: column;
       justify-content: space-between;
       gap: 8px;
-      transition: border-color 0.15s ease;
+      box-shadow: var(--card-shadow);
+      transition: all 0.15s ease;
     }
     .kpi-card:hover {
       border-color: var(--line-hi);
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
     }
     .kpi-top {
       display: flex;
@@ -1622,28 +1678,28 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       border: 1px solid transparent;
     }
     .tag-pink {
-      background: rgba(255, 51, 102, 0.12);
-      border-color: rgba(255, 51, 102, 0.4);
+      background: var(--pink-bg);
+      border-color: var(--pink-border);
       color: var(--pink);
-      text-shadow: 0 0 6px rgba(255, 51, 102, 0.3);
+      text-shadow: var(--glow-text-pink);
     }
     .tag-yellow {
-      background: rgba(255, 184, 0, 0.12);
-      border-color: rgba(255, 184, 0, 0.4);
+      background: var(--yellow-bg);
+      border-color: var(--yellow-border);
       color: var(--yellow);
-      text-shadow: 0 0 6px rgba(255, 184, 0, 0.3);
+      text-shadow: var(--glow-text-yellow);
     }
     .tag-green {
-      background: rgba(0, 255, 157, 0.12);
-      border-color: rgba(0, 255, 157, 0.4);
+      background: var(--green-bg);
+      border-color: var(--green-border);
       color: var(--green);
-      text-shadow: 0 0 6px rgba(0, 255, 157, 0.3);
+      text-shadow: var(--glow-text-green);
     }
     .tag-teal {
-      background: rgba(0, 229, 255, 0.12);
-      border-color: rgba(0, 229, 255, 0.4);
+      background: var(--teal-bg);
+      border-color: var(--teal-border);
       color: var(--teal);
-      text-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
+      text-shadow: var(--glow-text-teal);
     }
 
     /* ── Section 02: World Map & Detection Layout ────────── */
@@ -1821,6 +1877,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      box-shadow: var(--card-shadow);
     }
     .card-cap {
       display: flex;
@@ -1973,7 +2030,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       color: var(--text);
     }
     .intel-table tr:hover td {
-      background: rgba(255, 255, 255, 0.02);
+      background: var(--surface);
     }
 
     /* ── Section 05: Real-Time SOC Stream Table ──────────── */
@@ -2122,7 +2179,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       transition: background 0.1s ease;
     }
     .soc-table tr:hover td {
-      background: rgba(255, 255, 255, 0.03);
+      background: var(--surface);
     }
 
     /* Retro Bracket Badges with Cyber Glow */
@@ -2136,21 +2193,21 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     .verdict-allow {
       color: var(--green);
-      background: rgba(0, 255, 157, 0.08);
-      border: 1px solid rgba(0, 255, 157, 0.3);
-      text-shadow: 0 0 8px rgba(0, 255, 157, 0.4);
+      background: var(--green-bg);
+      border: 1px solid var(--green-border);
+      text-shadow: var(--glow-text-green);
     }
     .verdict-block {
       color: var(--pink);
-      background: rgba(255, 51, 102, 0.12);
-      border: 1px solid rgba(255, 51, 102, 0.4);
-      text-shadow: 0 0 8px rgba(255, 51, 102, 0.45);
+      background: var(--pink-bg);
+      border: 1px solid var(--pink-border);
+      text-shadow: var(--glow-text-pink);
     }
     .verdict-tarpit {
       color: var(--yellow);
-      background: rgba(255, 184, 0, 0.12);
-      border: 1px solid rgba(255, 184, 0, 0.4);
-      text-shadow: 0 0 8px rgba(255, 184, 0, 0.45);
+      background: var(--yellow-bg);
+      border: 1px solid var(--yellow-border);
+      text-shadow: var(--glow-text-yellow);
     }
 
     .badge-method {
@@ -2160,10 +2217,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 10px;
       border: 1px solid var(--line-hi);
     }
-    .method-get { color: var(--teal); background: rgba(0, 229, 255, 0.1); border-color: rgba(0, 229, 255, 0.3); }
-    .method-post { color: var(--blue); background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.3); }
-    .method-put { color: var(--yellow); background: rgba(255, 184, 0, 0.1); border-color: rgba(255, 184, 0, 0.3); }
-    .method-delete { color: var(--pink); background: rgba(255, 51, 102, 0.1); border-color: rgba(255, 51, 102, 0.3); }
+    .method-get { color: var(--teal); background: var(--teal-bg); border-color: var(--teal-border); }
+    .method-post { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-border); }
+    .method-put { color: var(--yellow); background: var(--yellow-bg); border-color: var(--yellow-border); }
+    .method-delete { color: var(--pink); background: var(--pink-bg); border-color: var(--pink-border); }
 
     .ip-clickable {
       cursor: pointer;
@@ -2177,14 +2234,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       color: var(--pink);
       padding: 1px 6px;
       border-radius: 3px;
-      border: 1px solid rgba(255, 51, 102, 0.38);
-      background: rgba(255, 51, 102, 0.1);
+      border: 1px solid var(--pink-border);
+      background: var(--pink-bg);
       font-size: 10.5px;
-      text-shadow: 0 0 6px rgba(255, 51, 102, 0.35);
+      text-shadow: var(--glow-text-pink);
       transition: all 0.12s ease;
     }
     .rule-tag:hover {
-      background: rgba(255, 51, 102, 0.22);
+      background: var(--pink);
+      color: var(--base);
       border-color: var(--pink);
     }
 
@@ -2661,24 +2719,24 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
           <defs>
             <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#00ff9d" stop-opacity="0.25"/>
-              <stop offset="100%" stop-color="#00ff9d" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="var(--green)" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="var(--green)" stop-opacity="0.0"/>
             </linearGradient>
             <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#ff3366" stop-opacity="0.3"/>
-              <stop offset="100%" stop-color="#ff3366" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="var(--pink)" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="var(--pink)" stop-opacity="0.0"/>
             </linearGradient>
           </defs>
           <g id="grid-group"></g>
           <g id="axes-group"></g>
           <path id="path-clean-area" fill="url(#grad-clean)"></path>
           <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
-          <path id="path-clean-line" fill="none" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-blocked-line" fill="none" stroke="#ff3366" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#ffb800" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
+          <path id="path-clean-line" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-blocked-line" fill="none" stroke="var(--pink)" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="var(--yellow)" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
           <g id="points-group"></g>
-          <line id="crosshair-line" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
-          <circle id="crosshair-dot" r="4" fill="#00e5ff" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
+          <line id="crosshair-line" stroke="var(--teal)" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
+          <circle id="crosshair-dot" r="4" fill="var(--teal)" stroke="var(--base)" stroke-width="2" style="display:none;"></circle>
           <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
         </svg>
       </div>
@@ -2691,10 +2749,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
       <div class="donut-wrap">
         <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
-          <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
-          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#00ff9d" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#ff3366" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#ffb800" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle cx="50" cy="50" r="38" fill="transparent" stroke="var(--line)" stroke-width="12"></circle>
+          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="var(--green)" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="var(--pink)" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="var(--yellow)" stroke-width="12" stroke-dasharray="0 238.7"></circle>
         </svg>
         <div class="donut-legend">
           <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
@@ -3691,7 +3749,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     for (var i = 0; i <= yTicks; i++) {
       var val = Math.round((maxVal / yTicks) * i);
       var y = padTop + chartH - (i / yTicks) * chartH;
-      gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="rgba(255,255,255,0.06)" stroke-dasharray="2,2" />';
+      gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="var(--line)" stroke-dasharray="2,2" />';
       axesHTML += '<text x="' + (padLeft - 8) + '" y="' + (y + 4) + '" fill="var(--overlay)" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
     }
 
@@ -3721,7 +3779,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       else if (idx === data.length - 1) anchor = 'end';
 
       axesHTML += '<text x="' + x + '" y="' + (h - 6) + '" fill="var(--overlay)" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="' + anchor + '">' + (d.time || '') + '</text>';
-      gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.04)" />';
+      gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="var(--line)" />';
     });
 
     gridGroup.innerHTML = gridHTML;
