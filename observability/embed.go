@@ -8,10 +8,16 @@ import (
 	"path/filepath"
 )
 
-//go:embed docker-compose.yml config.alloy loki-config.yaml routewarden.env grafana/*
+//go:embed docker-compose.yml README.md favicon.ico icon.svg
 var EmbeddedFiles embed.FS
 
-// Export exports all embedded observability assets to targetDir.
+//go:embed favicon.ico
+var FaviconICO []byte
+
+//go:embed icon.svg
+var FaviconSVG []byte
+
+// Export exports all embedded dashboard assets to targetDir.
 func Export(targetDir string) error {
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("create target directory %q: %w", targetDir, err)

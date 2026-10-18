@@ -10,7 +10,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build the Go binary on native platform with cross-compilation
 # ──────────────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
@@ -40,6 +40,6 @@ RUN apk --no-cache add ca-certificates tzdata docker-cli docker-cli-compose
 COPY --from=builder /bin/rwarden /usr/local/bin/rwarden
 
 WORKDIR /
-EXPOSE 3000 3100 12345 1514/udp
+EXPOSE 3000 3100 7890 12345 1514/udp
 ENTRYPOINT ["/usr/local/bin/rwarden"]
 CMD ["--help"]

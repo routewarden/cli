@@ -1552,7 +1552,7 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
 		}
-		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+		if !strings.Contains(stdout, "Exported RouteWarden Security Dashboard") {
 			t.Errorf("expected success message, got: %s", stdout)
 		}
 		composePath := filepath.Join(exportDir, "docker-compose.yml")
@@ -1561,40 +1561,17 @@ func TestCLI_DashboardCommands(t *testing.T) {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
 		} else {
 			composeStr := string(composeBytes)
-			if !strings.Contains(composeStr, "publicDashboards") {
-				t.Errorf("expected publicDashboards in exported docker-compose.yml")
+			if !strings.Contains(composeStr, "ghcr.io/routewarden/cli") {
+				t.Errorf("expected ghcr.io/routewarden/cli in exported docker-compose.yml")
 			}
-			if !strings.Contains(composeStr, "GF_SECURITY_ALLOW_EMBEDDING") {
-				t.Errorf("expected GF_SECURITY_ALLOW_EMBEDDING in exported docker-compose.yml")
-			}
-		}
-
-		alertingPath := filepath.Join(exportDir, "grafana", "provisioning", "alerting", "alerting.yaml")
-		alertingBytes, err := os.ReadFile(alertingPath)
-		if err != nil {
-			t.Errorf("alerting.yaml was not exported: %v", err)
-		} else {
-			alertingStr := string(alertingBytes)
-			if !strings.Contains(alertingStr, "rw-ddos-attack-spike") {
-				t.Errorf("expected rw-ddos-attack-spike in exported alerting.yaml")
-			}
-			if !strings.Contains(alertingStr, "routewarden-webhook") {
-				t.Errorf("expected routewarden-webhook in exported alerting.yaml")
+			if !strings.Contains(composeStr, "dashboard --port 7890 --no-open") {
+				t.Errorf("expected dashboard command in exported docker-compose.yml")
 			}
 		}
 
-		dashPath := filepath.Join(exportDir, "grafana", "dashboards", "routewarden-overview.json")
-		dashBytes, err := os.ReadFile(dashPath)
-		if err != nil {
-			t.Errorf("routewarden-overview.json was not exported: %v", err)
-		} else {
-			dashStr := string(dashBytes)
-			if !strings.Contains(dashStr, "Interactive Threat Incident Triage Table") {
-				t.Errorf("expected incident triage table in exported dashboard")
-			}
-			if !strings.Contains(dashStr, "Threat Geography & GeoIP Intelligence") {
-				t.Errorf("expected threat geography in exported dashboard")
-			}
+		readmePath := filepath.Join(exportDir, "README.md")
+		if _, err := os.Stat(readmePath); err != nil {
+			t.Errorf("README.md was not exported: %v", err)
 		}
 	})
 
@@ -1605,7 +1582,7 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
 		}
-		if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+		if !strings.Contains(stdout, "Exported RouteWarden Security Dashboard") {
 			t.Errorf("expected success message, got: %s", stdout)
 		}
 		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
@@ -1613,42 +1590,18 @@ func TestCLI_DashboardCommands(t *testing.T) {
 		}
 	})
 
-	t.Run("dashboard up with --env flags and export", func(t *testing.T) {
+	t.Run("dashboard up with export", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		exportDir := filepath.Join(tmpDir, "env-stack")
-		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir, "--env", "GF_SECURITY_ADMIN_PASSWORD=secret", "-e", "GF_SMTP_ENABLED=true")
+		exportDir := filepath.Join(tmpDir, "export-up-stack")
+		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir)
 		if code != 0 {
 			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
 		}
-		if !strings.Contains(stdout, "Exported observability configuration") {
+		if !strings.Contains(stdout, "Exported dashboard configuration") {
 			t.Errorf("expected export message, got: %s", stdout)
 		}
 		if _, err := os.Stat(filepath.Join(exportDir, "docker-compose.yml")); err != nil {
 			t.Errorf("docker-compose.yml was not exported: %v", err)
-		}
-	})
-
-	t.Run("dashboard up with --enable-alerting and export", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		exportDir := filepath.Join(tmpDir, "alerting-stack")
-		stdout, stderr, code := runCLI(t, "dashboard", "up", "--export", "--dir", exportDir, "--enable-alerting")
-		if code != 0 {
-			t.Fatalf("expected code 0, got %d. stderr: %s", code, stderr)
-		}
-		if !strings.Contains(stdout, "Exported observability configuration") {
-			t.Errorf("expected export message, got: %s", stdout)
-		}
-		alertingPath := filepath.Join(exportDir, "grafana", "provisioning", "alerting", "alerting.yaml")
-		if _, err := os.Stat(alertingPath); err != nil {
-			t.Errorf("alerting.yaml was not exported: %v", err)
-		}
-		pluginsPath := filepath.Join(exportDir, "grafana", "provisioning", "plugins", "plugins.yaml")
-		if _, err := os.Stat(pluginsPath); err != nil {
-			t.Errorf("plugins.yaml was not exported: %v", err)
-		}
-		emptyKeepPath := filepath.Join(exportDir, "grafana", "provisioning", "empty", "README.md")
-		if _, err := os.Stat(emptyKeepPath); err != nil {
-			t.Errorf("empty/README.md was not exported: %v", err)
 		}
 	})
 
@@ -2018,23 +1971,20 @@ func TestCLI_Generate_AllTargetsStdin(t *testing.T) {
 func TestCLI_Dashboard_ExportAndUnknownSubcommand(t *testing.T) {
 	// 1. Export dashboard stack to temporary directory
 	tmpDir := t.TempDir()
-	exportTarget := filepath.Join(tmpDir, "exported-observability")
+	exportTarget := filepath.Join(tmpDir, "exported-dashboard")
 
 	stdout, stderr, code := runCLI(t, "dashboard", "export", exportTarget)
 	if code != 0 {
 		t.Fatalf("expected code 0 from dashboard export, got %d. stderr: %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "Exported RouteWarden Observability Stack") {
+	if !strings.Contains(stdout, "Exported RouteWarden Security Dashboard") {
 		t.Errorf("expected success message from dashboard export, got:\n%s", stdout)
 	}
 
 	// Verify exported assets exist on disk
 	expectedFiles := []string{
 		filepath.Join(exportTarget, "docker-compose.yml"),
-		filepath.Join(exportTarget, "config.alloy"),
-		filepath.Join(exportTarget, "loki-config.yaml"),
-		filepath.Join(exportTarget, "routewarden.env"),
-		filepath.Join(exportTarget, "grafana/dashboards/routewarden-overview.json"),
+		filepath.Join(exportTarget, "README.md"),
 	}
 	for _, f := range expectedFiles {
 		if _, err := os.Stat(f); err != nil {
@@ -2132,7 +2082,3 @@ func TestCLI_Schema_HasConfigFile(t *testing.T) {
 		t.Errorf("expected schema properties to contain 'config_file'")
 	}
 }
-
-
-
-

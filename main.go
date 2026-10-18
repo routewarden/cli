@@ -27,7 +27,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "4.5.3"
+var version = "5.0.0"
 
 type stringSlice []string
 
@@ -52,20 +52,56 @@ Commands:
                 e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
   validate    Validate a RouteWarden configuration file (JSON)
                 e.g. rwarden validate [routewarden.json]
+  audit       Perform static analysis and linting on a policy file (alias: lint)
+                e.g. rwarden audit [routewarden.json]
+                e.g. rwarden audit --format sarif > results.sarif
+  diff        Compare two policies and evaluate security posture impact
+                e.g. rwarden diff prod.json candidate.json
   generate    Generate gateway configuration (traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden)
                 e.g. rwarden generate caddy [routewarden.json]
                 e.g. rwarden generate tcp-warden [routewarden.json]
+  monitor     Tail and colorize live reverse proxy security events
+                e.g. docker logs -f traefik | rwarden monitor
+                e.g. rwarden monitor --file /var/log/nginx/access.log
+  tui         Launch interactive terminal REPL for real-time testing (alias: interactive)
+                e.g. rwarden tui
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
-  dashboard   Launch or manage the Grafana + Loki + Alloy security dashboard
+  dashboard   Launch or manage the real-time SOC security dashboard
                 e.g. rwarden dashboard
-                e.g. rwarden dashboard up --port 3000
-                e.g. rwarden dashboard up --enable-alerting
-                e.g. rwarden dashboard down
+                e.g. rwarden dashboard -d
+                e.g. rwarden dashboard up --port 7890 --auth admin:secret --detach
                 e.g. rwarden dashboard status
-                e.g. rwarden dashboard export ./observability
+                e.g. rwarden dashboard stop
+                e.g. rwarden dashboard export ./dashboard
+  keys        Manage API keys for distributed remote log shipping
+                e.g. rwarden keys create prod-us-east
+                e.g. rwarden keys list
+                e.g. rwarden keys revoke <id>
+  register    Enroll a remote server with a central RouteWarden dashboard
+                e.g. rwarden register --url http://198.51.100.10:7890 --key <token>
+  push        Stream encrypted logs from a remote node to the central dashboard
+                e.g. rwarden push
+                e.g. rwarden push -d
+                e.g. rwarden push --docker --detach
+                e.g. rwarden push -f /var/log/nginx/access.log -f /var/log/caddy/access.log
+                e.g. rwarden push --docker -f /var/log/nginx/*.log -c custom-gateway
+                e.g. rwarden push status
+                e.g. rwarden push stop
+  status      Show running status of background dashboard and shipper daemons
+                e.g. rwarden status
+                e.g. rwarden status dashboard
+                e.g. rwarden status push
+  stop        Stop running background dashboard and/or shipper daemons
+                e.g. rwarden stop
+                e.g. rwarden stop dashboard
+                e.g. rwarden stop push
   cleanup     Stop and remove any running RouteWarden sandbox containers
+  completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
+                e.g. source <(rwarden completion bash)
+  man         Output system roff manual page (rwarden.1)
+                e.g. rwarden man | man -l -
   schema      Output the official RouteWarden JSON Schema
   version     Show CLI version
 
@@ -89,14 +125,47 @@ func main() {
 	case "validate":
 		handleValidate(os.Args[2:])
 
+	case "audit", "lint":
+		handleAudit(os.Args[2:])
+
+	case "diff":
+		handleDiff(os.Args[2:])
+
 	case "generate":
 		handleGenerate(os.Args[2:])
+
+	case "monitor":
+		handleMonitor(os.Args[2:])
+
+	case "tui", "interactive":
+		handleTUI(os.Args[2:])
+
+	case "completion":
+		handleCompletion(os.Args[2:])
+
+	case "man":
+		handleMan(os.Args[2:])
 
 	case "sandbox":
 		handleSandbox(os.Args[2:])
 
 	case "dashboard":
 		handleDashboard(os.Args[2:])
+
+	case "keys":
+		handleKeys(os.Args[2:])
+
+	case "register":
+		handleRegister(os.Args[2:])
+
+	case "push", "agent":
+		handlePush(os.Args[2:])
+
+	case "status", "ps":
+		handleGlobalStatus(os.Args[2:])
+
+	case "stop", "down":
+		handleGlobalStop(os.Args[2:])
 
 	case "cleanup":
 		handleCleanup(os.Args[2:])
@@ -130,73 +199,97 @@ func handleDashboard(args []string) {
 	switch subcmd {
 	case "export":
 		fs := flag.NewFlagSet("dashboard export", flag.ExitOnError)
-		dirFlag := fs.String("dir", "", "Directory to export observability stack files")
-		_ = fs.Parse(remainingArgs)
+		dirFlag := fs.String("dir", "", "Directory to export dashboard stack files")
+		_ = parseFlagsLenient(fs, remainingArgs)
 
-		targetDir := "./observability"
+		targetDir := "./dashboard"
 		if *dirFlag != "" {
 			targetDir = *dirFlag
 		} else if fs.NArg() > 0 {
 			targetDir = fs.Arg(0)
 		}
 		if err := observability.Export(targetDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error exporting observability stack: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error exporting dashboard stack: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("✅ Exported RouteWarden Observability Stack to %q\n", targetDir)
-		fmt.Println("   Includes: docker-compose.yml, config.alloy, loki-config.yaml, and grafana dashboards")
+		fmt.Printf("✅ Exported RouteWarden Security Dashboard to %q\n", targetDir)
+		fmt.Println("   Includes: docker-compose.yml and README.md")
 		fmt.Printf("   Run: cd %s && docker compose up -d\n", targetDir)
 
 	case "down", "stop":
-		fs := flag.NewFlagSet("dashboard down", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
-		_ = fs.Parse(remainingArgs)
-
-		if err := observability.Down(ctx, *dir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error stopping observability stack: %v\n", err)
-			os.Exit(1)
-		}
+		_, _ = stopDaemon("dashboard", "RouteWarden Dashboard")
 
 	case "status", "ps":
-		fs := flag.NewFlagSet("dashboard status", flag.ExitOnError)
-		dir := fs.String("dir", "", "Directory containing observability stack (default: ~/.routewarden/observability)")
-		_ = fs.Parse(remainingArgs)
-
-		if err := observability.Status(ctx, *dir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error checking status: %v\n", err)
-			os.Exit(1)
-		}
+		checkDaemonStatus("dashboard", "RouteWarden Dashboard")
 
 	case "up", "start":
 		fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-		port := fs.Int("port", 3000, "Port for Grafana dashboard UI (default: 3000)")
-		lokiPort := fs.Int("loki-port", 3100, "Port for Loki log engine (default: 3100)")
-		dir := fs.String("dir", "", "Directory to store observability configs (default: ~/.routewarden/observability)")
+		port := fs.Int("port", 7890, "Port for SOC dashboard UI (default: 7890)")
+		dir := fs.String("dir", "", "Directory to store dashboard configs (default: ~/.routewarden/dashboard)")
+		file := fs.String("file", "", "Log file to monitor (default: auto-discovered docker containers)")
+		fs.StringVar(file, "f", "", "Alias for --file")
+		container := fs.String("container", "", "Tail a specific Docker container by name or ID")
+		fs.StringVar(container, "c", "", "Alias for --container")
+		label := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
+		fs.StringVar(label, "l", "", "Alias for --label")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
-		exportOnly := fs.Bool("export", false, "Export observability files without starting containers")
-		enableAlerting := fs.Bool("enable-alerting", false, "Enable pre-configured Grafana threat alert rules and notification channels")
-		fs.BoolVar(enableAlerting, "alerting", false, "Alias for --enable-alerting")
-		var envList stringSlice
-		fs.Var(&envList, "env", "Environment variable to pass to dashboard stack (repeatable, e.g. --env GF_SECURITY_ADMIN_PASSWORD=secret)")
-		fs.Var(&envList, "e", "Alias for --env (repeatable)")
-		_ = fs.Parse(remainingArgs)
+		detach := fs.Bool("detach", false, "Run dashboard in background (detached) mode")
+		fs.BoolVar(detach, "d", false, "Alias for --detach")
+		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
+		geoipDB := fs.String("geoip-db", "", "Path to MaxMind GeoLite2-Country.mmdb or GeoLite2-City.mmdb database (or set GEOIP_DB / MAXMIND_DB)")
+		fs.StringVar(geoipDB, "maxmind", "", "Alias for --geoip-db")
+		auth := fs.String("auth", "", "Optional HTTP Basic Auth credentials (format: 'user:password', or set RW_DASHBOARD_AUTH)")
+		fs.StringVar(auth, "a", "", "Alias for --auth")
+		user := fs.String("user", "", "Optional HTTP Basic Auth username (used with --password)")
+		pass := fs.String("password", "", "Optional HTTP Basic Auth password (used with --user)")
+		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, default: all interfaces)")
+		_ = parseFlagsLenient(fs, remainingArgs)
+
+		if *detach && os.Getenv("_RW_DETACHED") != "1" {
+			bindHost := *host
+			if bindHost == "" {
+				bindHost = "127.0.0.1"
+			}
+			targetURL := fmt.Sprintf("http://%s:%d", bindHost, *port)
+			_ = spawnDetached("dashboard", "RouteWarden Dashboard", append([]string{"dashboard", "up"}, remainingArgs...), *port, targetURL)
+			return
+		}
+
+		if os.Getenv("_RW_DETACHED") == "1" {
+			defer removePID("dashboard")
+		}
+
+		if *file == "" && fs.NArg() > 0 && !strings.HasPrefix(fs.Arg(0), "-") {
+			*file = fs.Arg(0)
+		}
+
+		if *geoipDB != "" {
+			if err := observability.InitMaxMind(*geoipDB); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to load specified MaxMind database (%s): %v\n", *geoipDB, err)
+			}
+		}
 
 		if *exportOnly {
 			target := *dir
 			if target == "" {
-				target = "./observability"
+				target = "./dashboard"
 			}
 			if err := observability.Export(target); err != nil {
-				fmt.Fprintf(os.Stderr, "Error exporting observability assets: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error exporting dashboard assets: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("✅ Exported observability configuration to %s\n", target)
+			fmt.Printf("✅ Exported dashboard configuration to %s\n", target)
 			return
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *lokiPort, *noOpen, *enableAlerting, envList...); err != nil {
+		authStr := *auth
+		if authStr == "" && *user != "" {
+			authStr = *user + ":" + *pass
+		}
+
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
-			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./observability")
+			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)
 		}
 
@@ -204,7 +297,6 @@ func handleDashboard(args []string) {
 		// Unknown subcommand — if it looks like a flag, try running 'up' with all args;
 		// otherwise error clearly to avoid silently launching the stack.
 		if strings.HasPrefix(subcmd, "-") {
-			// subcmd was actually a flag, not a subcommand — re-parse as 'up' with all original args
 			handleDashboard(append([]string{"up"}, args...))
 			return
 		}

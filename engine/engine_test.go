@@ -225,7 +225,6 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 		}
 	})
 
-
 	t.Run("All valid response.mode options compile and validate", func(t *testing.T) {
 		validModes := []struct {
 			mode        string
@@ -692,8 +691,8 @@ func TestGenerate_SecurityBoundaries(t *testing.T) {
 		RedirectURL: "https://example.com/login?param=1&foo=bar",
 		ProxyURL:    "http://127.0.0.1:8080/honeypot",
 		Headers: map[string]string{
-			"Server":                 "RouteWarden Firewall v2.0",
-			"X-Injected\r\nHeader":  "evil-value\r\nInjected: 1",
+			"Server":               "RouteWarden Firewall v2.0",
+			"X-Injected\r\nHeader": "evil-value\r\nInjected: 1",
 		},
 	}
 
@@ -912,10 +911,10 @@ func TestEngine_CleanIP_Comprehensive(t *testing.T) {
 	}
 
 	tests := []struct {
-		input       string
-		remoteAddr  string
-		headers     map[string]string
-		expectIP    string
+		input      string
+		remoteAddr string
+		headers    map[string]string
+		expectIP   string
 	}{
 		{
 			remoteAddr: "192.0.2.1:8080",
@@ -1012,7 +1011,7 @@ func TestEngine_GenerateTraefikTOML_AllResponseModes(t *testing.T) {
 		TarpitMaxDurationSeconds: 10,
 		StreamSizeMB:             5,
 		Headers: map[string]string{
-			"X-Firewall": "RouteWarden",
+			"X-Firewall":  "RouteWarden",
 			"Retry-After": "60",
 		},
 		Captcha: &engine.CaptchaConfig{
@@ -1298,10 +1297,3 @@ func TestEngine_ConfigFile_Generators(t *testing.T) {
 		t.Errorf("expected config_file in Nginx Lua, got:\n%s", nginxOut)
 	}
 }
-
-
-
-
-
-
-
