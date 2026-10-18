@@ -304,14 +304,18 @@ type logEvent struct {
 	TimestampAlt   string  `json:"timestamp"`
 	ClientIP       string  `json:"client_ip"`
 	ClientIPAlt    string  `json:"ip"`
+	ClientHost     string  `json:"ClientHost"`
 	Verdict        string  `json:"verdict"`
 	Method         string  `json:"method"`
+	RequestMethod  string  `json:"RequestMethod"`
 	Path           string  `json:"path"`
 	PathAlt        string  `json:"request_uri"`
+	RequestPath    string  `json:"RequestPath"`
 	MatchedPattern string  `json:"matched_pattern"`
 	MatchedRuleAlt string  `json:"rule"`
 	StatusCode     int     `json:"status"`
 	StatusCodeAlt  int     `json:"status_code"`
+	DownstreamStat int     `json:"DownstreamStatus"`
 	LatencyMs      float64 `json:"latency_ms"`
 	DurationMsAlt  float64 `json:"duration_ms"`
 }
@@ -330,10 +334,13 @@ func toCombinedLog(line string) string {
 
 	// Try JSON format
 	var ev logEvent
-	if err := json.Unmarshal([]byte(line), &ev); err == nil && (ev.Path != "" || ev.PathAlt != "" || ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.Verdict != "") {
+	if err := json.Unmarshal([]byte(line), &ev); err == nil && (ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != "" || ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != "" || ev.Verdict != "") {
 		ip := ev.ClientIP
 		if ip == "" {
 			ip = ev.ClientIPAlt
+		}
+		if ip == "" {
+			ip = ev.ClientHost
 		}
 		if ip == "" {
 			ip = "127.0.0.1"
@@ -344,11 +351,17 @@ func toCombinedLog(line string) string {
 			path = ev.PathAlt
 		}
 		if path == "" {
+			path = ev.RequestPath
+		}
+		if path == "" {
 			path = "/"
 		}
 		path = strings.ReplaceAll(path, `"`, "%22")
 
 		method := ev.Method
+		if method == "" {
+			method = ev.RequestMethod
+		}
 		if method == "" {
 			method = "GET"
 		}
@@ -357,6 +370,9 @@ func toCombinedLog(line string) string {
 		status := ev.StatusCode
 		if status == 0 {
 			status = ev.StatusCodeAlt
+		}
+		if status == 0 {
+			status = ev.DownstreamStat
 		}
 		if status == 0 {
 			switch strings.ToUpper(ev.Verdict) {
