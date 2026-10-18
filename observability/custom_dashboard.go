@@ -1327,7 +1327,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       position: sticky;
       top: 0;
       z-index: 1000;
-      background: rgba(12, 15, 23, 0.96);
+      background: var(--bar-bg);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--line);
@@ -1337,6 +1337,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       align-items: center;
       gap: 16px;
       font-size: 11.5px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     }
     .bar-left {
       display: flex;
@@ -1747,14 +1748,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       display: none;
       pointer-events: none;
       z-index: 200;
-      background: rgba(24, 24, 37, 0.96);
+      background: var(--panel);
       border: 1px solid var(--line-hi);
       padding: 8px 12px;
       border-radius: 3px;
       font-size: 11px;
       line-height: 1.45;
-      color: var(--text);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+      color: var(--text-hi);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
       white-space: pre;
     }
 
