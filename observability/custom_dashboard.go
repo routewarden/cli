@@ -1422,6 +1422,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       display: inline-block;
       animation: pulse-ring 2s infinite;
     }
+    .pulse-dot.pulse-dot-paused {
+      background: var(--yellow) !important;
+      box-shadow: 0 0 8px var(--yellow) !important;
+      animation: none !important;
+    }
     @keyframes pulse-ring {
       0% { transform: scale(0.95); opacity: 0.8; }
       50% { transform: scale(1.3); opacity: 1; }
@@ -2769,7 +2774,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   </div>
   <div class="bar-mid">
     <div style="display:flex; align-items:center; gap:6px;">
-      <span class="pulse-dot"></span>
+      <span class="pulse-dot" id="stream-pulse-dot"></span>
       <span id="stream-status" style="color:var(--green); font-weight:600;">LIVE STREAM</span>
     </div>
     <span style="color:var(--line-hi);">|</span>
@@ -2779,7 +2784,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <button class="tui-btn" id="btn-toggle-theme" onclick="toggleTheme()" title="Toggle Theme (System / Light / Dark)">
       <span id="theme-btn-icon">🌓</span> <span id="theme-btn-text">AUTO</span>
     </button>
-    <button class="tui-btn" id="btn-toggle-scroll">⏸ Pause</button>
+    <button class="tui-btn" id="btn-toggle-scroll" onclick="toggleStreamPause()">⏸ Pause</button>
     <button class="tui-btn" id="btn-export-json">📥 Export</button>
   </div>
 </div>
@@ -2919,6 +2924,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           <span class="prompt-user">rwarden@soc:~$</span>
           <span class="prompt-cmd" id="prompt-stream-cmd">filter --stream=live</span>
           <span class="prompt-cursor">█</span>
+          <span id="pause-badge" style="display:none; margin-left:12px; padding:2px 8px; border-radius:3px; background:rgba(234,179,8,0.2); border:1px solid var(--yellow); color:var(--yellow); font-size:11px; font-weight:700; letter-spacing:0.05em;">⏸ STREAM PAUSED</span>
         </div>
 
         <div class="filter-tabs">
@@ -3222,6 +3228,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <!-- ── Terminal Keybindings Status Footer ────────────────────── -->
 <div class="tui-footer">
   <div class="footer-keys">
+    <span class="footer-key-item"><span class="key-cap">Space</span> Pause</span>
     <span class="footer-key-item"><span class="key-cap">T</span> Theme</span>
     <span class="footer-key-item"><span class="key-cap">W</span> Time Range</span>
     <span class="footer-key-item"><span class="key-cap">/</span> Search</span>
@@ -3235,6 +3242,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <script>
 (function() {
   var autoScroll = true;
+  var isPaused = false;
+  var pausedBufferedCount = 0;
   var allEvents = [];
   var timelineData = [];
 
@@ -3566,21 +3575,71 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     });
   }
 
-  btnToggleScroll.addEventListener('click', function() {
-    autoScroll = !autoScroll;
-    btnToggleScroll.textContent = autoScroll ? '⏸ Pause' : '▶ Resume';
-    btnToggleScroll.style.color = autoScroll ? 'var(--text)' : 'var(--yellow)';
-    if (autoScroll) {
+  window.toggleStreamPause = function() {
+    isPaused = !isPaused;
+    autoScroll = !isPaused;
+    var btn = document.getElementById('btn-toggle-scroll');
+    var statusEl = document.getElementById('stream-status');
+    var pulseDot = document.getElementById('stream-pulse-dot');
+    var pauseBadge = document.getElementById('pause-badge');
+
+    if (isPaused) {
+      pausedBufferedCount = 0;
+      if (btn) {
+        btn.innerHTML = '▶ Resume';
+        btn.style.background = 'var(--yellow)';
+        btn.style.color = '#000000';
+        btn.style.fontWeight = '700';
+        btn.style.borderColor = 'var(--yellow)';
+      }
+      if (statusEl) {
+        statusEl.textContent = 'STREAM PAUSED';
+        statusEl.style.color = 'var(--yellow)';
+      }
+      if (pulseDot) {
+        pulseDot.classList.add('pulse-dot-paused');
+      }
+      if (pauseBadge) {
+        pauseBadge.textContent = '⏸ STREAM PAUSED';
+        pauseBadge.style.display = 'inline-block';
+      }
+    } else {
+      if (btn) {
+        btn.innerHTML = '⏸ Pause';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.style.fontWeight = '';
+        btn.style.borderColor = '';
+      }
+      if (statusEl) {
+        statusEl.textContent = 'LIVE STREAM';
+        statusEl.style.color = 'var(--green)';
+      }
+      if (pulseDot) {
+        pulseDot.classList.remove('pulse-dot-paused');
+      }
+      if (pauseBadge) {
+        pauseBadge.style.display = 'none';
+      }
+      pausedBufferedCount = 0;
       renderTable();
+      fetchStats();
     }
-  });
+  };
+
+  if (btnToggleScroll) {
+    btnToggleScroll.addEventListener('click', function(e) {
+      e.preventDefault();
+      toggleStreamPause();
+    });
+  }
 
   window.jumpToLatest = function() {
     if (streamContainer) {
       streamContainer.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    if (!autoScroll) {
-      btnToggleScroll.click();
+    if (isPaused) {
+      toggleStreamPause();
     }
   };
 
@@ -3655,6 +3714,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       modal.style.display = 'none';
       var ipModal = document.getElementById('ip-modal');
       if (ipModal) ipModal.style.display = 'none';
+    } else if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      toggleStreamPause();
     } else if (e.key === 't' || e.key === 'T') {
       toggleTheme();
     } else if (e.key === 'w' || e.key === 'W') {
@@ -3862,7 +3924,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   // Periodically refresh table if time filter is active (so time window naturally rolls forward)
   setInterval(function() {
-    if (filters.timeRange !== 'ALL' && filters.timeRange !== 'custom' && autoScroll) {
+    if (filters.timeRange !== 'ALL' && filters.timeRange !== 'custom' && !isPaused) {
       renderTable();
     }
   }, 5000);
@@ -4751,6 +4813,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   // Fetch initial stats
   function fetchStats() {
+    if (isPaused) {
+      return;
+    }
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/stats', true);
     xhr.onreadystatechange = function() {
@@ -4777,19 +4842,27 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var ev = JSON.parse(e.data);
         allEvents.unshift(ev);
         if (allEvents.length > 1000) allEvents.pop();
-        if (autoScroll) {
+
+        if (isPaused) {
+          pausedBufferedCount++;
+          var pauseBadge = document.getElementById('pause-badge');
+          if (pauseBadge) {
+            pauseBadge.textContent = '⏸ PAUSED (+' + pausedBufferedCount + ' new)';
+            pauseBadge.style.display = 'inline-block';
+          }
+        } else {
           renderTable();
         }
       } catch(err) {}
     });
     es.addEventListener('connected', function() {
       var el = document.getElementById('stream-status');
-      if (el) el.textContent = 'LIVE STREAM';
+      if (el && !isPaused) el.textContent = 'LIVE STREAM';
     });
     es.onerror = function() {
       var el = document.getElementById('stream-status');
-      if (el) el.textContent = 'RECONNECTING...';
-    };
+      if (el && !isPaused) el.textContent = 'RECONNECTING...';
+    });
   }
 
   // Initial startup
