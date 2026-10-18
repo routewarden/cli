@@ -84,14 +84,44 @@ fi
 
 
 
-# 4. Update README.md version comment
+# 3. Update observability/custom_dashboard.go (version badges and runtime specification)
+if [ -f "${ROOT_DIR}/observability/custom_dashboard.go" ]; then
+  sed_inplace "s|(RouteWarden Core v)[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/observability/custom_dashboard.go"
+  sed_inplace "s|(CORE v)[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/observability/custom_dashboard.go"
+  sed_inplace "s|(<span class=\"dash-version-badge\"[^>]*>v)[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(</span>)|\1${SEMVER_NO_V}\4|g" "${ROOT_DIR}/observability/custom_dashboard.go"
+  echo "  ✓ Synchronized observability/custom_dashboard.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+# 4. Update observability/auth_screen.go (terminal login version tag)
+if [ -f "${ROOT_DIR}/observability/auth_screen.go" ]; then
+  sed_inplace "s|(terminal\.login\.v)[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/observability/auth_screen.go"
+  echo "  ✓ Synchronized observability/auth_screen.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+# 5. Update observability/manager.go (dashboard API version response)
+if [ -f "${ROOT_DIR}/observability/manager.go" ]; then
+  sed_inplace "s|(\"version\":[[:space:]]+\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/observability/manager.go"
+  echo "  ✓ Synchronized observability/manager.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+# 6. Update engine/audit.go (SARIF security linter report version)
+if [ -f "${ROOT_DIR}/engine/audit.go" ]; then
+  sed_inplace "s|(Version:[[:space:]]+\")[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\",[[:space:]]*// tool version)|\1${SEMVER_NO_V}\3|g" "${ROOT_DIR}/engine/audit.go"
+  echo "  ✓ Synchronized engine/audit.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+# 7. Update README.md version comment
 if [ -f "${ROOT_DIR}/README.md" ]; then
   sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
   echo "  ✓ Synchronized README.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
-# 5. Update VERSIONING.md (canonical version block)
+# 8. Update VERSIONING.md (canonical version block)
 if [ -f "${ROOT_DIR}/VERSIONING.md" ]; then
   sed_inplace "s|(\"version\":[[:space:]]*\")v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\")|\1${TARGET_VERSION}\3|g" "${ROOT_DIR}/VERSIONING.md"
   echo "  ✓ Synchronized VERSIONING.md"

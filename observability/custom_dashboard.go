@@ -66,6 +66,8 @@ type DashboardStats struct {
 	StatusCodes  map[string]int64 `json:"status_codes"`
 	RecentEvents []*SecurityEvent `json:"recent_events"`
 	Sources      SourceInfo       `json:"sources"`
+	AuthEnabled  bool             `json:"auth_enabled,omitempty"`
+	AuthUser     string           `json:"auth_user,omitempty"`
 }
 
 // EventStore maintains in-memory telemetry, ring buffer, aggregates, and SSE subscribers.
@@ -463,11 +465,12 @@ case 403:
 				ev.Verdict = "ALLOW"
 			}
 		} else {
-			if ev.Status == 403 {
+			switch ev.Status {
+      case 403:
 				ev.Verdict = "BLOCK"
-			} else if ev.Status == 429 {
+			case 429:
 				ev.Verdict = "TARPIT"
-			} else {
+			default:
 				ev.Verdict = "ALLOW"
 			}
 		}
@@ -1219,9 +1222,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="theme-color" content="#07090e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="RouteWarden SOC INTELLIGENCE & Threat Defense Console">
-  <title>[ 🛡️ ROUTEWARDEN ]</title>
+  <title>ROUTEWARDEN</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="shortcut icon" href="/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1690,6 +1699,21 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       border-radius: 3px;
       color: var(--text);
       font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .source-tag:hover {
+      border-color: var(--teal);
+      color: var(--teal);
+      transform: translateY(-1px);
+    }
+    .source-tag.active {
+      background: rgba(34, 211, 238, 0.15);
+      border-color: var(--teal);
+      color: var(--teal);
+      font-weight: 700;
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.25);
     }
 
     /* ── Section Headings (.head) ────────────────────────── */
@@ -2543,6 +2567,89 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: var(--surface);
     }
 
+    /* ── Terminal Table Pagination Bar ───────────────────── */
+    .table-pagination-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 14px;
+      background: var(--base);
+      border-top: 1px solid var(--line-hi);
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text);
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .pagination-left, .pagination-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .pagination-label {
+      color: var(--overlay);
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .pagination-select {
+      background: var(--panel);
+      color: var(--text-hi);
+      border: 1px solid var(--line-hi);
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .pagination-select:focus {
+      outline: none;
+      border-color: var(--teal);
+    }
+    .pagination-info {
+      color: var(--subtext);
+      font-size: 11px;
+      margin-left: 6px;
+    }
+    .pagination-btn {
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+    .pagination-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      border-color: var(--line) !important;
+      box-shadow: none !important;
+    }
+    .pagination-page-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--subtext);
+      font-size: 11px;
+      margin: 0 4px;
+    }
+    .pagination-page-input {
+      width: 44px;
+      text-align: center;
+      background: var(--panel);
+      border: 1px solid var(--line-hi);
+      color: var(--text-hi);
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .pagination-page-input:focus {
+      outline: none;
+      border-color: var(--teal);
+    }
+
+
     /* Retro Bracket Badges with Cyber Glow */
     .bracket-badge {
       font-weight: 700;
@@ -2633,34 +2740,42 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     .ip-modal-card {
       background: var(--modal-card-bg);
       border: 1px solid var(--line-hi);
-      border-radius: 4px;
+      border-radius: 8px;
       width: 100%;
-      max-width: 860px;
+      max-width: 880px;
       max-height: 90vh;
       overflow-y: auto;
-      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.85);
       display: flex;
       flex-direction: column;
     }
     .modal-header {
-      padding: 10px 16px;
+      padding: 12px 18px;
       background: var(--panel);
       border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
       align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
     .modal-title {
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 700;
       letter-spacing: 0.5px;
       color: var(--text-hi);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .modal-close {
       cursor: pointer;
       color: var(--overlay);
-      font-size: 18px;
+      font-size: 20px;
       line-height: 1;
+      padding: 4px;
+      transition: color 0.15s ease;
     }
     .modal-close:hover {
       color: var(--pink);
@@ -2671,24 +2786,25 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       line-height: 1.6;
     }
 
-    /* IP Intelligence Details */
+    /* Redesigned IP Details & Threat Report */
     .ip-header-banner {
-      padding: 14px 16px;
+      padding: 16px 20px;
       background: var(--panel);
       border-bottom: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 14px;
     }
     .ip-title-address {
       display: flex;
       align-items: center;
       gap: 10px;
-      font-size: 18px;
-      font-weight: 700;
+      font-size: 20px;
+      font-weight: 800;
       color: var(--teal);
+      letter-spacing: 0.5px;
     }
     .ip-geo-badge {
       display: inline-flex;
@@ -2696,16 +2812,103 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 6px;
       background: var(--surface);
       border: 1px solid var(--line-hi);
-      padding: 2px 8px;
-      border-radius: 3px;
-      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11.5px;
       color: var(--text);
+      font-weight: 500;
     }
+    .ip-org-text {
+      font-size: 11.5px;
+      color: var(--subtext);
+    }
+
+    /* Risk Status Alert Banner */
+    .ip-risk-card {
+      margin: 16px 20px 0;
+      padding: 12px 16px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .ip-risk-card.risk-high {
+      background: rgba(255, 51, 102, 0.1);
+      border: 1px solid var(--pink-border);
+    }
+    .ip-risk-card.risk-med {
+      background: rgba(255, 184, 0, 0.1);
+      border: 1px solid rgba(255, 184, 0, 0.4);
+    }
+    .ip-risk-card.risk-safe {
+      background: rgba(0, 255, 157, 0.08);
+      border: 1px solid var(--green-border);
+    }
+    .risk-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .risk-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .risk-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .risk-high .risk-title { color: var(--pink); }
+    .risk-med .risk-title { color: var(--yellow); }
+    .risk-safe .risk-title { color: var(--green); }
+    .risk-desc {
+      font-size: 11px;
+      color: var(--subtext);
+      margin-top: 2px;
+    }
+
+    /* Metric Summary Strip */
+    .ip-stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 16px 20px 0;
+    }
+    @media (max-width: 640px) {
+      .ip-stat-strip { grid-template-columns: repeat(2, 1fr); }
+    }
+    .ip-stat-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+    .ip-stat-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--overlay);
+    }
+    .ip-stat-val {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text-hi);
+      margin: 4px 0 2px;
+    }
+    .ip-stat-sub {
+      font-size: 10px;
+      color: var(--subtext);
+    }
+
+    /* Two-Column Information Details */
     .ip-intel-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 14px;
-      padding: 16px;
+      padding: 16px 20px;
     }
     @media (max-width: 720px) {
       .ip-intel-grid { grid-template-columns: 1fr; }
@@ -2713,62 +2916,142 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     .ip-box {
       border: 1px solid var(--line);
       background: var(--panel);
-      border-radius: 4px;
-      padding: 12px;
+      border-radius: 6px;
+      padding: 14px;
     }
     .ip-box-title {
-      font-size: 11px;
+      font-size: 11.5px;
       font-weight: 700;
       letter-spacing: 0.5px;
-      text-transform: uppercase;
-      color: var(--overlay);
-      margin-bottom: 8px;
+      color: var(--text-hi);
+      margin-bottom: 10px;
       border-bottom: 1px solid var(--line);
-      padding-bottom: 4px;
+      padding-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     .ip-kv-row {
       display: flex;
       justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
       font-size: 11.5px;
-      padding: 4px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+      padding: 5px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     }
     .ip-kv-label {
       color: var(--overlay);
+      font-weight: 500;
+      flex-shrink: 0;
     }
     .ip-kv-val {
       color: var(--text);
       font-weight: 500;
       text-align: right;
+      word-break: break-word;
     }
 
+    /* Recent Requests from IP */
+    .ip-recent-box {
+      margin: 0 20px 16px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 6px;
+      padding: 14px;
+    }
+    .ip-recent-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-top: 6px;
+    }
+    .ip-recent-table th {
+      text-align: left;
+      padding: 6px 8px;
+      color: var(--overlay);
+      font-weight: 600;
+      border-bottom: 1px solid var(--line);
+    }
+    .ip-recent-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    /* Abuse Reporting Section */
     .abuse-section {
-      padding: 14px 16px;
+      padding: 16px 20px 20px;
       border-top: 1px solid var(--line);
       background: var(--panel);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+    }
+    .abuse-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .abuse-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--pink);
+      letter-spacing: 0.5px;
+    }
+    .abuse-desc {
+      font-size: 11px;
+      color: var(--subtext);
+      margin-top: 3px;
+      max-width: 520px;
+      line-height: 1.4;
     }
     .abuse-actions-row {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
     }
+    .abuse-report-card {
+      background: var(--crust);
+      border: 1px solid var(--line-hi);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .abuse-report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--subtext);
+      font-weight: 600;
+    }
     .abuse-report-textarea {
       font-family: var(--mono);
       font-size: 11px;
       line-height: 1.5;
-      background: var(--crust);
-      border: 1px solid var(--line-hi);
+      background: transparent;
+      border: none;
       color: var(--text);
-      padding: 10px;
-      border-radius: 3px;
+      padding: 12px;
       width: 100%;
       height: 140px;
       resize: vertical;
       outline: none;
+      box-sizing: border-box;
+    }
+    .abuse-footer-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .abuse-email-hint {
+      font-size: 11px;
+      color: var(--subtext);
     }
 
     /* ── Terminal Keybindings Status Bar ─────────────────── */
@@ -2806,6 +3089,398 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-weight: 700;
       font-size: 10px;
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Mobile & Tablet Responsive Optimizations (< 768px, < 480px)
+       ═══════════════════════════════════════════════════════════════ */
+    .soc-section {
+      position: relative;
+      margin-bottom: 24px;
+    }
+    .mobile-section-nav {
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      /* Mobile Viewport Spacing */
+      .wrap {
+        padding: 8px 10px 40px !important;
+      }
+
+      /* Compact Sticky Topbar */
+      .bar {
+        padding: 7px 10px !important;
+        gap: 8px !important;
+        flex-wrap: wrap !important;
+      }
+      .bar-left {
+        gap: 8px !important;
+        font-size: 11px !important;
+      }
+      .bar-mid {
+        display: none !important; /* Hide verbose clock/live text in sticky bar on mobile */
+      }
+      .bar-right {
+        gap: 5px !important;
+      }
+      .tui-btn {
+        padding: 5px 8px !important;
+        font-size: 10.5px !important;
+        min-height: 32px !important;
+      }
+
+      /* Sticky Section Quick-Jump Ribbon */
+      .mobile-section-nav {
+        display: flex !important;
+        align-items: center;
+        gap: 6px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 8px 4px 10px;
+        margin: 4px 0 16px;
+        position: sticky;
+        top: 48px;
+        z-index: 920;
+        background: var(--bar-bg);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line);
+      }
+      .mobile-section-nav::-webkit-scrollbar {
+        display: none;
+      }
+      .mobile-nav-chip {
+        flex-shrink: 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        padding: 5px 10px;
+        border-radius: 4px;
+        background: var(--panel);
+        border: 1px solid var(--line-hi);
+        color: var(--subtext);
+        text-decoration: none;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .mobile-nav-chip:hover, .mobile-nav-chip:active {
+        color: var(--teal);
+        border-color: var(--teal);
+      }
+      .mobile-nav-chip.active {
+        background: var(--teal-bg);
+        border-color: var(--teal);
+        color: var(--teal);
+        box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+      }
+
+      /* Section Segregation Containers & Dividers */
+      .soc-section {
+        margin-bottom: 28px !important;
+        scroll-margin-top: 104px; /* Offset for sticky topbar + mobile nav strip */
+      }
+      .soc-section:not(:last-child)::after {
+        content: "";
+        display: block;
+        height: 1px;
+        margin-top: 26px;
+        background: linear-gradient(90deg, transparent, var(--line-hi), transparent);
+      }
+
+      /* Prominent Cyber Section Header Banners on Mobile */
+      .head {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        flex-direction: row !important;
+        gap: 8px !important;
+        margin: 20px 0 12px !important;
+        padding: 8px 12px !important;
+        background: var(--panel) !important;
+        border: 1px solid var(--line-hi) !important;
+        border-left: 4px solid var(--teal) !important;
+        border-radius: 4px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+      }
+      #sec-kpis .head { border-left-color: var(--teal) !important; }
+      #sec-stream .head { border-left-color: var(--pink) !important; }
+      #sec-geo .head { border-left-color: var(--yellow) !important; }
+      #sec-charts .head { border-left-color: var(--green) !important; }
+      #sec-intel .head { border-left-color: var(--peach) !important; }
+
+      .head h2 {
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.8px !important;
+        color: var(--text-hi) !important;
+        white-space: normal !important;
+        line-height: 1.3 !important;
+        margin: 0 !important;
+      }
+      .head .rule {
+        display: none !important;
+      }
+      .head .cmd {
+        font-size: 9.5px !important;
+        font-weight: 600 !important;
+        color: var(--teal) !important;
+        background: var(--teal-bg) !important;
+        border: 1px solid var(--teal-border) !important;
+        padding: 2px 7px !important;
+        border-radius: 3px !important;
+        flex-shrink: 0 !important;
+      }
+      #sec-stream .head .cmd {
+        color: var(--pink) !important;
+        background: var(--pink-bg) !important;
+        border-color: var(--pink-border) !important;
+      }
+      #sec-geo .head .cmd {
+        color: var(--yellow) !important;
+        background: var(--yellow-bg) !important;
+        border-color: var(--yellow-border) !important;
+      }
+      #sec-charts .head .cmd {
+        color: var(--green) !important;
+        background: var(--green-bg) !important;
+        border-color: var(--green-border) !important;
+      }
+      #sec-intel .head .cmd {
+        color: var(--peach) !important;
+        background: rgba(255, 140, 66, 0.12) !important;
+        border-color: rgba(255, 140, 66, 0.35) !important;
+      }
+
+      /* Monitored Nodes Ribbon Segregation */
+      .sources-ribbon {
+        background: var(--panel) !important;
+        border: 1px solid var(--line-hi) !important;
+        border-left: 3px solid var(--green) !important;
+        padding: 8px 12px !important;
+        border-radius: 4px !important;
+        margin: 12px 0 16px !important;
+        gap: 6px !important;
+      }
+
+      /* Display ASCII name on mobile with responsive fluid scaling & touch scroll */
+      .wordmark {
+        display: block !important;
+        font-size: clamp(3.4px, 1.05vw, 6px) !important;
+        line-height: 1.15 !important;
+        white-space: pre !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        margin: 6px 0 10px !important;
+      }
+      .wordmark::-webkit-scrollbar {
+        display: none !important;
+      }
+
+      /* Masthead Stack */
+      .masthead {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+        margin: 6px 0 14px !important;
+      }
+      .spec-card {
+        border-radius: 6px !important;
+        border: 1px solid var(--line-hi) !important;
+        margin-top: 10px !important;
+      }
+
+      /* Hide fixed bottom keyboard shortcuts footer on touch devices */
+      .tui-footer {
+        display: none !important;
+      }
+
+      /* Compact 2-column KPI grid on mobile with distinct borders */
+      .kpi-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+        margin-bottom: 14px !important;
+      }
+      .kpi-card {
+        padding: 9px 10px !important;
+        border-radius: 6px !important;
+        border: 1px solid var(--line-hi) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+      }
+      .kpi-val {
+        font-size: 20px !important;
+      }
+      .kpi-label {
+        font-size: 9.5px !important;
+      }
+      .kpi-meter {
+        font-size: 10px !important;
+      }
+
+      /* Card Framing for Terminals and Charts */
+      .term {
+        border-radius: 6px !important;
+        border: 1px solid var(--line-hi) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
+      }
+      .chart-card {
+        margin-bottom: 14px !important;
+        border-radius: 6px !important;
+        border: 1px solid var(--line-hi) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
+      }
+
+      /* Responsive World Map Stage */
+      .map-stage {
+        border-right: none !important;
+        border-bottom: 1px solid var(--line) !important;
+      }
+      #osm-map-container, #ascii-map-container, #leaflet-map {
+        height: 260px !important;
+      }
+
+      /* Responsive Charts */
+      .charts-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+      }
+      .timeline-container {
+        height: 180px !important;
+        padding: 6px !important;
+      }
+
+      /* Responsive Intelligence Tables */
+      .intel-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+      }
+      .intel-table th, .intel-table td {
+        padding: 6px 8px !important;
+        font-size: 10.5px !important;
+      }
+
+      /* Responsive Console Toolbar & Filters */
+      .console-toolbar {
+        padding: 8px 10px !important;
+        gap: 8px !important;
+      }
+      .console-hud-bar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+      }
+      .prompt-row {
+        width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      .filter-tabs {
+        width: 100% !important;
+        display: flex !important;
+      }
+      .tab-btn {
+        flex: 1 !important;
+        justify-content: center !important;
+        padding: 6px 4px !important;
+        font-size: 10px !important;
+      }
+      .filters-matrix {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 6px !important;
+        width: 100% !important;
+      }
+      .filter-item {
+        width: 100% !important;
+      }
+      .filter-select {
+        width: 100% !important;
+        height: 36px !important;
+        font-size: 12px !important;
+      }
+      .search-wrap {
+        grid-column: 1 / -1 !important;
+        width: 100% !important;
+        min-width: 100% !important;
+      }
+      .search-box {
+        height: 36px !important;
+        font-size: 13px !important;
+      }
+
+      /* Stream Table Touch Scroll */
+      .table-container {
+        max-height: 420px !important;
+        -webkit-overflow-scrolling: touch !important;
+      }
+      .soc-table th {
+        padding: 7px 9px !important;
+        font-size: 9.5px !important;
+      }
+      .soc-table td {
+        padding: 8px 9px !important;
+        font-size: 10.5px !important;
+      }
+
+      /* Responsive Pagination Bar */
+      .table-pagination-bar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        padding: 8px 10px !important;
+      }
+      .pagination-left, .pagination-nav {
+        justify-content: space-between !important;
+        width: 100% !important;
+      }
+      .pagination-btn {
+        padding: 6px 10px !important;
+        min-height: 34px !important;
+      }
+
+      /* Mobile Modal Bottom-Sheet Styling */
+      .modal-overlay {
+        padding: 10px 6px 0 !important;
+        align-items: flex-end !important;
+      }
+      .modal-card, .ip-modal-card {
+        max-width: 100% !important;
+        max-height: 94vh !important;
+        border-radius: 8px 8px 0 0 !important;
+        margin: 0 !important;
+      }
+      .modal-header, .ip-header-banner {
+        padding: 10px 12px !important;
+      }
+      .ip-title-address {
+        font-size: 15px !important;
+      }
+      .ip-intel-grid {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+        padding: 10px !important;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .filters-matrix {
+        grid-template-columns: 1fr !important;
+      }
+      .kpi-grid {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 6px !important;
+      }
+      .kpi-card {
+        padding: 7px 8px !important;
+      }
+      .kpi-val {
+        font-size: 18px !important;
+      }
+      .bar-left span {
+        font-size: 12px !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -2813,7 +3488,13 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <!-- ── Sticky Top Terminal Bar ─────────────────────────────── -->
 <div class="bar">
   <div class="bar-left">
-    <span>[ 🛡️ ROUTEWARDEN ]</span>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
+      <span>ROUTEWARDEN</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.0.0</span>
+    </div>
+    <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
+    <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
   </div>
   <div class="bar-mid">
     <div style="display:flex; align-items:center; gap:6px;">
@@ -2870,8 +3551,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.0 // GoAccess Ingress Parser</span>
-            <span class="spec-pill spec-pill-green">CORE v5.0</span>
+            <span class="spec-val">RouteWarden Core v5.0.0 // Native SOC Ingress Parser</span>
+            <span class="spec-pill spec-pill-green">CORE v5.0.0</span>
           </div>
         </div>
         <div class="spec-row">
@@ -2904,7 +3585,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <span style="color: var(--overlay); font-style: italic;">Discovering active containers & remote agents...</span>
   </div>
 
+  <!-- ── Mobile Section Quick Jump Strip ───────────────────── -->
+  <nav class="mobile-section-nav" aria-label="Section Navigation">
+    <a href="#sec-kpis" class="mobile-nav-chip active" data-target="sec-kpis"><span>01</span> KPIS</a>
+    <a href="#sec-stream" class="mobile-nav-chip" data-target="sec-stream"><span>02</span> STREAM</a>
+    <a href="#sec-geo" class="mobile-nav-chip" data-target="sec-geo"><span>03</span> GEO</a>
+    <a href="#sec-charts" class="mobile-nav-chip" data-target="sec-charts"><span>04</span> CHARTS</a>
+    <a href="#sec-intel" class="mobile-nav-chip" data-target="sec-intel"><span>05</span> INTEL</a>
+  </nav>
+
   <!-- ── Section 01: KPI Spec Cards ────────────────────────── -->
+  <section class="soc-section" id="sec-kpis">
   <div class="head">
     <h2>01 // INGRESS TELEMETRY & ATTACK COUNTERS</h2>
     <div class="rule"></div>
@@ -2952,8 +3643,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <div class="kpi-sub"><span class="tui-tag tag-green">200 OK</span> Legitimate traffic</div>
     </div>
   </div>
+  </section>
 
   <!-- ── Section 02: Real-Time SOC Security Event Stream ───── -->
+  <section class="soc-section" id="sec-stream">
   <div class="head">
     <h2>02 // SECURITY OPERATIONS LOG STREAM</h2>
     <div class="rule"></div>
@@ -3002,6 +3695,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <option value="6h">⏱️ Last 6 hours</option>
             <option value="24h">⏱️ Last 24 hours</option>
             <option value="custom">⏱️ Custom Range...</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <select class="filter-select" id="select-node" title="Filter log stream by connected node / source">
+            <option value="ALL">📡 All Nodes</option>
           </select>
         </div>
 
@@ -3079,9 +3778,36 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <button id="btn-scroll-top" class="tui-btn" style="display:none; pointer-events:auto; background:var(--teal); color:var(--crust); font-weight:700; border-color:var(--teal); box-shadow:0 2px 10px rgba(0,0,0,0.35); cursor:pointer;" onclick="jumpToLatest()">▲ JUMP TO LATEST</button>
       </div>
     </div>
+
+    <!-- Terminal Table Pagination Bar -->
+    <div class="table-pagination-bar" id="stream-pagination-bar">
+      <div class="pagination-left">
+        <span class="pagination-label">Rows:</span>
+        <select class="pagination-select" id="select-page-size" title="Select events displayed per page" onchange="changePageSize(this.value)">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="250">250</option>
+          <option value="500">500</option>
+        </select>
+        <span class="pagination-info" id="pagination-info">Showing 0–0 of 0 events</span>
+        <button class="tui-btn pagination-btn" id="btn-load-more-db" style="display:none; margin-left:8px; color:var(--teal); border-color:var(--teal);" onclick="loadHistoricalLogs()">📥 Load More from DB</button>
+      </div>
+      <div class="pagination-nav">
+        <button class="tui-btn pagination-btn" id="btn-page-first" title="First Page" onclick="goToPage(1)" disabled>⏮ First</button>
+        <button class="tui-btn pagination-btn" id="btn-page-prev" title="Previous Page ( [ )" onclick="goToPrevPage()" disabled>◀ Prev</button>
+        <span class="pagination-page-indicator">
+          Page <input type="number" class="pagination-page-input" id="input-page-num" min="1" value="1" onchange="onPageInputChange(this.value)"> of <span id="pagination-total-pages">1</span>
+        </span>
+        <button class="tui-btn pagination-btn" id="btn-page-next" title="Next Page ( ] )" onclick="goToNextPage()" disabled>Next ▶</button>
+        <button class="tui-btn pagination-btn" id="btn-page-last" title="Last Page" onclick="goToLastPage()" disabled>Last ⏭</button>
+      </div>
+    </div>
   </div>
+  </section>
 
   <!-- ── Section 03: World Map & Threat Geo-Distribution ───── -->
+  <section class="soc-section" id="sec-geo">
   <div class="head">
     <h2>03 // GEO-DISTRIBUTION & ATTACK MATRIX</h2>
     <div class="rule"></div>
@@ -3121,8 +3847,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+  </section>
 
   <!-- ── Section 04: Telemetry Dynamics ────────────────────── -->
+  <section class="soc-section" id="sec-charts">
   <div class="head">
     <h2>04 // TELEMETRY DYNAMICS & THREAT SIGNATURES</h2>
     <div class="rule"></div>
@@ -3192,8 +3920,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+  </section>
 
   <!-- ── Section 05: Intelligence Vectors ──────────────────── -->
+  <section class="soc-section" id="sec-intel">
   <div class="head">
     <h2>05 // INTELLIGENCE VECTORS & HOTSPOTS</h2>
     <div class="rule"></div>
@@ -3242,6 +3972,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+  </section>
 
 </div>
 
@@ -3276,6 +4007,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <span class="footer-key-item"><span class="key-cap">/</span> Search</span>
     <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
     <span class="footer-key-item"><span class="key-cap">R</span> Reset Filters</span>
+    <span class="footer-key-item"><span class="key-cap">[</span> <span class="key-cap">]</span> Page</span>
     <span class="footer-key-item"><span class="key-cap">ESC</span> Close Modal</span>
   </div>
   <div>ROUTEWARDEN SOC // ACTIVE DEFENSE</div>
@@ -3289,12 +4021,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var allEvents = [];
   var timelineData = [];
 
+  // Table Pagination State
+  var currentPage = 1;
+  var pageSize = 50;
+  var currentEvents = [];
+  var totalFilteredCount = 0;
+  var searchDebounceTimer = null;
+
   // Active Filter State
   var filters = {
     verdict: 'ALL',
     timeRange: 'ALL',
     customStart: null,
     customEnd: null,
+    node: 'ALL',
     country: 'ALL',
     method: 'ALL',
     status: 'ALL',
@@ -3304,6 +4044,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   };
 
   var latestStats = null;
+  var lastSources = null;
 
   // Visibilities
   var visibleSeries = {
@@ -3335,6 +4076,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var customTimeEnd = document.getElementById('custom-time-end');
   var btnApplyCustomTime = document.getElementById('btn-apply-custom-time');
   var btnCancelCustomTime = document.getElementById('btn-cancel-custom-time');
+  var selectNode = document.getElementById('select-node');
   var selectCountry = document.getElementById('select-country');
   var selectMethod = document.getElementById('select-method');
   var selectStatus = document.getElementById('select-status');
@@ -3512,6 +4254,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
     }
     if (filters.verdict !== 'ALL') cmd += ' --verdict=' + filters.verdict.toLowerCase();
+    if (filters.node && filters.node !== 'ALL') cmd += ' --node=' + filters.node;
     if (filters.country !== 'ALL') cmd += ' --country=' + filters.country;
     if (filters.method !== 'ALL') cmd += ' --method=' + filters.method;
     if (filters.status !== 'ALL') cmd += ' --status=' + filters.status;
@@ -3579,6 +4322,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     });
   }
 
+  if (selectNode) {
+    selectNode.addEventListener('change', function(e) {
+      filters.node = e.target.value;
+      currentPage = 1;
+      renderActiveChips();
+      renderTable();
+      if (lastSources) renderSources(lastSources);
+    });
+  }
+
   selectCountry.addEventListener('change', function(e) {
     filters.country = e.target.value;
     renderActiveChips();
@@ -3602,8 +4355,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (searchClearBtn) {
       searchClearBtn.style.display = e.target.value ? 'inline-block' : 'none';
     }
+    currentPage = 1;
     renderActiveChips();
-    renderTable();
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(function() {
+      fetchFilteredLogs(1, true);
+    }, 250);
   });
 
   if (searchClearBtn) {
@@ -3611,8 +4368,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       searchInput.value = '';
       filters.search = '';
       searchClearBtn.style.display = 'none';
+      currentPage = 1;
       renderActiveChips();
-      renderTable();
+      fetchFilteredLogs(1, true);
       searchInput.focus();
     });
   }
@@ -3670,6 +4428,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   };
 
   window.jumpToLatest = function() {
+    currentPage = 1;
+    renderTable();
     if (streamContainer) {
       streamContainer.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -3696,6 +4456,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     filters.timeRange = 'ALL';
     filters.customStart = null;
     filters.customEnd = null;
+    filters.node = 'ALL';
     filters.country = 'ALL';
     filters.method = 'ALL';
     filters.status = 'ALL';
@@ -3712,6 +4473,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (customTimeRow) customTimeRow.style.display = 'none';
     if (customTimeStart) customTimeStart.value = '';
     if (customTimeEnd) customTimeEnd.value = '';
+    if (selectNode) selectNode.value = 'ALL';
     selectCountry.value = 'ALL';
     selectMethod.value = 'ALL';
     selectStatus.value = 'ALL';
@@ -3720,7 +4482,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     renderActiveChips();
     renderTable();
-    if (latestStats) updateWorldMap(latestStats);
+    if (lastSources) renderSources(lastSources);    if (latestStats) updateWorldMap(latestStats);
   }
 
   btnExportJSON.addEventListener('click', function() {
@@ -3765,10 +4527,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       selectCountry.focus();
     } else if (e.key === 'p' || e.key === 'P') {
       searchInput.focus();
+    } else if (e.key === '[' || e.key === 'ArrowLeft') {
+      window.goToPrevPage();
+    } else if (e.key === ']' || e.key === 'ArrowRight') {
+      window.goToNextPage();
     }
   });
 
   function renderActiveChips() {
+    currentPage = 1;
     var chips = [];
     if (filters.timeRange !== 'ALL') {
       var timeLabel = 'Time: ' + filters.timeRange;
@@ -3799,6 +4566,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var ab = document.querySelector('[data-filter-verdict="ALL"]');
       if (ab) ab.classList.add('active');
     }});
+    if (filters.node !== 'ALL') chips.push({ label: 'Node: ' + filters.node, clear: function() { filters.node = 'ALL'; if (selectNode) selectNode.value = 'ALL'; if (lastSources) renderSources(lastSources); }});
     if (filters.country !== 'ALL') chips.push({ label: 'Country: ' + filters.country, clear: function() { filters.country = 'ALL'; selectCountry.value = 'ALL'; }});
     if (filters.method !== 'ALL') chips.push({ label: 'Method: ' + filters.method, clear: function() { filters.method = 'ALL'; selectMethod.value = 'ALL'; }});
     if (filters.status !== 'ALL') chips.push({ label: 'Status: ' + filters.status, clear: function() { filters.status = 'ALL'; selectStatus.value = 'ALL'; }});
@@ -3811,6 +4579,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (filters.path) chips.push({ label: 'Path: ' + filters.path, clear: function() { filters.path = ''; }});
 
     if (selectTimeRange) selectTimeRange.classList.toggle('filter-active', filters.timeRange !== 'ALL');
+    if (selectNode) selectNode.classList.toggle('filter-active', filters.node !== 'ALL');
     if (selectCountry) selectCountry.classList.toggle('filter-active', filters.country !== 'ALL');
     if (selectMethod) selectMethod.classList.toggle('filter-active', filters.method !== 'ALL');
     if (selectStatus) selectStatus.classList.toggle('filter-active', filters.status !== 'ALL');
@@ -3852,6 +4621,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     return allEvents.filter(function(ev) {
       if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
+      if (filters.node && filters.node !== 'ALL' && (ev.source || '') !== filters.node) return false;
       if (filters.country !== 'ALL' && ev.country !== filters.country && ev.country_code !== filters.country) return false;
       if (filters.method !== 'ALL' && (ev.method || '').toUpperCase() !== filters.method) return false;
       if (filters.ip && ev.client_ip !== filters.ip) return false;
@@ -3883,17 +4653,82 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       }
 
       if (filters.search) {
-        var str = (ev.client_ip + ' ' + (ev.country || '') + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status).toLowerCase();
+        var str = (ev.client_ip + ' ' + (ev.country || '') + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status + ' ' + (ev.source || '')).toLowerCase();
         if (str.indexOf(filters.search) === -1) return false;
       }
       return true;
     });
   }
 
-  function renderTable() {
-    var filtered = getFilteredEvents();
+  function matchesCurrentFilters(ev) {
+    if (!ev) return false;
+    if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
+    if (filters.node && filters.node !== 'ALL' && (ev.source || '') !== filters.node) return false;
+    if (filters.country !== 'ALL' && ev.country !== filters.country && ev.country_code !== filters.country) return false;
+    if (filters.method !== 'ALL' && (ev.method || '').toUpperCase() !== filters.method) return false;
+    if (filters.ip && ev.client_ip !== filters.ip) return false;
+    if (filters.path && ev.path !== filters.path) return false;
+
+    if (filters.status !== 'ALL') {
+      var s = ev.status;
+      if (filters.status === '2xx' && (s < 200 || s >= 300)) return false;
+      if (filters.status === '403' && s !== 403) return false;
+      if (filters.status === '429' && s !== 429) return false;
+      if (filters.status === '4xx' && (s < 400 || s >= 500)) return false;
+      if (filters.status === '5xx' && (s < 500 || s >= 600)) return false;
+    }
+
+    if (filters.search) {
+      var str = (ev.client_ip + ' ' + (ev.country || '') + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status + ' ' + (ev.source || '')).toLowerCase();
+      if (str.indexOf(filters.search) === -1) return false;
+    }
+    return true;
+  }
+
+  function buildFilterQueryString(page, size) {
+    var p = page || currentPage;
+    var s = size || pageSize;
+    var offset = (p - 1) * s;
+    var params = ['limit=' + s, 'offset=' + offset];
+
+    if (filters.verdict && filters.verdict !== 'ALL') {
+      params.push('verdict=' + encodeURIComponent(filters.verdict));
+    }
+    if (filters.node && filters.node !== 'ALL') {
+      params.push('node=' + encodeURIComponent(filters.node));
+    }
+    if (filters.country && filters.country !== 'ALL') {
+      params.push('country=' + encodeURIComponent(filters.country));
+    }
+    if (filters.method && filters.method !== 'ALL') {
+      params.push('method=' + encodeURIComponent(filters.method));
+    }
+    if (filters.status && filters.status !== 'ALL') {
+      params.push('status=' + encodeURIComponent(filters.status));
+    }
+    if (filters.ip) {
+      params.push('ip=' + encodeURIComponent(filters.ip));
+    }
+    if (filters.path) {
+      params.push('path=' + encodeURIComponent(filters.path));
+    }
+    if (filters.search) {
+      params.push('search=' + encodeURIComponent(filters.search));
+    }
+    if (filters.timeRange && filters.timeRange !== 'ALL') {
+      if (filters.timeRange === 'custom') {
+        if (filters.customStart) params.push('start=' + encodeURIComponent(new Date(filters.customStart).toISOString()));
+        if (filters.customEnd) params.push('end=' + encodeURIComponent(new Date(filters.customEnd).toISOString()));
+      } else {
+        params.push('time=' + encodeURIComponent(filters.timeRange));
+      }
+    }
+    return params.join('&');
+  }
+
+  function renderRowsHTML(events) {
     var rowsHTML = '';
-    filtered.slice(0, 250).forEach(function(ev) {
+    events.forEach(function(ev) {
       var verdictClass = 'verdict-allow';
       var verdictLabel = '[ ALLOW ]';
       if (ev.verdict === 'BLOCK') {
@@ -3944,18 +4779,155 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       else if (filters.timeRange === '24h') tDesc = 'last 24 hours';
       else if (filters.timeRange === 'custom') tDesc = 'custom time window';
       emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">⏱️</div>NO LOGS IN SELECTED TIME RANGE (' + tDesc.toUpperCase() + ')<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Select a broader time window or reset filters to view earlier security events.</div>';
-    } else if (filters.search || filters.country !== 'ALL' || filters.method !== 'ALL' || filters.status !== 'ALL') {
+    } else if (filters.search || filters.node !== 'ALL' || filters.country !== 'ALL' || filters.method !== 'ALL' || filters.status !== 'ALL' || filters.verdict !== 'ALL') {
       emptyMessage = '<div style="font-size:16px; margin-bottom:6px;">🔍</div>NO EVENTS MATCHING ACTIVE FILTERS<div style="font-size:10.5px; margin-top:4px; color:var(--subtext);">Click [RESET ALL FILTERS] to clear query parameters.</div>';
     }
 
     streamTbody.innerHTML = rowsHTML || '<tr><td colspan="8" style="color:var(--overlay); text-align:center; padding:28px 12px; font-family:var(--mono);">' + emptyMessage + '</td></tr>';
+  }
 
-    if (streamContainer) {
-      if (autoScroll && streamContainer.scrollTop <= 30) {
-        streamContainer.scrollTop = 0;
+  function fetchFilteredLogs(page, resetScroll) {
+    if (page) currentPage = page;
+    var qs = buildFilterQueryString(currentPage, pageSize);
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/logs?' + qs, true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 401) {
+          window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        if (xhr.status === 200) {
+          try {
+            var data = JSON.parse(xhr.responseText);
+            currentEvents = data.events || [];
+            totalFilteredCount = (typeof data.filtered_total === 'number') ? data.filtered_total : (data.total || currentEvents.length);
+            var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+            if (currentPage > totalPages) currentPage = totalPages;
+            if (currentPage < 1) currentPage = 1;
+
+            var startIndex = (currentPage - 1) * pageSize;
+            var endIndex = Math.min(startIndex + currentEvents.length, totalFilteredCount);
+
+            renderRowsHTML(currentEvents);
+            updatePaginationUI(totalFilteredCount, totalPages, startIndex, endIndex);
+
+            if (resetScroll && streamContainer) {
+              streamContainer.scrollTop = 0;
+            }
+            return;
+          } catch(e) {}
+        }
+        renderTableFallback();
+      }
+    };
+    xhr.send();
+  }
+
+  function renderTableFallback() {
+    var filtered = getFilteredEvents();
+    totalFilteredCount = filtered.length;
+    var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    var startIndex = (currentPage - 1) * pageSize;
+    var endIndex = Math.min(startIndex + pageSize, totalFilteredCount);
+    currentEvents = filtered.slice(startIndex, endIndex);
+
+    renderRowsHTML(currentEvents);
+    updatePaginationUI(totalFilteredCount, totalPages, startIndex, endIndex);
+  }
+
+  function renderTable() {
+    fetchFilteredLogs(currentPage, false);
+  }
+
+  function updatePaginationUI(totalFiltered, totalPages, startIndex, endIndex) {
+    var info = document.getElementById('pagination-info');
+    var totalPagesEl = document.getElementById('pagination-total-pages');
+    var inputPage = document.getElementById('input-page-num');
+    var btnFirst = document.getElementById('btn-page-first');
+    var btnPrev = document.getElementById('btn-page-prev');
+    var btnNext = document.getElementById('btn-page-next');
+    var btnLast = document.getElementById('btn-page-last');
+    var btnLoadMore = document.getElementById('btn-load-more-db');
+
+    if (info) {
+      if (totalFiltered === 0) {
+        info.textContent = 'Showing 0–0 of 0 events';
+      } else {
+        info.textContent = 'Showing ' + (startIndex + 1) + '–' + endIndex + ' of ' + totalFiltered + ' events';
+      }
+    }
+    if (totalPagesEl) totalPagesEl.textContent = totalPages;
+    if (inputPage) {
+      inputPage.value = currentPage;
+      inputPage.max = totalPages;
+    }
+
+    if (btnFirst) btnFirst.disabled = (currentPage <= 1);
+    if (btnPrev) btnPrev.disabled = (currentPage <= 1);
+    if (btnNext) btnNext.disabled = (currentPage >= totalPages);
+    if (btnLast) btnLast.disabled = (currentPage >= totalPages);
+
+    if (btnLoadMore) {
+      if (totalFiltered > (startIndex + currentEvents.length)) {
+        btnLoadMore.style.display = 'inline-flex';
+        btnLoadMore.textContent = 'Next Page ▶';
+        btnLoadMore.onclick = function() { window.goToNextPage(); };
+      } else {
+        btnLoadMore.style.display = 'none';
       }
     }
   }
+
+  window.goToPage = function(page) {
+    var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+    var p = parseInt(page, 10);
+    if (isNaN(p)) return;
+    if (p < 1) p = 1;
+    if (p > totalPages) p = totalPages;
+    if (p !== currentPage) {
+      currentPage = p;
+      fetchFilteredLogs(p, true);
+    }
+  };
+
+  window.goToPrevPage = function() {
+    if (currentPage > 1) {
+      window.goToPage(currentPage - 1);
+    }
+  };
+
+  window.goToNextPage = function() {
+    var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+    if (currentPage < totalPages) {
+      window.goToPage(currentPage + 1);
+    }
+  };
+
+  window.goToLastPage = function() {
+    var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+    window.goToPage(totalPages);
+  };
+
+  window.changePageSize = function(size) {
+    var s = parseInt(size, 10);
+    if (!isNaN(s) && s > 0) {
+      pageSize = s;
+      currentPage = 1;
+      fetchFilteredLogs(1, true);
+    }
+  };
+
+  window.onPageInputChange = function(val) {
+    window.goToPage(val);
+  };
+
+  window.loadHistoricalLogs = function() {
+    window.goToNextPage();
+  };
 
   // Periodically refresh table if time filter is active (so time window naturally rolls forward)
   setInterval(function() {
@@ -3965,11 +4937,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }, 5000);
 
   window.inspectEvent = function(id) {
-    var found = allEvents.find(function(e) { return e.id === id; });
+    var found = currentEvents.find(function(e) { return e.id === id; }) || allEvents.find(function(e) { return e.id === id; });
     if (!found) return;
 
     modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid var(--line); padding-bottom:10px;">' +
-      '<div>SOURCE IP: <b style="color:var(--teal);">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') + '</div>' +
+      '<div>SOURCE IP: <b style="color:var(--teal);">' + found.client_ip + '</b>' + (found.country ? ' <span style="margin-left:8px;">' + getFlagEmoji(found.country_code) + ' ' + found.country + '</span>' : '') +
+      ' <span style="margin-left:14px; color:var(--mauve); font-size:11px; font-weight:600;">NODE / SOURCE: ' + (found.source || 'local') + '</span></div>' +
       '<button class="tui-btn" onclick="inspectIP(\'' + found.client_ip + '\')">🌐 IP INTEL & ABUSE HUB</button>' +
     '</div>' +
     '<pre style="margin:0; overflow-x:auto; background:var(--crust); padding:12px; border-radius:3px; border:1px solid var(--line);">' + JSON.stringify(found, null, 2) + '</pre>';
@@ -4594,26 +5567,39 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   function renderSources(sources) {
+    if (sources) {
+      lastSources = sources;
+    } else {
+      sources = lastSources;
+    }
     if (!sources) return;
     var sHTML = '<span style="font-weight: 600; color: var(--text-hi);">🌐 MONITORED NODES:</span>';
     var count = 0;
+    var nodeNames = [];
 
     if (sources.mode === 'file') {
-      sHTML += '<span class="source-tag">📁 ' + (sources.file || 'Local Log File') + '</span>';
+      var fname = sources.file || 'Local Log File';
+      nodeNames.push(fname);
+      var isAct = (filters.node === fname);
+      sHTML += '<span class="source-tag' + (isAct ? ' active' : '') + '" onclick="filterByNode(\'' + fname.replace(/'/g, "\\'") + '\')" title="Filter events from ' + fname.replace(/"/g, '&quot;') + '">📁 ' + fname + '</span>';
       count++;
     }
 
     if (sources.targets && sources.targets.length > 0) {
       sources.targets.forEach(function(t) {
+        nodeNames.push(t.name);
         var sid = (t.id && t.id.length > 12) ? t.id.substring(0, 12) : t.id;
-        sHTML += '<span class="source-tag">🐳 ' + t.name + ' (' + sid + ')</span>';
+        var isAct = (filters.node === t.name);
+        sHTML += '<span class="source-tag' + (isAct ? ' active' : '') + '" onclick="filterByNode(\'' + t.name.replace(/'/g, "\\'") + '\')" title="Filter events from container: ' + t.name.replace(/"/g, '&quot;') + '">🐳 ' + t.name + ' (' + sid + ')</span>';
         count++;
       });
     }
 
     if (sources.agents && sources.agents.length > 0) {
       sources.agents.forEach(function(ag) {
-        sHTML += '<span class="source-tag">🌐 ' + ag.name + ' (' + (ag.remote_ip || 'remote') + ') <span style="color:var(--mauve);">🔒 X25519</span></span>';
+        nodeNames.push(ag.name);
+        var isAct = (filters.node === ag.name);
+        sHTML += '<span class="source-tag' + (isAct ? ' active' : '') + '" onclick="filterByNode(\'' + ag.name.replace(/'/g, "\\'") + '\')" title="Filter events from agent: ' + ag.name.replace(/"/g, '&quot;') + '">🌐 ' + ag.name + ' (' + (ag.remote_ip || 'remote') + ') <span style="color:var(--mauve);">🔒 X25519</span></span>';
         count++;
       });
     }
@@ -4622,7 +5608,46 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       sHTML += '<span style="color: var(--overlay); font-style: italic;">Awaiting local containers or remote agents (<code>rwarden push</code>)...</span>';
     }
     sourcesContainer.innerHTML = sHTML;
+
+    // Harvest extra sources from allEvents or currentEvents
+    if (allEvents && allEvents.length > 0) {
+      allEvents.forEach(function(e) {
+        if (e.source) nodeNames.push(e.source);
+      });
+    }
+
+    if (selectNode) {
+      var currentNode = filters.node || 'ALL';
+      var nOptHTML = '<option value="ALL">📡 All Nodes</option>';
+      var seen = {};
+      nodeNames.forEach(function(name) {
+        if (!name || seen[name]) return;
+        seen[name] = true;
+        var sel = (name === currentNode) ? ' selected' : '';
+        nOptHTML += '<option value="' + name.replace(/"/g, '&quot;') + '"' + sel + '>📡 ' + name + '</option>';
+      });
+      if (currentNode !== 'ALL' && !seen[currentNode]) {
+        nOptHTML += '<option value="' + currentNode.replace(/"/g, '&quot;') + '" selected>📡 ' + currentNode + '</option>';
+      }
+      if (selectNode.innerHTML !== nOptHTML) {
+        selectNode.innerHTML = nOptHTML;
+        selectNode.value = currentNode;
+      }
+    }
   }
+
+  window.filterByNode = function(node) {
+    if (!node || node === filters.node) {
+      filters.node = 'ALL';
+    } else {
+      filters.node = node;
+    }
+    if (selectNode) selectNode.value = filters.node;
+    currentPage = 1;
+    renderActiveChips();
+    renderTable();
+    if (lastSources) renderSources(lastSources);
+  };
 
   // IP Intelligence & Abuse Hub
   var ipModal = document.getElementById('ip-modal');
@@ -4854,20 +5879,49 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '/api/stats', true);
     xhr.onreadystatechange = function() {
-      if (xhr.readyState === 4 && xhr.status === 200) {
-        try {
-          var data = JSON.parse(xhr.responseText);
-          updateKPIs(data);
-          if (data.sources) renderSources(data.sources);
-          if (data.recent_events && allEvents.length === 0) {
-            allEvents = data.recent_events;
-            renderTable();
-          }
-        } catch(e) {}
+      if (xhr.readyState === 4) {
+        if (xhr.status === 401) {
+          window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        if (xhr.status === 200) {
+          try {
+            var data = JSON.parse(xhr.responseText);
+            updateKPIs(data);
+            if (data.auth_enabled) {
+              var authBadge = document.getElementById('auth-status-badge');
+              if (authBadge) {
+                authBadge.textContent = '🔒 AUTH: ' + (data.auth_user || 'ACTIVE');
+                authBadge.style.display = 'inline-block';
+              }
+              var btnLogout = document.getElementById('btn-logout');
+              if (btnLogout) {
+                btnLogout.style.display = 'inline-flex';
+              }
+            }
+            if (data.sources) renderSources(data.sources);
+            if (data.recent_events && allEvents.length === 0) {
+              allEvents = data.recent_events;
+              renderTable();
+            }
+          } catch(e) {}
+        }
       }
     };
     xhr.send();
   }
+
+  // Dashboard Sign Out
+  window.logoutDashboard = function() {
+    fetch('/api/auth/logout', { method: 'POST' })
+      .then(function() {
+        try { localStorage.removeItem('routewarden_auth'); } catch(e) {}
+        window.location.href = '/login';
+      })
+      .catch(function() {
+        window.location.href = '/logout';
+      });
+  };
 
   // Real-Time SSE Stream
   function initSSE() {
@@ -4886,7 +5940,25 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             pauseBadge.style.display = 'inline-block';
           }
         } else {
-          renderTable();
+          if (matchesCurrentFilters(ev)) {
+            if (currentPage === 1 && (!filters.timeRange || filters.timeRange === 'ALL')) {
+              currentEvents.unshift(ev);
+              if (currentEvents.length > pageSize) currentEvents.pop();
+              totalFilteredCount++;
+              var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+              renderRowsHTML(currentEvents);
+              updatePaginationUI(totalFilteredCount, totalPages, 0, currentEvents.length);
+              if (autoScroll && streamContainer && streamContainer.scrollTop <= 30) {
+                streamContainer.scrollTop = 0;
+              }
+            } else {
+              totalFilteredCount++;
+              var totalPages = Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+              var startIndex = (currentPage - 1) * pageSize;
+              var endIndex = Math.min(startIndex + currentEvents.length, totalFilteredCount);
+              updatePaginationUI(totalFilteredCount, totalPages, startIndex, endIndex);
+            }
+          }
         }
       } catch(err) {}
     });
@@ -4900,8 +5972,59 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     };
   }
 
+  function initMobileNavObserver() {
+    var chips = document.querySelectorAll('.mobile-nav-chip');
+    var sections = document.querySelectorAll('.soc-section');
+    if (!sections.length || !chips.length) return;
+
+    // Smooth click handler
+    chips.forEach(function(chip) {
+      chip.addEventListener('click', function(e) {
+        var targetId = chip.getAttribute('data-target');
+        var targetEl = document.getElementById(targetId);
+        if (targetEl) {
+          e.preventDefault();
+          targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          chips.forEach(function(c) { c.classList.remove('active'); });
+          chip.classList.add('active');
+        }
+      });
+    });
+
+    // Scroll spy via IntersectionObserver if supported
+    if ('IntersectionObserver' in window) {
+      var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            var id = entry.target.id;
+            chips.forEach(function(c) {
+              if (c.getAttribute('data-target') === id) {
+                c.classList.add('active');
+                if (c.scrollIntoViewIfNeeded) {
+                  c.scrollIntoViewIfNeeded({ inline: 'center' });
+                } else {
+                  c.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+                }
+              } else {
+                c.classList.remove('active');
+              }
+            });
+          }
+        });
+      }, {
+        rootMargin: '-20% 0px -70% 0px',
+        threshold: 0
+      });
+
+      sections.forEach(function(sec) {
+        observer.observe(sec);
+      });
+    }
+  }
+
   // Initial startup
   initLeafletMap();
+  initMobileNavObserver();
   fetchStats();
   initSSE();
   setInterval(fetchStats, 3000);

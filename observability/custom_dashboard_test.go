@@ -149,6 +149,15 @@ func TestCustomDashboard_HTTPEndpoints(t *testing.T) {
 	if !strings.Contains(body, "RouteWarden") || !strings.Contains(body, "SOC INTELLIGENCE") {
 		t.Errorf("expected RouteWarden SOC dashboard HTML, got: %s", body[:min(200, len(body))])
 	}
+	if !strings.Contains(body, `id="select-node"`) {
+		t.Errorf("expected select-node in dashboard HTML")
+	}
+	if !strings.Contains(body, "filterByNode") {
+		t.Errorf("expected filterByNode function in dashboard script")
+	}
+	if !strings.Contains(body, "All Nodes") {
+		t.Errorf("expected 'All Nodes' in dashboard HTML")
+	}
 
 	// 2. GET /api/stats should return valid JSON
 	reqStats := httptest.NewRequest("GET", "/api/stats", nil)
@@ -191,6 +200,34 @@ func TestCustomDashboard_HTTPEndpoints(t *testing.T) {
 	handler.ServeHTTP(rrNoIP, reqNoIP)
 	if rrNoIP.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for /api/ip-lookup without IP, got %d", rrNoIP.Code)
+	}
+
+	// 5. GET /favicon.ico should return 200 with image/x-icon
+	reqFavicon := httptest.NewRequest("GET", "/favicon.ico", nil)
+	rrFavicon := httptest.NewRecorder()
+	handler.ServeHTTP(rrFavicon, reqFavicon)
+	if rrFavicon.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /favicon.ico, got %d", rrFavicon.Code)
+	}
+	if ct := rrFavicon.Header().Get("Content-Type"); ct != "image/x-icon" {
+		t.Errorf("expected Content-Type image/x-icon, got %q", ct)
+	}
+	if rrFavicon.Body.Len() == 0 {
+		t.Errorf("expected non-empty favicon.ico body")
+	}
+
+	// 6. GET /icon.svg should return 200 with image/svg+xml
+	reqIcon := httptest.NewRequest("GET", "/icon.svg", nil)
+	rrIcon := httptest.NewRecorder()
+	handler.ServeHTTP(rrIcon, reqIcon)
+	if rrIcon.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /icon.svg, got %d", rrIcon.Code)
+	}
+	if ct := rrIcon.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Errorf("expected Content-Type image/svg+xml, got %q", ct)
+	}
+	if rrIcon.Body.Len() == 0 {
+		t.Errorf("expected non-empty icon.svg body")
 	}
 
 	// 5. Test direct LookupIP function for invalid and empty inputs
@@ -310,4 +347,155 @@ func TestCustomDashboard_TimeRangeFilterElements(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomDashboard_PaginationElements(t *testing.T) {
+	html := observability.CustomSOCDashboardHTML
+	elements := []string{
+		`id="stream-pagination-bar"`,
+		`id="select-page-size"`,
+		`id="pagination-info"`,
+		`id="btn-page-first"`,
+		`id="btn-page-prev"`,
+		`id="input-page-num"`,
+		`id="pagination-total-pages"`,
+		`id="btn-page-next"`,
+		`id="btn-page-last"`,
+		`id="btn-load-more-db"`,
+		`goToPage`,
+		`goToPrevPage`,
+		`goToNextPage`,
+		`changePageSize`,
+		`fetchFilteredLogs`,
+		`matchesCurrentFilters`,
+		`buildFilterQueryString`,
+		`href="/icon.svg"`,
+		`href="/favicon.ico"`,
+		`src="/icon.svg"`,
+	}
+	for _, el := range elements {
+		if !strings.Contains(html, el) {
+			t.Errorf("expected dashboard HTML to contain %s", el)
+		}
+	}
+}
+
+func TestDashboard_Authentication(t *testing.T) {
+	tempDir := t.TempDir()
+	logFilePath := tempDir + "/access.log"
+	logFile, _ := os.Create(logFilePath)
+	defer logFile.Close()
+
+	// 1. Create handler with auth configured: admin:supersecret
+	handler := observability.NewDashboardHandlerWithAuth(tempDir, nil, "", logFile, nil, "", "admin:supersecret")
+
+	// A. Unauthenticated request to GET / should return 401 with WWW-Authenticate
+	reqNoAuth := httptest.NewRequest("GET", "/", nil)
+	rrNoAuth := httptest.NewRecorder()
+	handler.ServeHTTP(rrNoAuth, reqNoAuth)
+	if rrNoAuth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized without credentials, got %d", rrNoAuth.Code)
+	}
+	if !strings.Contains(rrNoAuth.Header().Get("WWW-Authenticate"), "Basic") {
+		t.Errorf("expected WWW-Authenticate header with Basic, got %q", rrNoAuth.Header().Get("WWW-Authenticate"))
+	}
+
+	// B. Request with incorrect credentials should return 401
+	reqWrong := httptest.NewRequest("GET", "/", nil)
+	reqWrong.SetBasicAuth("admin", "wrongpassword")
+	rrWrong := httptest.NewRecorder()
+	handler.ServeHTTP(rrWrong, reqWrong)
+	if rrWrong.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for wrong password, got %d", rrWrong.Code)
+	}
+
+	// C. Request with valid Basic Auth should return 200 OK
+	reqValid := httptest.NewRequest("GET", "/", nil)
+	reqValid.SetBasicAuth("admin", "supersecret")
+	rrValid := httptest.NewRecorder()
+	handler.ServeHTTP(rrValid, reqValid)
+	if rrValid.Code != http.StatusOK {
+		t.Errorf("expected 200 OK with valid Basic Auth, got %d", rrValid.Code)
+	}
+
+	// D. Unauthenticated request to /api/logs should return 401 JSON
+	reqLogsNoAuth := httptest.NewRequest("GET", "/api/logs", nil)
+	rrLogsNoAuth := httptest.NewRecorder()
+	handler.ServeHTTP(rrLogsNoAuth, reqLogsNoAuth)
+	if rrLogsNoAuth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for /api/logs without credentials, got %d", rrLogsNoAuth.Code)
+	}
+	if !strings.Contains(rrLogsNoAuth.Body.String(), "unauthorized") {
+		t.Errorf("expected JSON error for unauthorized API, got %s", rrLogsNoAuth.Body.String())
+	}
+
+	// E. /api/stats with valid Basic Auth should return auth_enabled=true and auth_user="admin"
+	reqStats := httptest.NewRequest("GET", "/api/stats", nil)
+	reqStats.SetBasicAuth("admin", "supersecret")
+	rrStats := httptest.NewRecorder()
+	handler.ServeHTTP(rrStats, reqStats)
+	if rrStats.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/stats with valid credentials, got %d", rrStats.Code)
+	}
+	var stats map[string]interface{}
+	if err := json.Unmarshal(rrStats.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("failed to decode /api/stats JSON: %v", err)
+	}
+	if authEn, ok := stats["auth_enabled"].(bool); !ok || !authEn {
+		t.Errorf("expected auth_enabled=true in /api/stats, got %v", stats["auth_enabled"])
+	}
+	if authUser, ok := stats["auth_user"].(string); !ok || authUser != "admin" {
+		t.Errorf("expected auth_user='admin' in /api/stats, got %v", stats["auth_user"])
+	}
+
+	// F. /api/logs with ?auth=admin:supersecret query param should return 200 OK
+	reqQueryAuth := httptest.NewRequest("GET", "/api/logs?auth=admin:supersecret", nil)
+	rrQueryAuth := httptest.NewRecorder()
+	handler.ServeHTTP(rrQueryAuth, reqQueryAuth)
+	if rrQueryAuth.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/logs with ?auth=, got %d", rrQueryAuth.Code)
+	}
+
+	// G. /api/logs with ?token=supersecret query param should return 200 OK
+	reqQueryToken := httptest.NewRequest("GET", "/api/logs?token=supersecret", nil)
+	rrQueryToken := httptest.NewRecorder()
+	handler.ServeHTTP(rrQueryToken, reqQueryToken)
+	if rrQueryToken.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/logs with ?token=, got %d", rrQueryToken.Code)
+	}
+
+	// H. /api/logs with Bearer token should return 200 OK
+	reqBearer := httptest.NewRequest("GET", "/api/logs", nil)
+	reqBearer.Header.Set("Authorization", "Bearer supersecret")
+	rrBearer := httptest.NewRecorder()
+	handler.ServeHTTP(rrBearer, reqBearer)
+	if rrBearer.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/logs with Bearer token, got %d", rrBearer.Code)
+	}
+
+	// I. Static assets /favicon.ico and /icon.svg should be exempt from auth
+	reqFav := httptest.NewRequest("GET", "/favicon.ico", nil)
+	rrFav := httptest.NewRecorder()
+	handler.ServeHTTP(rrFav, reqFav)
+	if rrFav.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /favicon.ico without auth, got %d", rrFav.Code)
+	}
+
+	// J. Agent API /api/v1/pubkey should be exempt from auth
+	reqPub := httptest.NewRequest("GET", "/api/v1/pubkey", nil)
+	rrPub := httptest.NewRecorder()
+	handler.ServeHTTP(rrPub, reqPub)
+	if rrPub.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for /api/v1/pubkey without dashboard basic auth, got %d", rrPub.Code)
+	}
+
+	// K. Handler with empty auth should allow unauthenticated access
+	openHandler := observability.NewDashboardHandlerWithAuth(tempDir, nil, "", logFile, nil, "", "")
+	reqOpen := httptest.NewRequest("GET", "/api/logs", nil)
+	rrOpen := httptest.NewRecorder()
+	openHandler.ServeHTTP(rrOpen, reqOpen)
+	if rrOpen.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for open handler without auth, got %d", rrOpen.Code)
+	}
+}
+
 
