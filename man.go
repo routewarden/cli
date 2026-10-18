@@ -48,8 +48,23 @@ Emit system roff/troff manual page.
 \fBsandbox\fR \fItarget\fR [\fIconfig\fR]
 Spin up an ephemeral, isolated Traefik, Caddy, or NGINX container in Docker to test live request traffic against policies.
 .TP
-\fBdashboard\fR [\fIup\fR|\fIdown\fR|\fIstatus\fR|\fIexport\fR]
-Launch and manage the lightweight real-time SOC security dashboard.
+\fBdashboard\fR [\fIup\fR|\fIdown\fR|\fIstatus\fR|\fIstop\fR|\fIexport\fR]
+Launch and manage the real-time SOC security dashboard (supports \fB--detach\fR / \fB-d\fR).
+.TP
+\fBkeys\fR [\fIcreate\fR|\fIlist\fR|\fIrevoke\fR]
+Manage agent authentication keys and tokens for distributed remote log streaming.
+.TP
+\fBregister\fR [\fI--url\fR] [\fI--key\fR]
+Enroll a remote edge server with a central RouteWarden dashboard.
+.TP
+\fBpush\fR [\fIoptions\fR]
+Stream encrypted reverse proxy logs to the central dashboard (supports \fB--docker\fR, \fB--detach\fR / \fB-d\fR, \fBstatus\fR, \fBstop\fR).
+.TP
+\fBstatus\fR [\fIdashboard\fR|\fIpush\fR]
+Display running status, PID, and log path of background dashboard and shipper daemons.
+.TP
+\fBstop\fR [\fIdashboard\fR|\fIpush\fR|\fIall\fR]
+Stop running background dashboard and/or shipper daemons.
 .TP
 \fBcleanup\fR
 Stop and remove all running RouteWarden ephemeral sandbox containers.
