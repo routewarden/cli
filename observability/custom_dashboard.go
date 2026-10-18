@@ -479,13 +479,13 @@ func (s *EventStore) GetStats() DashboardStats {
 		statCopy[k] = v
 	}
 
-	// Copy recent events in reverse order (newest first)
+	// Copy recent events in reverse order (newest first, up to 250)
 	recent := make([]*SecurityEvent, len(s.events))
 	for i, ev := range s.events {
 		recent[len(s.events)-1-i] = ev
 	}
-	if len(recent) > 100 {
-		recent = recent[:100]
+	if len(recent) > 250 {
+		recent = recent[:250]
 	}
 
 	return DashboardStats{
@@ -609,8 +609,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     body {
       background-color: var(--bg-primary);
       background-image: 
-        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.07) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.07) 0px, transparent 50%),
+        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
         radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.5) 0px, transparent 100%);
       background-attachment: fixed;
       color: var(--text-primary);
@@ -622,7 +622,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Layout Container */
     .dashboard-wrap {
       max-width: 1540px;
       margin: 0 auto;
@@ -633,7 +632,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 20px;
     }
 
-    /* Top Navigation Header */
+    /* Top Header Bar */
     header.soc-header {
       display: flex;
       flex-wrap: wrap;
@@ -760,7 +759,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     /* Executive KPI Grid */
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
       gap: 16px;
     }
     .kpi-card {
@@ -854,10 +853,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-weight: 700;
     }
 
-    /* Visual Charts Section */
+    /* Charts Section */
     .charts-grid {
       display: grid;
-      grid-template-columns: 2fr 1fr;
+      grid-template-columns: 2.1fr 1fr;
       gap: 20px;
     }
     @media (max-width: 1080px) {
@@ -876,15 +875,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
     .card-header {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
+      gap: 10px;
     }
     .card-title {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -894,10 +895,34 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 8px;
     }
 
-    /* SVG Timeline */
+    /* Timeline Controls & Legend */
+    .timeline-legend {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      transition: opacity 0.2s;
+    }
+    .legend-item.dimmed {
+      opacity: 0.35;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+    }
+
     .timeline-container {
       width: 100%;
-      height: 220px;
+      height: 250px;
       position: relative;
     }
     .timeline-svg {
@@ -906,23 +931,67 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       overflow: visible;
     }
 
+    /* Floating Tooltip */
+    .chart-tooltip {
+      position: absolute;
+      display: none;
+      pointer-events: none;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(56, 189, 248, 0.15);
+      z-index: 100;
+      line-height: 1.5;
+      transform: translate(-50%, -115%);
+    }
+
+    /* Donut & Rules Stack */
+    .donut-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      gap: 16px;
+      padding: 6px 0;
+    }
+    .donut-svg {
+      width: 130px;
+      height: 130px;
+      transform: rotate(-90deg);
+    }
+    .donut-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
     /* Rules Progress Bars */
     .rules-list {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
       justify-content: center;
-      min-height: 180px;
     }
     .rule-item {
       display: flex;
       flex-direction: column;
       gap: 4px;
+      cursor: pointer;
+      padding: 4px 6px;
+      border-radius: 6px;
+      transition: background 0.15s ease;
+    }
+    .rule-item:hover {
+      background: rgba(255, 255, 255, 0.05);
     }
     .rule-meta {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
+      font-size: 11px;
       font-family: 'JetBrains Mono', monospace;
     }
     .rule-name {
@@ -934,7 +1003,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     .rule-bar-wrap {
       width: 100%;
-      height: 7px;
+      height: 6px;
       background: rgba(255, 255, 255, 0.06);
       border-radius: 4px;
       overflow: hidden;
@@ -943,7 +1012,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       height: 100%;
       border-radius: 4px;
       background: linear-gradient(90deg, #6366f1, #38bdf8);
-      transition: width 0.5s ease;
+      transition: width 0.4s ease;
     }
 
     /* Intelligence Split Grid */
@@ -974,16 +1043,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       border-bottom: 1px solid var(--card-border);
     }
     .intel-table td {
-      padding: 10px 12px;
+      padding: 8px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       color: #cbd5e1;
       font-family: 'JetBrains Mono', monospace;
     }
     .intel-table tr:hover td {
-      background: rgba(255, 255, 255, 0.03);
+      background: rgba(255, 255, 255, 0.04);
+      cursor: pointer;
     }
 
-    /* Real-Time SOC Live Console */
+    /* Multi-Dimensional SOC Console Filters */
     .console-card {
       background: var(--card-bg);
       backdrop-filter: blur(14px);
@@ -996,13 +1066,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       flex-direction: column;
       gap: 14px;
     }
+
     .console-toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .filters-row {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
     }
+
     .filter-tabs {
       display: flex;
       gap: 6px;
@@ -1028,20 +1105,74 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       color: #38bdf8;
     }
 
+    .filter-select {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 12px;
+      padding: 6px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .filter-select:focus {
+      border-color: var(--accent-cyan);
+    }
+
     .search-box {
       background: rgba(0, 0, 0, 0.35);
       border: 1px solid var(--card-border);
-      border-radius: 8px;
+      border-radius: 6px;
       padding: 6px 12px;
       color: #f8fafc;
       font-size: 12px;
       font-family: 'JetBrains Mono', monospace;
       outline: none;
-      width: 240px;
+      min-width: 220px;
+      flex: 1;
       transition: border-color 0.2s ease;
     }
     .search-box:focus {
       border-color: var(--accent-cyan);
+    }
+
+    /* Active Filter Chips Bar */
+    .active-chips-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .filter-chip {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #7dd3fc;
+      padding: 3px 8px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .chip-close {
+      cursor: pointer;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .chip-close:hover {
+      color: #ffffff;
+    }
+    .btn-clear-all {
+      color: #fb7185;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: underline;
     }
 
     .table-container {
@@ -1078,7 +1209,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       white-space: nowrap;
     }
     table.soc-table tr:hover td {
-      background: rgba(255, 255, 255, 0.03);
+      background: rgba(255, 255, 255, 0.04);
       cursor: pointer;
     }
 
@@ -1196,7 +1327,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span class="pulse-dot"></span>
         <span id="stream-status">LIVE STREAM</span>
       </div>
-      <button class="btn-action" id="btn-toggle-scroll">⏸ Pause Stream</button>
+      <button class="btn-action" id="btn-toggle-scroll">⏸ Pause</button>
+      <button class="btn-action" id="btn-export-json">📥 Export</button>
       <button class="btn-action" id="btn-clear-logs">🗑 Clear</button>
     </div>
   </header>
@@ -1215,7 +1347,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span class="kpi-icon">🛡️</span>
       </div>
       <div class="kpi-val" id="kpi-total">0</div>
-      <div class="kpi-sub">Real-time gateway events</div>
+      <div class="kpi-sub">Gateway ingress events</div>
     </div>
 
     <div class="kpi-card" style="border-top: 3px solid var(--accent-red);">
@@ -1257,45 +1389,63 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   <!-- Visual Graphs Grid -->
   <div class="charts-grid">
-    <!-- Real-Time Timeline Curve -->
+    <!-- Real-Time Timeline Curve with Full Scales & Legend -->
     <div class="chart-card">
       <div class="card-header">
-        <span class="card-title">📈 Real-Time Ingress Velocity & Threat Timeline</span>
-        <span style="font-size: 11px; color: var(--text-muted); font-family: monospace;" id="timeline-range">Live 30-min window</span>
+        <span class="card-title">📈 Ingress Velocity & Threat Timeline</span>
+        <div class="timeline-legend">
+          <span class="legend-item" id="legend-clean"><span class="legend-dot" style="background:#10b981;"></span> Clean</span>
+          <span class="legend-item" id="legend-blocked"><span class="legend-dot" style="background:#f43f5e;"></span> Blocked</span>
+          <span class="legend-item" id="legend-tarpit"><span class="legend-dot" style="background:#f59e0b;"></span> Tarpit</span>
+        </div>
       </div>
       <div class="timeline-container" id="timeline-box">
-        <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 200" preserveAspectRatio="none">
+        <div class="chart-tooltip" id="timeline-tooltip"></div>
+        <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
           <defs>
             <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#10b981" stop-opacity="0.35"/>
+              <stop offset="0%" stop-color="#10b981" stop-opacity="0.4"/>
               <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
             </linearGradient>
             <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.5"/>
+              <stop offset="0%" stop-color="#f43f5e" stop-opacity="0.55"/>
               <stop offset="100%" stop-color="#f43f5e" stop-opacity="0.0"/>
             </linearGradient>
-            <linearGradient id="grad-tarpit" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.45"/>
-              <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.0"/>
-            </linearGradient>
           </defs>
-          <g id="grid-lines"></g>
+          <g id="grid-group"></g>
+          <g id="axes-group"></g>
           <path id="path-clean-area" fill="url(#grad-clean)"></path>
           <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
-          <path id="path-clean-line" fill="none" stroke="#10b981" stroke-width="2.5"></path>
-          <path id="path-blocked-line" fill="none" stroke="#f43f5e" stroke-width="2.5"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#f59e0b" stroke-width="2"></path>
+          <path id="path-clean-line" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"></path>
+          <path id="path-blocked-line" fill="none" stroke="#f43f5e" stroke-width="2.5" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"></path>
+          <line id="crosshair-line" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3,3" style="display:none;"></line>
+          <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
         </svg>
       </div>
     </div>
 
-    <!-- Top Triggered Rules Breakdown -->
+    <!-- Threat Breakdown (Donut + Top Rules) -->
     <div class="chart-card">
       <div class="card-header">
-        <span class="card-title">🎯 Top Triggered Threat Rules</span>
+        <span class="card-title">🎯 Threat Ratio & Signatures</span>
       </div>
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
+          <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
+          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#10b981" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#f43f5e" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#f59e0b" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+        </svg>
+        <div class="donut-legend">
+          <div><span style="color:#10b981;">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
+          <div><span style="color:#f43f5e;">●</span> Blocked: <span id="donut-blocked-lbl">0%</span></div>
+          <div><span style="color:#f59e0b;">●</span> Tarpit: <span id="donut-tarpit-lbl">0%</span></div>
+        </div>
+      </div>
+      <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">Top Triggered Rules (Click to filter):</div>
       <div class="rules-list" id="rules-container">
-        <div style="color: #64748b; font-size: 12px; font-style: italic;">Awaiting rule triggers...</div>
+        <div style="color: #64748b; font-size: 11px; font-style: italic;">Awaiting rule triggers...</div>
       </div>
     </div>
   </div>
@@ -1305,13 +1455,14 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="chart-card">
       <div class="card-header">
         <span class="card-title">🚨 Top Attacking Client IPs</span>
+        <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
       </div>
       <table class="intel-table">
         <thead>
           <tr>
             <th>Client IP</th>
             <th>Total Hits</th>
-            <th>Verdict Breakdown</th>
+            <th>Threat Breakdown</th>
           </tr>
         </thead>
         <tbody id="top-ips-tbody">
@@ -1323,6 +1474,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="chart-card">
       <div class="card-header">
         <span class="card-title">🎯 Top Targeted Endpoints</span>
+        <span style="font-size:11px; color:var(--text-muted);">Click row to filter</span>
       </div>
       <table class="intel-table">
         <thead>
@@ -1339,16 +1491,48 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Real-Time Threat Stream Console -->
+  <!-- Real-Time Multi-Dimensional SOC Console -->
   <div class="console-card">
     <div class="console-toolbar">
-      <div class="filter-tabs">
-        <button class="tab-btn active" data-filter="ALL">All Traffic (<span id="count-tab-all">0</span>)</button>
-        <button class="tab-btn" data-filter="BLOCK">🛑 Blocked (<span id="count-tab-block">0</span>)</button>
-        <button class="tab-btn" data-filter="TARPIT">⏳ Tarpitted (<span id="count-tab-tarpit">0</span>)</button>
-        <button class="tab-btn" data-filter="ALLOW">✅ Clean (<span id="count-tab-clean">0</span>)</button>
+      <!-- Row 1: Verdict Tabs, Selectors, Search -->
+      <div class="filters-row">
+        <div class="filter-tabs">
+          <button class="tab-btn active" data-filter-verdict="ALL">All (<span id="count-tab-all">0</span>)</button>
+          <button class="tab-btn" data-filter-verdict="BLOCK">🛑 Blocked (<span id="count-tab-block">0</span>)</button>
+          <button class="tab-btn" data-filter-verdict="TARPIT">⏳ Tarpit (<span id="count-tab-tarpit">0</span>)</button>
+          <button class="tab-btn" data-filter-verdict="ALLOW">✅ Clean (<span id="count-tab-clean">0</span>)</button>
+        </div>
+
+        <select class="filter-select" id="select-method">
+          <option value="ALL">All Methods</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+
+        <select class="filter-select" id="select-status">
+          <option value="ALL">All Statuses</option>
+          <option value="2xx">2xx Success</option>
+          <option value="403">403 Forbidden</option>
+          <option value="429">429 Tarpit</option>
+          <option value="4xx">4xx Client Errors</option>
+          <option value="5xx">5xx Server Errors</option>
+        </select>
+
+        <select class="filter-select" id="select-rule">
+          <option value="ALL">All Threat Rules</option>
+        </select>
+
+        <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule, Status...">
       </div>
-      <input type="text" class="search-box" id="search-input" placeholder="Search IP, Path, Rule...">
+
+      <!-- Row 2: Active Filter Chips Bar -->
+      <div class="active-chips-bar" id="active-chips-container" style="display:none;">
+        <span style="color:var(--text-muted);">Active Filters:</span>
+        <div id="chips-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        <button class="btn-clear-all" id="btn-reset-filters">Reset All Filters</button>
+      </div>
     </div>
 
     <div class="table-container" id="stream-table-container">
@@ -1384,10 +1568,26 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 <script>
 (function() {
   var autoScroll = true;
-  var currentFilter = 'ALL';
-  var searchQuery = '';
   var allEvents = [];
   var timelineData = [];
+
+  // Active Filter State
+  var filters = {
+    verdict: 'ALL',
+    method: 'ALL',
+    status: 'ALL',
+    rule: 'ALL',
+    search: '',
+    ip: '',
+    path: ''
+  };
+
+  // Visibilities
+  var visibleSeries = {
+    clean: true,
+    blocked: true,
+    tarpit: true
+  };
 
   // DOM Elements
   var kpiTotal = document.getElementById('kpi-total');
@@ -1403,29 +1603,70 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var topPathsTbody = document.getElementById('top-paths-tbody');
   var btnToggleScroll = document.getElementById('btn-toggle-scroll');
   var btnClearLogs = document.getElementById('btn-clear-logs');
+  var btnExportJSON = document.getElementById('btn-export-json');
+  var btnResetFilters = document.getElementById('btn-reset-filters');
   var searchInput = document.getElementById('search-input');
+  var selectMethod = document.getElementById('select-method');
+  var selectStatus = document.getElementById('select-status');
+  var selectRule = document.getElementById('select-rule');
+  var chipsContainer = document.getElementById('active-chips-container');
+  var chipsList = document.getElementById('chips-list');
   var modal = document.getElementById('event-modal');
   var modalContent = document.getElementById('modal-content');
   var modalClose = document.getElementById('modal-close-btn');
+
+  // Legend Toggles
+  function setupLegendToggle(id, key) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', function() {
+      visibleSeries[key] = !visibleSeries[key];
+      el.classList.toggle('dimmed', !visibleSeries[key]);
+      drawTimeline(timelineData);
+    });
+  }
+  setupLegendToggle('legend-clean', 'clean');
+  setupLegendToggle('legend-blocked', 'blocked');
+  setupLegendToggle('legend-tarpit', 'tarpit');
 
   // Tab Filtering
   document.querySelectorAll('.tab-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
-      currentFilter = btn.getAttribute('data-filter');
+      filters.verdict = btn.getAttribute('data-filter-verdict');
+      renderActiveChips();
       renderTable();
     });
   });
 
+  selectMethod.addEventListener('change', function(e) {
+    filters.method = e.target.value;
+    renderActiveChips();
+    renderTable();
+  });
+
+  selectStatus.addEventListener('change', function(e) {
+    filters.status = e.target.value;
+    renderActiveChips();
+    renderTable();
+  });
+
+  selectRule.addEventListener('change', function(e) {
+    filters.rule = e.target.value;
+    renderActiveChips();
+    renderTable();
+  });
+
   searchInput.addEventListener('input', function(e) {
-    searchQuery = e.target.value.toLowerCase().trim();
+    filters.search = e.target.value.toLowerCase().trim();
+    renderActiveChips();
     renderTable();
   });
 
   btnToggleScroll.addEventListener('click', function() {
     autoScroll = !autoScroll;
-    btnToggleScroll.textContent = autoScroll ? '⏸ Pause Stream' : '▶ Resume Stream';
+    btnToggleScroll.textContent = autoScroll ? '⏸ Pause' : '▶ Resume';
     btnToggleScroll.style.color = autoScroll ? '#cbd5e1' : '#f59e0b';
   });
 
@@ -1434,21 +1675,107 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     renderTable();
   });
 
+  btnResetFilters.addEventListener('click', function() {
+    filters.verdict = 'ALL';
+    filters.method = 'ALL';
+    filters.status = 'ALL';
+    filters.rule = 'ALL';
+    filters.search = '';
+    filters.ip = '';
+    filters.path = '';
+
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    var allBtn = document.querySelector('[data-filter-verdict="ALL"]');
+    if (allBtn) allBtn.classList.add('active');
+
+    selectMethod.value = 'ALL';
+    selectStatus.value = 'ALL';
+    selectRule.value = 'ALL';
+    searchInput.value = '';
+
+    renderActiveChips();
+    renderTable();
+  });
+
+  btnExportJSON.addEventListener('click', function() {
+    var filtered = getFilteredEvents();
+    var blob = new Blob([JSON.stringify(filtered, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'routewarden-soc-events-' + new Date().toISOString() + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
   modalClose.addEventListener('click', function() { modal.style.display = 'none'; });
   window.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
 
-  function renderTable() {
-    var filtered = allEvents.filter(function(ev) {
-      if (currentFilter !== 'ALL' && ev.verdict !== currentFilter) return false;
-      if (searchQuery) {
-        var str = (ev.client_ip + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method).toLowerCase();
-        if (str.indexOf(searchQuery) === -1) return false;
+  function renderActiveChips() {
+    var chips = [];
+    if (filters.verdict !== 'ALL') chips.push({ label: 'Verdict: ' + filters.verdict, clear: function() {
+      filters.verdict = 'ALL';
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      var ab = document.querySelector('[data-filter-verdict="ALL"]');
+      if (ab) ab.classList.add('active');
+    }});
+    if (filters.method !== 'ALL') chips.push({ label: 'Method: ' + filters.method, clear: function() { filters.method = 'ALL'; selectMethod.value = 'ALL'; }});
+    if (filters.status !== 'ALL') chips.push({ label: 'Status: ' + filters.status, clear: function() { filters.status = 'ALL'; selectStatus.value = 'ALL'; }});
+    if (filters.rule !== 'ALL') chips.push({ label: 'Rule: ' + filters.rule, clear: function() { filters.rule = 'ALL'; selectRule.value = 'ALL'; }});
+    if (filters.search) chips.push({ label: 'Search: "' + filters.search + '"', clear: function() { filters.search = ''; searchInput.value = ''; }});
+    if (filters.ip) chips.push({ label: 'IP: ' + filters.ip, clear: function() { filters.ip = ''; }});
+    if (filters.path) chips.push({ label: 'Path: ' + filters.path, clear: function() { filters.path = ''; }});
+
+    if (chips.length > 0) {
+      chipsContainer.style.display = 'flex';
+      var h = '';
+      chips.forEach(function(c, i) {
+        h += '<span class="filter-chip">' + c.label + ' <span class="chip-close" data-chip-idx="' + i + '">&times;</span></span>';
+      });
+      chipsList.innerHTML = h;
+
+      chipsList.querySelectorAll('.chip-close').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var idx = parseInt(el.getAttribute('data-chip-idx'), 10);
+          if (chips[idx]) chips[idx].clear();
+          renderActiveChips();
+          renderTable();
+        });
+      });
+    } else {
+      chipsContainer.style.display = 'none';
+    }
+  }
+
+  function getFilteredEvents() {
+    return allEvents.filter(function(ev) {
+      if (filters.verdict !== 'ALL' && ev.verdict !== filters.verdict) return false;
+      if (filters.method !== 'ALL' && (ev.method || '').toUpperCase() !== filters.method) return false;
+      if (filters.rule !== 'ALL' && (ev.rule || '') !== filters.rule) return false;
+      if (filters.ip && ev.client_ip !== filters.ip) return false;
+      if (filters.path && ev.path !== filters.path) return false;
+
+      if (filters.status !== 'ALL') {
+        var s = ev.status;
+        if (filters.status === '2xx' && (s < 200 || s >= 300)) return false;
+        if (filters.status === '403' && s !== 403) return false;
+        if (filters.status === '429' && s !== 429) return false;
+        if (filters.status === '4xx' && (s < 400 || s >= 500)) return false;
+        if (filters.status === '5xx' && (s < 500 || s >= 600)) return false;
+      }
+
+      if (filters.search) {
+        var str = (ev.client_ip + ' ' + ev.path + ' ' + (ev.rule || '') + ' ' + ev.method + ' ' + ev.status).toLowerCase();
+        if (str.indexOf(filters.search) === -1) return false;
       }
       return true;
     });
+  }
 
+  function renderTable() {
+    var filtered = getFilteredEvents();
     var rowsHTML = '';
-    filtered.slice(-150).forEach(function(ev) {
+    filtered.slice(-200).forEach(function(ev) {
       var verdictClass = 'verdict-allow';
       var verdictLabel = 'ALLOW';
       if (ev.verdict === 'BLOCK') {
@@ -1494,24 +1821,42 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   function updateKPIs(stats) {
     if (!stats) return;
-    kpiTotal.textContent = Number(stats.total_events || 0).toLocaleString();
-    kpiBlocked.textContent = Number(stats.blocked_count || 0).toLocaleString();
-    kpiTarpit.textContent = Number(stats.tarpit_count || 0).toLocaleString();
-    kpiClean.textContent = Number(stats.clean_count || 0).toLocaleString();
+    var total = stats.total_events || 0;
+    var blocked = stats.blocked_count || 0;
+    var tarpit = stats.tarpit_count || 0;
+    var clean = stats.clean_count || 0;
+
+    kpiTotal.textContent = Number(total).toLocaleString();
+    kpiBlocked.textContent = Number(blocked).toLocaleString();
+    kpiTarpit.textContent = Number(tarpit).toLocaleString();
+    kpiClean.textContent = Number(clean).toLocaleString();
     kpiBlockRate.textContent = (stats.block_rate || '0.0%') + ' Rate';
 
-    document.getElementById('count-tab-all').textContent = stats.total_events || 0;
-    document.getElementById('count-tab-block').textContent = stats.blocked_count || 0;
-    document.getElementById('count-tab-tarpit').textContent = stats.tarpit_count || 0;
-    document.getElementById('count-tab-clean').textContent = stats.clean_count || 0;
+    document.getElementById('count-tab-all').textContent = total;
+    document.getElementById('count-tab-block').textContent = blocked;
+    document.getElementById('count-tab-tarpit').textContent = tarpit;
+    document.getElementById('count-tab-clean').textContent = clean;
 
-    // Rules Progress
+    // Update Donut Chart
+    updateDonut(clean, blocked, tarpit, total);
+
+    // Populate Rule Dropdown & List
     if (stats.top_rules && stats.top_rules.length > 0) {
+      // Dropdown sync
+      var currentSel = selectRule.value;
+      var optHTML = '<option value="ALL">All Threat Rules</option>';
+      stats.top_rules.forEach(function(r) {
+        optHTML += '<option value="' + r.name + '">' + r.name + ' (' + r.count + ')</option>';
+      });
+      selectRule.innerHTML = optHTML;
+      selectRule.value = currentSel;
+
+      // Progress bars
       var maxRuleCount = stats.top_rules[0].count || 1;
       var rHTML = '';
       stats.top_rules.forEach(function(r) {
         var pct = ((r.count / maxRuleCount) * 100).toFixed(1);
-        rHTML += '<div class="rule-item">' +
+        rHTML += '<div class="rule-item" onclick="filterByRule(\'' + r.name + '\')">' +
           '<div class="rule-meta">' +
             '<span class="rule-name">🛡️ ' + r.name + '</span>' +
             '<span class="rule-count">' + Number(r.count).toLocaleString() + ' hits</span>' +
@@ -1526,7 +1871,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (stats.top_ips && stats.top_ips.length > 0) {
       var ipHTML = '';
       stats.top_ips.forEach(function(item) {
-        ipHTML += '<tr>' +
+        ipHTML += '<tr onclick="filterByIP(\'' + item.name + '\')">' +
           '<td>' + item.name + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span></td>' +
@@ -1540,7 +1885,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var pHTML = '';
       stats.top_paths.forEach(function(item) {
         var ruleBadge = item.rule ? '<span class="pill-threat">' + item.rule + '</span>' : '<span style="color:#64748b;">—</span>';
-        pHTML += '<tr>' +
+        pHTML += '<tr onclick="filterByPath(\'' + item.name + '\')">' +
           '<td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">' + item.name + '</td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
           '<td>' + ruleBadge + '</td>' +
@@ -1551,42 +1896,134 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     // Timeline SVG
     if (stats.timeline && stats.timeline.length > 0) {
-      drawTimeline(stats.timeline);
+      timelineData = stats.timeline;
+      drawTimeline(timelineData);
     }
   }
 
+  window.filterByRule = function(rule) {
+    filters.rule = rule;
+    selectRule.value = rule;
+    renderActiveChips();
+    renderTable();
+  };
+
+  window.filterByIP = function(ip) {
+    filters.ip = ip;
+    renderActiveChips();
+    renderTable();
+  };
+
+  window.filterByPath = function(path) {
+    filters.path = path;
+    renderActiveChips();
+    renderTable();
+  };
+
+  function updateDonut(clean, blocked, tarpit, total) {
+    if (total === 0) total = 1;
+    var circ = 2 * Math.PI * 38; // ~238.76
+
+    var pClean = clean / total;
+    var pBlocked = blocked / total;
+    var pTarpit = tarpit / total;
+
+    var elClean = document.getElementById('donut-clean');
+    var elBlocked = document.getElementById('donut-blocked');
+    var elTarpit = document.getElementById('donut-tarpit');
+
+    var lClean = pClean * circ;
+    var lBlocked = pBlocked * circ;
+    var lTarpit = pTarpit * circ;
+
+    elClean.setAttribute('stroke-dasharray', lClean + ' ' + (circ - lClean));
+    elClean.setAttribute('stroke-dashoffset', '0');
+
+    elBlocked.setAttribute('stroke-dasharray', lBlocked + ' ' + (circ - lBlocked));
+    elBlocked.setAttribute('stroke-dashoffset', -lClean);
+
+    elTarpit.setAttribute('stroke-dasharray', lTarpit + ' ' + (circ - lTarpit));
+    elTarpit.setAttribute('stroke-dashoffset', -(lClean + lBlocked));
+
+    document.getElementById('donut-clean-lbl').textContent = (pClean * 100).toFixed(1) + '%';
+    document.getElementById('donut-blocked-lbl').textContent = (pBlocked * 100).toFixed(1) + '%';
+    document.getElementById('donut-tarpit-lbl').textContent = (pTarpit * 100).toFixed(1) + '%';
+  }
+
+  // Draw Highly Readable Timeline with Coordinate Grids, Axes & Crosshair
   function drawTimeline(data) {
     if (!data || data.length === 0) return;
-    var svg = document.getElementById('timeline-svg');
+
     var cleanArea = document.getElementById('path-clean-area');
     var blockedArea = document.getElementById('path-blocked-area');
     var cleanLine = document.getElementById('path-clean-line');
     var blockedLine = document.getElementById('path-blocked-line');
     var tarpitLine = document.getElementById('path-tarpit-line');
+    var gridGroup = document.getElementById('grid-group');
+    var axesGroup = document.getElementById('axes-group');
+    var overlay = document.getElementById('chart-overlay');
+    var crosshair = document.getElementById('crosshair-line');
+    var tooltip = document.getElementById('timeline-tooltip');
 
     var w = 800;
-    var h = 180;
-    var pad = 10;
+    var h = 240;
+    var padLeft = 45;
+    var padRight = 20;
+    var padTop = 20;
+    var padBottom = 30;
 
-    var maxVal = 1;
+    var chartW = w - padLeft - padRight;
+    var chartH = h - padTop - padBottom;
+
+    var maxVal = 5;
     data.forEach(function(d) {
       if (d.total > maxVal) maxVal = d.total;
     });
+    // Round maxVal up to nice increment
+    maxVal = Math.ceil(maxVal * 1.15);
 
+    // 1. Draw Y-Axis Gridlines & Labels
+    var gridHTML = '';
+    var axesHTML = '';
+    var yTicks = 4;
+    for (var i = 0; i <= yTicks; i++) {
+      var val = Math.round((maxVal / yTicks) * i);
+      var y = padTop + chartH - (i / yTicks) * chartH;
+      // Dotted horizontal gridline
+      gridHTML += '<line x1="' + padLeft + '" y1="' + y + '" x2="' + (w - padRight) + '" y2="' + y + '" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3,3" />';
+      // Y-axis tick text
+      axesHTML += '<text x="' + (padLeft - 8) + '" y="' + (y + 4) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="end">' + val + '</text>';
+    }
+
+    // 2. Draw X-Axis Ticks & Labels
+    var step = chartW / Math.max(1, data.length - 1);
+    var xInterval = Math.max(1, Math.floor(data.length / 6));
+    data.forEach(function(d, i) {
+      if (i % xInterval === 0 || i === data.length - 1) {
+        var x = padLeft + i * step;
+        axesHTML += '<text x="' + x + '" y="' + (h - 8) + '" fill="#64748b" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">' + (d.time || '') + '</text>';
+        gridHTML += '<line x1="' + x + '" y1="' + padTop + '" x2="' + x + '" y2="' + (h - padBottom) + '" stroke="rgba(255,255,255,0.03)" />';
+      }
+    });
+
+    gridGroup.innerHTML = gridHTML;
+    axesGroup.innerHTML = axesHTML;
+
+    // 3. Calculate Path Coordinates
     var ptsClean = [];
     var ptsBlocked = [];
     var ptsTarpit = [];
-
-    var step = (w - pad * 2) / Math.max(1, data.length - 1);
+    var pointMap = [];
 
     data.forEach(function(d, i) {
-      var x = pad + i * step;
-      var yClean = h - (d.clean / maxVal) * (h - pad * 2) - pad;
-      var yBlocked = h - (d.blocked / maxVal) * (h - pad * 2) - pad;
-      var yTarpit = h - (d.tarpit / maxVal) * (h - pad * 2) - pad;
+      var x = padLeft + i * step;
+      var yClean = padTop + chartH - (d.clean / maxVal) * chartH;
+      var yBlocked = padTop + chartH - (d.blocked / maxVal) * chartH;
+      var yTarpit = padTop + chartH - (d.tarpit / maxVal) * chartH;
       ptsClean.push({ x: x, y: yClean });
       ptsBlocked.push({ x: x, y: yBlocked });
       ptsTarpit.push({ x: x, y: yTarpit });
+      pointMap.push({ x: x, data: d });
     });
 
     function makePath(pts) {
@@ -1598,15 +2035,82 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       return p;
     }
 
-    cleanLine.setAttribute('d', makePath(ptsClean));
-    blockedLine.setAttribute('d', makePath(ptsBlocked));
-    tarpitLine.setAttribute('d', makePath(ptsTarpit));
+    if (visibleSeries.clean) {
+      cleanLine.setAttribute('d', makePath(ptsClean));
+      cleanLine.style.display = 'inline';
+      var areaClean = makePath(ptsClean) + ' L ' + ptsClean[ptsClean.length - 1].x + ' ' + (padTop + chartH) + ' L ' + ptsClean[0].x + ' ' + (padTop + chartH) + ' Z';
+      cleanArea.setAttribute('d', areaClean);
+      cleanArea.style.display = 'inline';
+    } else {
+      cleanLine.style.display = 'none';
+      cleanArea.style.display = 'none';
+    }
 
-    var areaClean = makePath(ptsClean) + ' L ' + ptsClean[ptsClean.length - 1].x + ' ' + h + ' L ' + ptsClean[0].x + ' ' + h + ' Z';
-    cleanArea.setAttribute('d', areaClean);
+    if (visibleSeries.blocked) {
+      blockedLine.setAttribute('d', makePath(ptsBlocked));
+      blockedLine.style.display = 'inline';
+      var areaBlocked = makePath(ptsBlocked) + ' L ' + ptsBlocked[ptsBlocked.length - 1].x + ' ' + (padTop + chartH) + ' L ' + ptsBlocked[0].x + ' ' + (padTop + chartH) + ' Z';
+      blockedArea.setAttribute('d', areaBlocked);
+      blockedArea.style.display = 'inline';
+    } else {
+      blockedLine.style.display = 'none';
+      blockedArea.style.display = 'none';
+    }
 
-    var areaBlocked = makePath(ptsBlocked) + ' L ' + ptsBlocked[ptsBlocked.length - 1].x + ' ' + h + ' L ' + ptsBlocked[0].x + ' ' + h + ' Z';
-    blockedArea.setAttribute('d', areaBlocked);
+    if (visibleSeries.tarpit) {
+      tarpitLine.setAttribute('d', makePath(ptsTarpit));
+      tarpitLine.style.display = 'inline';
+    } else {
+      tarpitLine.style.display = 'none';
+    }
+
+    // 4. Interactive Crosshair & Tooltip Hover
+    overlay.onmousemove = function(e) {
+      var rect = overlay.getBoundingClientRect();
+      var mouseX = (e.clientX - rect.left) * (w / rect.width);
+      if (mouseX < padLeft || mouseX > w - padRight) {
+        crosshair.style.display = 'none';
+        tooltip.style.display = 'none';
+        return;
+      }
+
+      // Find nearest data point
+      var closest = pointMap[0];
+      var minDiff = 999999;
+      pointMap.forEach(function(pt) {
+        var diff = Math.abs(pt.x - mouseX);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = pt;
+        }
+      });
+
+      if (!closest) return;
+
+      crosshair.setAttribute('x1', closest.x);
+      crosshair.setAttribute('y1', padTop);
+      crosshair.setAttribute('x2', closest.x);
+      crosshair.setAttribute('y2', padTop + chartH);
+      crosshair.style.display = 'inline';
+
+      var d = closest.data;
+      var rate = d.total > 0 ? ((d.blocked / d.total) * 100).toFixed(1) + '%' : '0.0%';
+      var toolHTML = '<div style="font-weight:700; color:#38bdf8; margin-bottom:4px;">⏱ ' + d.time + ' UTC</div>' +
+        '<div style="color:#ffffff;">Total Ingress: <b>' + d.total + '</b></div>' +
+        '<div style="color:#10b981;">Clean: <b>' + d.clean + '</b></div>' +
+        '<div style="color:#f43f5e;">Blocked: <b>' + d.blocked + ' (' + rate + ')</b></div>' +
+        '<div style="color:#f59e0b;">Tarpit: <b>' + d.tarpit + '</b></div>';
+
+      tooltip.innerHTML = toolHTML;
+      tooltip.style.left = (closest.x * (rect.width / w)) + 'px';
+      tooltip.style.top = (padTop + 20) + 'px';
+      tooltip.style.display = 'block';
+    };
+
+    overlay.onmouseleave = function() {
+      crosshair.style.display = 'none';
+      tooltip.style.display = 'none';
+    };
   }
 
   function renderSources(sources) {
