@@ -1201,7 +1201,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       --text-hi: #ffffff;
 
       --green: #a6e3a1;
-      --teal: #94e2d5;
+      --teal: #00e5ff;
       --yellow: #f9e2af;
       --peach: #fab387;
       --pink: #f38ba8;
@@ -1241,7 +1241,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       position: sticky;
       top: 0;
       z-index: 1000;
-      background: rgba(24, 24, 37, 0.94);
+      background: rgba(12, 15, 23, 0.96);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--line);
@@ -1305,13 +1305,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     .tui-btn:hover {
       background: var(--surface);
-      border-color: var(--overlay);
+      border-color: var(--teal);
       color: var(--text-hi);
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
     }
     .tui-btn.active {
-      background: var(--surface);
+      background: rgba(0, 229, 255, 0.12);
       border-color: var(--teal);
       color: var(--teal);
+      font-weight: 700;
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.28);
     }
 
     /* ── Main Container ──────────────────────────────────── */
@@ -1344,8 +1347,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       overflow-x: auto;
       scrollbar-width: none;
     }
-    .wordmark .hl { color: var(--green); }
-    .wordmark .sub { color: var(--teal); }
+    .wordmark .hl { color: var(--green); text-shadow: 0 0 14px rgba(0, 255, 157, 0.45); }
+    .wordmark .sub { color: var(--teal); text-shadow: 0 0 14px rgba(0, 229, 255, 0.45); }
 
     .lede {
       color: var(--subtext);
@@ -1430,6 +1433,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       margin: 0;
       font-weight: 700;
       white-space: nowrap;
+      text-shadow: 0 0 10px rgba(0, 255, 157, 0.35);
     }
     .head .rule {
       flex: 1;
@@ -1530,24 +1534,28 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       border: 1px solid transparent;
     }
     .tag-pink {
-      background: rgba(243, 139, 168, 0.12);
-      border-color: rgba(243, 139, 168, 0.35);
+      background: rgba(255, 51, 102, 0.12);
+      border-color: rgba(255, 51, 102, 0.4);
       color: var(--pink);
+      text-shadow: 0 0 6px rgba(255, 51, 102, 0.3);
     }
     .tag-yellow {
-      background: rgba(249, 226, 175, 0.12);
-      border-color: rgba(249, 226, 175, 0.35);
+      background: rgba(255, 184, 0, 0.12);
+      border-color: rgba(255, 184, 0, 0.4);
       color: var(--yellow);
+      text-shadow: 0 0 6px rgba(255, 184, 0, 0.3);
     }
     .tag-green {
-      background: rgba(166, 227, 161, 0.12);
-      border-color: rgba(166, 227, 161, 0.35);
+      background: rgba(0, 255, 157, 0.12);
+      border-color: rgba(0, 255, 157, 0.4);
       color: var(--green);
+      text-shadow: 0 0 6px rgba(0, 255, 157, 0.3);
     }
     .tag-teal {
-      background: rgba(148, 226, 213, 0.12);
-      border-color: rgba(148, 226, 213, 0.35);
+      background: rgba(0, 229, 255, 0.12);
+      border-color: rgba(0, 229, 255, 0.4);
       color: var(--teal);
+      text-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
     }
 
     /* ── Section 02: World Map & Detection Layout ────────── */
@@ -2028,20 +2036,32 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       background: rgba(255, 255, 255, 0.03);
     }
 
-    /* Retro Bracket Badges */
+    /* Retro Bracket Badges with Cyber Glow */
     .bracket-badge {
       font-weight: 700;
       letter-spacing: 0.5px;
       font-size: 11px;
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 3px;
     }
     .verdict-allow {
       color: var(--green);
+      background: rgba(0, 255, 157, 0.08);
+      border: 1px solid rgba(0, 255, 157, 0.3);
+      text-shadow: 0 0 8px rgba(0, 255, 157, 0.4);
     }
     .verdict-block {
       color: var(--pink);
+      background: rgba(255, 51, 102, 0.12);
+      border: 1px solid rgba(255, 51, 102, 0.4);
+      text-shadow: 0 0 8px rgba(255, 51, 102, 0.45);
     }
     .verdict-tarpit {
       color: var(--yellow);
+      background: rgba(255, 184, 0, 0.12);
+      border: 1px solid rgba(255, 184, 0, 0.4);
+      text-shadow: 0 0 8px rgba(255, 184, 0, 0.45);
     }
 
     .badge-method {
@@ -2051,10 +2071,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       font-size: 10px;
       border: 1px solid var(--line-hi);
     }
-    .method-get { color: var(--teal); background: rgba(148, 226, 213, 0.08); }
-    .method-post { color: var(--blue); background: rgba(137, 180, 250, 0.08); }
-    .method-put { color: var(--yellow); background: rgba(249, 226, 175, 0.08); }
-    .method-delete { color: var(--pink); background: rgba(243, 139, 168, 0.08); }
+    .method-get { color: var(--teal); background: rgba(0, 229, 255, 0.1); border-color: rgba(0, 229, 255, 0.3); }
+    .method-post { color: var(--blue); background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.3); }
+    .method-put { color: var(--yellow); background: rgba(255, 184, 0, 0.1); border-color: rgba(255, 184, 0, 0.3); }
+    .method-delete { color: var(--pink); background: rgba(255, 51, 102, 0.1); border-color: rgba(255, 51, 102, 0.3); }
 
     .ip-clickable {
       cursor: pointer;
@@ -2066,14 +2086,17 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     .rule-tag {
       cursor: pointer;
       color: var(--pink);
-      padding: 1px 5px;
+      padding: 1px 6px;
       border-radius: 3px;
-      border: 1px solid rgba(243, 139, 168, 0.3);
-      background: rgba(243, 139, 168, 0.08);
+      border: 1px solid rgba(255, 51, 102, 0.38);
+      background: rgba(255, 51, 102, 0.1);
       font-size: 10.5px;
+      text-shadow: 0 0 6px rgba(255, 51, 102, 0.35);
+      transition: all 0.12s ease;
     }
     .rule-tag:hover {
-      background: rgba(243, 139, 168, 0.18);
+      background: rgba(255, 51, 102, 0.22);
+      border-color: var(--pink);
     }
 
     /* ── Inspector Modals ────────────────────────────────── */
@@ -2472,24 +2495,24 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <svg class="timeline-svg" id="timeline-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
           <defs>
             <linearGradient id="grad-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#a6e3a1" stop-opacity="0.25"/>
-              <stop offset="100%" stop-color="#a6e3a1" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="#00ff9d" stop-opacity="0.25"/>
+              <stop offset="100%" stop-color="#00ff9d" stop-opacity="0.0"/>
             </linearGradient>
             <linearGradient id="grad-blocked" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stop-color="#f38ba8" stop-opacity="0.3"/>
-              <stop offset="100%" stop-color="#f38ba8" stop-opacity="0.0"/>
+              <stop offset="0%" stop-color="#ff3366" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#ff3366" stop-opacity="0.0"/>
             </linearGradient>
           </defs>
           <g id="grid-group"></g>
           <g id="axes-group"></g>
           <path id="path-clean-area" fill="url(#grad-clean)"></path>
           <path id="path-blocked-area" fill="url(#grad-blocked)"></path>
-          <path id="path-clean-line" fill="none" stroke="#a6e3a1" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-blocked-line" fill="none" stroke="#f38ba8" stroke-width="2" stroke-linecap="round"></path>
-          <path id="path-tarpit-line" fill="none" stroke="#f9e2af" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
+          <path id="path-clean-line" fill="none" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-blocked-line" fill="none" stroke="#ff3366" stroke-width="2" stroke-linecap="round"></path>
+          <path id="path-tarpit-line" fill="none" stroke="#ffb800" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3,3"></path>
           <g id="points-group"></g>
-          <line id="crosshair-line" stroke="#94e2d5" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
-          <circle id="crosshair-dot" r="4" fill="#94e2d5" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
+          <line id="crosshair-line" stroke="#00e5ff" stroke-width="1" stroke-dasharray="2,2" style="display:none;"></line>
+          <circle id="crosshair-dot" r="4" fill="#00e5ff" stroke="#11111b" stroke-width="2" style="display:none;"></circle>
           <rect id="chart-overlay" width="800" height="240" fill="transparent" style="cursor:crosshair;"></rect>
         </svg>
       </div>
@@ -2503,9 +2526,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       <div class="donut-wrap">
         <svg class="donut-svg" viewBox="0 0 100 100" id="donut-svg">
           <circle cx="50" cy="50" r="38" fill="transparent" stroke="rgba(255,255,255,0.06)" stroke-width="12"></circle>
-          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#a6e3a1" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#f38ba8" stroke-width="12" stroke-dasharray="0 238.7"></circle>
-          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#f9e2af" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-clean" cx="50" cy="50" r="38" fill="transparent" stroke="#00ff9d" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-blocked" cx="50" cy="50" r="38" fill="transparent" stroke="#ff3366" stroke-width="12" stroke-dasharray="0 238.7"></circle>
+          <circle id="donut-tarpit" cx="50" cy="50" r="38" fill="transparent" stroke="#ffb800" stroke-width="12" stroke-dasharray="0 238.7"></circle>
         </svg>
         <div class="donut-legend">
           <div><span style="color:var(--green);">●</span> Clean: <span id="donut-clean-lbl">0%</span></div>
@@ -3349,7 +3372,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
     // 2. Draw World Landmass Dot Matrix
     var step = 14;
-    asciiCtx.fillStyle = 'rgba(108, 112, 134, 0.28)';
+    asciiCtx.fillStyle = 'rgba(0, 229, 255, 0.22)';
     asciiCtx.font = '10px "JetBrains Mono", monospace';
     asciiCtx.textAlign = 'center';
     asciiCtx.textBaseline = 'middle';
@@ -3379,17 +3402,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var blocked = c.blocked || 0;
       var tarpit = c.tarpit || 0;
 
-      var color = '#a6e3a1'; // Clean green
-      if (blocked > 0) color = '#f38ba8'; // Pink threat
-      else if (tarpit > 0) color = '#f9e2af'; // Yellow tarpit
+      var color = '#00ff9d'; // Electric green
+      if (blocked > 0) color = '#ff3366'; // Crimson threat
+      else if (tarpit > 0) color = '#ffb800'; // Amber tarpit
 
       var isSelected = (filters.country === c.name || filters.country === code);
       var isHovered = (asciiHoverCountry && (asciiHoverCountry.country_code === code));
 
-      // Outer Radar Pulse
+      // Outer Radar Pulse with Glow
+      asciiCtx.shadowBlur = 10;
+      asciiCtx.shadowColor = color;
       asciiCtx.strokeStyle = color;
-      asciiCtx.globalAlpha = 0.35 + (Math.sin(pulsePhase) + 1) * 0.2;
-      asciiCtx.lineWidth = isSelected ? 2 : 1;
+      asciiCtx.globalAlpha = 0.4 + (Math.sin(pulsePhase) + 1) * 0.25;
+      asciiCtx.lineWidth = isSelected ? 2.2 : 1.2;
       asciiCtx.beginPath();
       asciiCtx.arc(pos.x, pos.y, isSelected ? pulseRadius * 1.3 : pulseRadius, 0, 2 * Math.PI);
       asciiCtx.stroke();
@@ -3398,8 +3423,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       // Inner Core Dot
       asciiCtx.fillStyle = color;
       asciiCtx.beginPath();
-      asciiCtx.arc(pos.x, pos.y, isSelected ? 5 : 3.5, 0, 2 * Math.PI);
+      asciiCtx.arc(pos.x, pos.y, isSelected ? 5.5 : 4, 0, 2 * Math.PI);
       asciiCtx.fill();
+      asciiCtx.shadowBlur = 0;
 
       // Country Tag [ US 14.2k ]
       var flag = getFlagEmoji(code);
@@ -3414,15 +3440,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       if (tagY < 16) tagY = pos.y + 16;
 
       // Tag Background
-      asciiCtx.fillStyle = isSelected ? 'rgba(49, 50, 68, 0.95)' : 'rgba(24, 24, 37, 0.88)';
-      asciiCtx.strokeStyle = isSelected ? '#94e2d5' : (isHovered ? '#cdd6f4' : 'rgba(59, 59, 79, 0.9)');
+      asciiCtx.fillStyle = isSelected ? 'rgba(24, 32, 53, 0.96)' : 'rgba(12, 15, 23, 0.92)';
+      asciiCtx.strokeStyle = isSelected ? '#00e5ff' : (isHovered ? '#f8fafc' : 'rgba(45, 59, 99, 0.9)');
       asciiCtx.lineWidth = 1;
 
       asciiCtx.fillRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
       asciiCtx.strokeRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
 
       // Tag Text
-      asciiCtx.fillStyle = isSelected ? '#94e2d5' : (blocked > 0 ? '#f38ba8' : '#cdd6f4');
+      asciiCtx.fillStyle = isSelected ? '#00e5ff' : (blocked > 0 ? '#ff3366' : '#e2e8f0');
       asciiCtx.textAlign = 'left';
       asciiCtx.textBaseline = 'middle';
       asciiCtx.fillText(tagText, tagX, tagY);
@@ -3606,9 +3632,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var tarpit = c.tarpit || 0;
         var clean = Math.max(0, total - blocked - tarpit);
 
-        var color = '#a6e3a1';
-        if (blocked > 0) color = '#f38ba8';
-        else if (tarpit > 0) color = '#f9e2af';
+        var color = '#00ff9d';
+        if (blocked > 0) color = '#ff3366';
+        else if (tarpit > 0) color = '#ffb800';
 
         var flag = getFlagEmoji(code);
         var isFilterActive = filters.country === c.name || filters.country === code;
@@ -3616,7 +3642,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var markerHtml = '<div class="soc-marker-wrap">' +
           '<div class="soc-marker-ring" style="border-color:' + color + ';"></div>' +
           '<div class="soc-marker-core" style="background:' + color + '; box-shadow:0 0 8px ' + color + ';"></div>' +
-          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1px solid #94e2d5; color:#94e2d5;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
+          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1px solid #00e5ff; color:#94e2d5;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
         '</div>';
 
         var customIcon = L.divIcon({
