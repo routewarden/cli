@@ -1670,12 +1670,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
 
     .tui-tag {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
       padding: 1px 6px;
       border-radius: 3px;
       font-size: 10.5px;
       font-weight: 600;
       border: 1px solid transparent;
+      white-space: nowrap;
+      line-height: 1.4;
     }
     .tag-pink {
       background: var(--pink-bg);
@@ -2005,13 +2008,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       gap: 16px;
       margin-bottom: 20px;
     }
-    @media (max-width: 960px) {
+    @media (max-width: 1080px) {
       .intel-grid { grid-template-columns: 1fr; }
     }
     .intel-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 11.5px;
+      white-space: nowrap;
+    }
+    .threat-breakdown-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
     }
     .intel-table th {
       text-align: left;
@@ -2780,7 +2790,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span>🚨 TOP ATTACKING CLIENT IPS</span>
         <span style="font-size:10.5px; color:var(--overlay);">Click row to inspect</span>
       </div>
-      <div style="max-height:260px; overflow-y:auto;">
+      <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
           <thead>
             <tr>
@@ -2802,7 +2812,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         <span>🎯 TOP TARGETED ENDPOINTS</span>
         <span style="font-size:10.5px; color:var(--overlay);">Click row to filter</span>
       </div>
-      <div style="max-height:260px; overflow-y:auto;">
+      <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
           <thead>
             <tr>
@@ -3374,8 +3384,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
           '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + '</span></td>' +
           '<td><span style="cursor:pointer;" onclick="filterByCountry(\'' + countryName + '\')">' + flag + ' ' + countryName + '</span></td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
-          '<td><span class="tui-tag tag-pink">' + item.blocked + ' blk</span> <span class="tui-tag tag-yellow">' + item.tarpit + ' tar</span> ' +
-          '<button class="tui-btn" style="padding:1px 6px; font-size:10px; margin-left:6px;" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></td>' +
+          '<td><div class="threat-breakdown-cell"><span class="tui-tag tag-pink">' + item.blocked + ' blk</span><span class="tui-tag tag-yellow">' + item.tarpit + ' tar</span>' +
+          '<button class="tui-btn" style="padding:1px 6px; font-size:10px;" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></div></td>' +
         '</tr>';
       });
       if (topIpsTbody.innerHTML !== ipHTML) {
