@@ -1593,8 +1593,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     #leaflet-map {
       width: 100%;
-      height: 100%;
-      background: #0d0f18 !important;
+      height: 430px;
+      background: #07090e !important;
     }
 
     /* OSM Dark Inversion Filter for Retro Terminal Map */
@@ -2513,27 +2513,23 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
   <div class="term">
     <div class="cap">
-      <span>🌐 GLOBAL TRAFFIC & THREAT RADAR</span>
-      <span id="map-country-count">0 Countries Detected</span>
       <div style="display:flex; align-items:center; gap:8px;">
-        <button class="tui-btn active" id="btn-mode-ascii" onclick="setMapMode('ascii')">[📟 ASCII MATRIX]</button>
-        <button class="tui-btn" id="btn-mode-osm" onclick="setMapMode('osm')">[🌍 OSM DARK]</button>
-        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET]</button>
+        <span>🌐 GLOBAL THREAT & INGRESS RADAR</span>
+        <span class="tui-tag tag-teal" id="map-country-count">0 Countries Detected</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="display:flex; align-items:center; gap:10px; font-size:11px;">
+          <span><span style="color:var(--green);">●</span> Clean</span>
+          <span><span style="color:var(--pink);">■</span> Threats</span>
+          <span><span style="color:var(--yellow);">▲</span> Tarpit</span>
+        </div>
+        <button class="tui-btn" id="btn-reset-map" onclick="resetMapZoom()">[⟲ RESET VIEW]</button>
       </div>
     </div>
 
     <div class="map-body">
       <div class="map-stage">
-        <!-- Mode 1: ASCII Matrix Dot Map -->
-        <div id="ascii-map-container">
-          <canvas id="ascii-matrix-canvas"></canvas>
-          <div id="ascii-tooltip" class="ascii-tip"></div>
-        </div>
-
-        <!-- Mode 2: Leaflet Dark OpenStreetMap -->
-        <div id="osm-map-container" style="display:none;">
-          <div id="leaflet-map"></div>
-        </div>
+        <div id="leaflet-map"></div>
       </div>
 
       <!-- Right Sidebar: Detected Countries Breakdown -->
@@ -2702,7 +2698,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <span class="footer-key-item"><span class="key-cap">F</span> Filter Country</span>
     <span class="footer-key-item"><span class="key-cap">P</span> Filter Path</span>
     <span class="footer-key-item"><span class="key-cap">I</span> Inspect IP</span>
-    <span class="footer-key-item"><span class="key-cap">M</span> Toggle Map Mode</span>
     <span class="footer-key-item"><span class="key-cap">R</span> Reset Filters</span>
     <span class="footer-key-item"><span class="key-cap">ESC</span> Close Modal</span>
   </div>
@@ -2714,7 +2709,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var autoScroll = true;
   var allEvents = [];
   var timelineData = [];
-  var mapMode = 'ascii'; // 'ascii' or 'osm'
 
   // Active Filter State
   var filters = {
@@ -2897,8 +2891,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       modal.style.display = 'none';
       var ipModal = document.getElementById('ip-modal');
       if (ipModal) ipModal.style.display = 'none';
-    } else if (e.key === 'm' || e.key === 'M') {
-      setMapMode(mapMode === 'ascii' ? 'osm' : 'ascii');
     } else if (e.key === 'r' || e.key === 'R') {
       resetAllFilters();
     } else if (e.key === 'f' || e.key === 'F') {
@@ -3270,297 +3262,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // ASCII Matrix World Map Engine
-  // ═══════════════════════════════════════════════════════════════
-  var asciiCanvas = document.getElementById('ascii-matrix-canvas');
-  var asciiCtx = asciiCanvas ? asciiCanvas.getContext('2d') : null;
-  var asciiTip = document.getElementById('ascii-tooltip');
-  var asciiHoverCountry = null;
-  var animFrameId = null;
-  var pulsePhase = 0;
-
-  // Approximate landmass bounding boxes [latMin, latMax, lonMin, lonMax]
-  var landBoxes = [
-    // North America
-    [25, 70, -165, -60],
-    [15, 32, -115, -80],
-    // South America
-    [-55, 12, -82, -35],
-    // Europe
-    [36, 70, -10, 40],
-    // Russia / Northern Asia
-    [45, 75, 40, 180],
-    // Central & East Asia
-    [10, 50, 60, 145],
-    // Indian Subcontinent
-    [8, 35, 68, 92],
-    // Southeast Asia
-    [-10, 25, 95, 140],
-    // Africa
-    [-35, 37, -18, 52],
-    // Australia & NZ
-    [-45, -10, 112, 178],
-    // Greenland
-    [60, 83, -73, -12],
-    // Japan & UK islands
-    [30, 45, 128, 146],
-    [50, 59, -10, 2]
-  ];
-
-  function isLand(lat, lon) {
-    for (var i = 0; i < landBoxes.length; i++) {
-      var b = landBoxes[i];
-      if (lat >= b[0] && lat <= b[1] && lon >= b[2] && lon <= b[3]) {
-        // Exclude large ocean gaps inside rough boxes
-        if (lat < 0 && lon < -25 && lon > -35) return false; // Atlantic gap
-        if (lat > 25 && lat < 50 && lon > -40 && lon < -10) return false; // Mid-Atlantic
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function geoToCanvas(lat, lon, width, height) {
-    // Equirectangular projection
-    var x = ((lon + 180) / 360) * width;
-    // Map latitude -60 to 75
-    var latMin = -60;
-    var latMax = 78;
-    var y = ((latMax - lat) / (latMax - latMin)) * height;
-    return { x: x, y: y };
-  }
-
-  function canvasToGeo(x, y, width, height) {
-    var lon = (x / width) * 360 - 180;
-    var latMax = 78;
-    var latMin = -60;
-    var lat = latMax - (y / height) * (latMax - latMin);
-    return { lat: lat, lon: lon };
-  }
-
-  function initAsciiCanvas() {
-    if (!asciiCanvas || !asciiCtx) return;
-    var rect = asciiCanvas.getBoundingClientRect();
-    var dpr = window.devicePixelRatio || 1;
-    asciiCanvas.width = rect.width * dpr;
-    asciiCanvas.height = rect.height * dpr;
-    asciiCtx.scale(dpr, dpr);
-  }
-
-  function drawAsciiMatrix() {
-    if (!asciiCanvas || !asciiCtx) return;
-    var rect = asciiCanvas.getBoundingClientRect();
-    var w = rect.width;
-    var h = rect.height;
-    if (w <= 0 || h <= 0) return;
-
-    asciiCtx.clearRect(0, 0, w, h);
-
-    // 1. Draw Subtle Background Coordinate Grid
-    asciiCtx.strokeStyle = 'rgba(40, 40, 56, 0.45)';
-    asciiCtx.lineWidth = 1;
-    for (var x = 0; x < w; x += 60) {
-      asciiCtx.beginPath();
-      asciiCtx.moveTo(x, 0);
-      asciiCtx.lineTo(x, h);
-      asciiCtx.stroke();
-    }
-    for (var y = 0; y < h; y += 45) {
-      asciiCtx.beginPath();
-      asciiCtx.moveTo(0, y);
-      asciiCtx.lineTo(w, y);
-      asciiCtx.stroke();
-    }
-
-    // 2. Draw World Landmass Dot Matrix
-    var step = 14;
-    asciiCtx.fillStyle = 'rgba(0, 229, 255, 0.22)';
-    asciiCtx.font = '10px "JetBrains Mono", monospace';
-    asciiCtx.textAlign = 'center';
-    asciiCtx.textBaseline = 'middle';
-
-    for (var cy = step; cy < h; cy += step) {
-      for (var cx = step; cx < w; cx += step) {
-        var geo = canvasToGeo(cx, cy, w, h);
-        if (isLand(geo.lat, geo.lon)) {
-          asciiCtx.fillText('·', cx, cy);
-        }
-      }
-    }
-
-    // 3. Draw Detected Country Blips & Radar Waves
-    var countries = (latestStats && latestStats.top_countries) ? latestStats.top_countries : [];
-    pulsePhase += 0.04;
-    var pulseRadius = 8 + (Math.sin(pulsePhase) + 1) * 6;
-
-    countries.forEach(function(c) {
-      var code = (c.country_code || '').toUpperCase();
-      if (!code || code === 'LAN' || code === 'LOCAL') return;
-      var coord = countryCoords[code];
-      if (!coord) return;
-
-      var pos = geoToCanvas(coord.lat, coord.lon, w, h);
-      var total = c.count || 0;
-      var blocked = c.blocked || 0;
-      var tarpit = c.tarpit || 0;
-
-      var color = '#00ff9d'; // Electric green
-      if (blocked > 0) color = '#ff3366'; // Crimson threat
-      else if (tarpit > 0) color = '#ffb800'; // Amber tarpit
-
-      var isSelected = (filters.country === c.name || filters.country === code);
-      var isHovered = (asciiHoverCountry && (asciiHoverCountry.country_code === code));
-
-      // Outer Radar Pulse with Glow
-      asciiCtx.shadowBlur = 10;
-      asciiCtx.shadowColor = color;
-      asciiCtx.strokeStyle = color;
-      asciiCtx.globalAlpha = 0.4 + (Math.sin(pulsePhase) + 1) * 0.25;
-      asciiCtx.lineWidth = isSelected ? 2.2 : 1.2;
-      asciiCtx.beginPath();
-      asciiCtx.arc(pos.x, pos.y, isSelected ? pulseRadius * 1.3 : pulseRadius, 0, 2 * Math.PI);
-      asciiCtx.stroke();
-      asciiCtx.globalAlpha = 1.0;
-
-      // Inner Core Dot
-      asciiCtx.fillStyle = color;
-      asciiCtx.beginPath();
-      asciiCtx.arc(pos.x, pos.y, isSelected ? 5.5 : 4, 0, 2 * Math.PI);
-      asciiCtx.fill();
-      asciiCtx.shadowBlur = 0;
-
-      // Country Tag [ US 14.2k ]
-      var flag = getFlagEmoji(code);
-      var tagText = flag + ' ' + (total >= 1000 ? (total/1000).toFixed(1) + 'k' : total);
-      var pad = 4;
-      asciiCtx.font = '600 10px "JetBrains Mono", monospace';
-      var textW = asciiCtx.measureText(tagText).width;
-
-      var tagX = pos.x + 8;
-      var tagY = pos.y - 8;
-      if (tagX + textW + 8 > w) tagX = pos.x - textW - 14;
-      if (tagY < 16) tagY = pos.y + 16;
-
-      // Tag Background
-      asciiCtx.fillStyle = isSelected ? 'rgba(24, 32, 53, 0.96)' : 'rgba(12, 15, 23, 0.92)';
-      asciiCtx.strokeStyle = isSelected ? '#00e5ff' : (isHovered ? '#f8fafc' : 'rgba(45, 59, 99, 0.9)');
-      asciiCtx.lineWidth = 1;
-
-      asciiCtx.fillRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
-      asciiCtx.strokeRect(tagX - pad, tagY - 9, textW + pad * 2, 16);
-
-      // Tag Text
-      asciiCtx.fillStyle = isSelected ? '#00e5ff' : (blocked > 0 ? '#ff3366' : '#e2e8f0');
-      asciiCtx.textAlign = 'left';
-      asciiCtx.textBaseline = 'middle';
-      asciiCtx.fillText(tagText, tagX, tagY);
-    });
-
-    if (mapMode === 'ascii') {
-      animFrameId = requestAnimationFrame(drawAsciiMatrix);
-    }
-  }
-
-  // Canvas Mouse Interaction (Hover tooltip & Click filter)
-  if (asciiCanvas) {
-    asciiCanvas.addEventListener('mousemove', function(e) {
-      var rect = asciiCanvas.getBoundingClientRect();
-      var mx = e.clientX - rect.left;
-      var my = e.clientY - rect.top;
-      var countries = (latestStats && latestStats.top_countries) ? latestStats.top_countries : [];
-
-      var found = null;
-      var minDist = 22;
-
-      for (var i = 0; i < countries.length; i++) {
-        var c = countries[i];
-        var code = (c.country_code || '').toUpperCase();
-        var coord = countryCoords[code];
-        if (!coord) continue;
-        var pos = geoToCanvas(coord.lat, coord.lon, rect.width, rect.height);
-        var dist = Math.hypot(pos.x - mx, pos.y - my);
-        if (dist < minDist) {
-          minDist = dist;
-          found = c;
-        }
-      }
-
-      asciiHoverCountry = found;
-      if (found) {
-        asciiCanvas.style.cursor = 'pointer';
-        var code = (found.country_code || '').toUpperCase();
-        var flag = getFlagEmoji(code);
-        var total = found.count || 0;
-        var blocked = found.blocked || 0;
-        var tarpit = found.tarpit || 0;
-        var clean = Math.max(0, total - blocked - tarpit);
-        var rate = total > 0 ? ((blocked / total) * 100).toFixed(1) + '%' : '0.0%';
-
-        var tip = '┌─ [ ' + flag + ' ' + found.name.toUpperCase() + ' ] ────────────────┐\n' +
-          '│ Hits:    ' + Number(total).toLocaleString().padEnd(12) + ' │\n' +
-          '│ Threats: ' + (blocked + ' (' + rate + ')').padEnd(12) + ' │\n' +
-          '│ Tarpit:  ' + String(tarpit).padEnd(12) + ' │\n' +
-          '│ Clean:   ' + String(clean).padEnd(12) + ' │\n' +
-          '│ Click to filter telemetry       │\n' +
-          '└─────────────────────────────────┘';
-
-        asciiTip.textContent = tip;
-        var tipX = mx + 16;
-        var tipY = my + 16;
-        if (tipX + 260 > rect.width) tipX = mx - 270;
-        if (tipY + 130 > rect.height) tipY = my - 130;
-        asciiTip.style.left = tipX + 'px';
-        asciiTip.style.top = tipY + 'px';
-        asciiTip.style.display = 'block';
-      } else {
-        asciiCanvas.style.cursor = 'default';
-        asciiTip.style.display = 'none';
-      }
-    });
-
-    asciiCanvas.addEventListener('mouseleave', function() {
-      asciiHoverCountry = null;
-      asciiTip.style.display = 'none';
-    });
-
-    asciiCanvas.addEventListener('click', function() {
-      if (asciiHoverCountry) {
-        filterByCountry(asciiHoverCountry.name);
-      }
-    });
-  }
-
-  window.setMapMode = function(mode) {
-    mapMode = mode;
-    var btnAscii = document.getElementById('btn-mode-ascii');
-    var btnOsm = document.getElementById('btn-mode-osm');
-    var asciiContainer = document.getElementById('ascii-map-container');
-    var osmContainer = document.getElementById('osm-map-container');
-
-    if (mode === 'ascii') {
-      btnAscii.classList.add('active');
-      btnOsm.classList.remove('active');
-      asciiContainer.style.display = 'block';
-      osmContainer.style.display = 'none';
-      initAsciiCanvas();
-      if (!animFrameId) drawAsciiMatrix();
-    } else {
-      btnOsm.classList.add('active');
-      btnAscii.classList.remove('active');
-      asciiContainer.style.display = 'none';
-      osmContainer.style.display = 'block';
-      if (animFrameId) {
-        cancelAnimationFrame(animFrameId);
-        animFrameId = null;
-      }
-      initLeafletMap();
-      if (leafletMap) {
-        setTimeout(function() { leafletMap.invalidateSize(); }, 50);
-      }
-    }
-  };
-
-  // ═══════════════════════════════════════════════════════════════
   // Leaflet OSM Dark Engine
   // ═══════════════════════════════════════════════════════════════
   var leafletMap = null;
@@ -3599,15 +3300,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   window.resetMapZoom = function() {
-    if (mapMode === 'osm' && leafletMap) {
+    if (leafletMap) {
       leafletMap.setView([22, 10], 2);
-    } else if (mapMode === 'ascii') {
-      initAsciiCanvas();
     }
   };
 
   window.addEventListener('resize', function() {
-    initAsciiCanvas();
     if (leafletMap) leafletMap.invalidateSize();
   });
 
@@ -3644,7 +3342,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         var markerHtml = '<div class="soc-marker-wrap">' +
           '<div class="soc-marker-ring" style="border-color:' + color + ';"></div>' +
           '<div class="soc-marker-core" style="background:' + color + '; box-shadow:0 0 8px ' + color + ';"></div>' +
-          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1px solid #00e5ff; color:#94e2d5;' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
+          '<div class="soc-marker-label" style="' + (isFilterActive ? 'border:1px solid #00e5ff; color:#00e5ff; box-shadow:0 0 8px rgba(0,229,255,0.4);' : '') + '">' + flag + ' ' + Number(total).toLocaleString() + '</div>' +
         '</div>';
 
         var customIcon = L.divIcon({
@@ -4256,8 +3954,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   }
 
   // Initial startup
-  initAsciiCanvas();
-  drawAsciiMatrix();
+  initLeafletMap();
   fetchStats();
   initSSE();
   setInterval(fetchStats, 3000);
