@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -327,3 +328,94 @@ loop:
 		t.Errorf("unexpected lines: %v", lines)
 	}
 }
+
+func TestResolveFileList_EdgeCases(t *testing.T) {
+	t.Run("empty and whitespace only", func(t *testing.T) {
+		res := resolveFileList([]string{"", "   ", "\t"}, []string{"", "  "})
+		if len(res) != 0 {
+			t.Errorf("expected 0 files, got %d: %v", len(res), res)
+		}
+	})
+
+	t.Run("multiple commas and whitespace trimming", func(t *testing.T) {
+		res := resolveFileList([]string{",,/var/log/a.log,,,   /var/log/b.log  ,"}, []string{",/var/log/c.log,"})
+		expected := []string{"/var/log/a.log", "/var/log/b.log", "/var/log/c.log"}
+		if len(res) != len(expected) {
+			t.Fatalf("expected %d files, got %d: %v", len(expected), len(res), res)
+		}
+		for i, v := range expected {
+			if res[i] != v {
+				t.Errorf("at index %d: expected %s, got %s", i, v, res[i])
+			}
+		}
+	})
+
+	t.Run("glob with zero matches does not keep literal pattern", func(t *testing.T) {
+		nonExistentGlob := filepath.Join(t.TempDir(), "nonexistent_*.log")
+		res := resolveFileList([]string{nonExistentGlob}, nil)
+		if len(res) != 0 {
+			t.Errorf("expected 0 files for unmatched glob, got %d: %v", len(res), res)
+		}
+	})
+
+	t.Run("non-existent direct file path is retained for tail -F retry", func(t *testing.T) {
+		directFile := filepath.Join(t.TempDir(), "future.log")
+		res := resolveFileList([]string{directFile}, nil)
+		if len(res) != 1 || res[0] != directFile {
+			t.Errorf("expected direct file retained, got: %v", res)
+		}
+	})
+
+	t.Run("cross-source deduplication", func(t *testing.T) {
+		p := "/var/log/nginx.log"
+		res := resolveFileList([]string{p, p + "," + p}, []string{p})
+		if len(res) != 1 || res[0] != p {
+			t.Errorf("expected exactly 1 deduplicated entry, got %d: %v", len(res), res)
+		}
+	})
+}
+
+func TestResolveContainerList_EdgeCases(t *testing.T) {
+	t.Run("empty and comma separators", func(t *testing.T) {
+		res := resolveContainerList([]string{"", ",,,", "  ", "app1, ,app2,"})
+		expected := []string{"app1", "app2"}
+		if len(res) != len(expected) {
+			t.Fatalf("expected %d containers, got %d: %v", len(expected), len(res), res)
+		}
+		for i, v := range expected {
+			if res[i] != v {
+				t.Errorf("at index %d: expected %s, got %s", i, v, res[i])
+			}
+		}
+	})
+
+	t.Run("deduplication across repeatable flags", func(t *testing.T) {
+		res := resolveContainerList([]string{"traefik", "traefik", "gateway", "gateway,traefik"})
+		expected := []string{"traefik", "gateway"}
+		if len(res) != len(expected) {
+			t.Fatalf("expected %d containers, got %d: %v", len(expected), len(res), res)
+		}
+	})
+}
+
+func TestSendBatchWithRetry_ClientErrorNonRetryable(t *testing.T) {
+	var callCount int32
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&callCount, 1)
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(http.StatusUnauthorized) // 401
+			return rec.Result(), nil
+		}),
+	}
+
+	batch := []string{"event 1"}
+	err := sendBatchWithRetry(context.Background(), client, "http://example.com/api/v1/events", "token", "agent1", "host1", nil, batch)
+	if err == nil {
+		t.Fatal("expected error for 401 Unauthorized, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected 401 in error string, got: %v", err)
+	}
+}
+

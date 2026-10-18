@@ -424,8 +424,8 @@ func resolveFileList(flags []string, positionalArgs []string) []string {
 						results = append(results, m)
 					}
 				}
-				return
 			}
+			return
 		}
 		if !seen[p] {
 			seen[p] = true
