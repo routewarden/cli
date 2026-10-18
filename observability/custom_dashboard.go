@@ -3,7 +3,9 @@ package observability
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -288,12 +290,13 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 
 		ev.Verdict = strings.ToUpper(le.Verdict)
 		if ev.Verdict == "" {
-			if ev.Status == 403 {
-				ev.Verdict = "BLOCK"
-			} else if ev.Status == 429 {
-				ev.Verdict = "TARPIT"
-			} else {
-				ev.Verdict = "ALLOW"
+			switch ev.Status {
+        case 403:
+          ev.Verdict = "BLOCK"
+        case 429:
+          ev.Verdict = "TARPIT"
+        default:
+          ev.Verdict = "ALLOW"
 			}
 		}
 		if ev.Status == 0 {
@@ -365,11 +368,12 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 					ev.Rule = strings.TrimSpace(rem[:end])
 				}
 			}
-			if ev.Status == 403 {
+			switch ev.Status {
+case 403:
 				ev.Verdict = "BLOCK"
-			} else if ev.Status == 429 {
+			case 429:
 				ev.Verdict = "TARPIT"
-			} else {
+			default:
 				ev.Verdict = "ALLOW"
 			}
 		} else {
@@ -578,6 +582,108 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, store *EventStore) {
 			flusher.Flush()
 		}
 	}
+}
+
+// IPDetails represents geolocation and ISP intelligence for an IP address.
+type IPDetails struct {
+	IP          string  `json:"ip"`
+	Status      string  `json:"status"` // "success" or "fail"
+	Country     string  `json:"country,omitempty"`
+	CountryCode string  `json:"country_code,omitempty"`
+	Region      string  `json:"region,omitempty"`
+	RegionName  string  `json:"region_name,omitempty"`
+	City        string  `json:"city,omitempty"`
+	Zip         string  `json:"zip,omitempty"`
+	Lat         float64 `json:"lat,omitempty"`
+	Lon         float64 `json:"lon,omitempty"`
+	Timezone    string  `json:"timezone,omitempty"`
+	ISP         string  `json:"isp,omitempty"`
+	Org         string  `json:"org,omitempty"`
+	AS          string  `json:"as,omitempty"`
+	IsPrivate   bool    `json:"is_private"`
+	Message     string  `json:"message,omitempty"`
+}
+
+type cachedIP struct {
+	details   *IPDetails
+	fetchedAt time.Time
+}
+
+var (
+	ipCacheMu sync.RWMutex
+	ipCache   = make(map[string]cachedIP)
+)
+
+// LookupIP queries IP intelligence using ip-api.com with local caching and private IP handling.
+func LookupIP(ipStr string) *IPDetails {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "" {
+		return &IPDetails{IP: ipStr, Status: "fail", Message: "empty IP address"}
+	}
+
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return &IPDetails{IP: ipStr, Status: "fail", Message: "invalid IP address format"}
+	}
+
+	// Detect private / loopback / link-local addresses
+	if parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsLinkLocalUnicast() || parsed.IsUnspecified() {
+		return &IPDetails{
+			IP:          ipStr,
+			Status:      "success",
+			Country:     "Local / Private Network",
+			CountryCode: "LAN",
+			RegionName:  "Internal Subnet",
+			City:        "Private Network",
+			ISP:         "RFC 1918 / Loopback",
+			Org:         "Local Intranet",
+			AS:          "AS0 (Private)",
+			IsPrivate:   true,
+		}
+	}
+
+	// Check cache (TTL 2 hours)
+	ipCacheMu.RLock()
+	if c, ok := ipCache[ipStr]; ok && time.Since(c.fetchedAt) < 2*time.Hour {
+		ipCacheMu.RUnlock()
+		return c.details
+	}
+	ipCacheMu.RUnlock()
+
+	// Query ip-api.com over HTTP (fast, free tier)
+	client := &http.Client{Timeout: 4 * time.Second}
+	apiURL := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query", url.QueryEscape(ipStr))
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return &IPDetails{
+			IP:      ipStr,
+			Status:  "fail",
+			Message: "Lookup failed: " + err.Error(),
+		}
+	}
+	defer resp.Body.Close()
+
+	var details IPDetails
+	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+		return &IPDetails{
+			IP:      ipStr,
+			Status:  "fail",
+			Message: "JSON decode error: " + err.Error(),
+		}
+	}
+	if details.IP == "" {
+		details.IP = ipStr
+	}
+
+	// Cache successful or recognized lookups
+	ipCacheMu.Lock()
+	ipCache[ipStr] = cachedIP{
+		details:   &details,
+		fetchedAt: time.Now(),
+	}
+	ipCacheMu.Unlock()
+
+	return &details
 }
 
 // CustomSOCDashboardHTML contains the complete, self-contained RouteWarden Executive SOC Dashboard.
@@ -1367,6 +1473,214 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       color: #e2e8f0;
       white-space: pre-wrap;
     }
+
+    /* IP Intelligence & Abuse Hub Modal */
+    .ip-modal-card {
+      background: #0b1120;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 16px;
+      width: 90%;
+      max-width: 760px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 24px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 25px rgba(56, 189, 248, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .ip-header-banner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 14px 18px;
+    }
+    .ip-title-address {
+      font-size: 22px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .ip-geo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #7dd3fc;
+    }
+    .ip-intel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 680px) {
+      .ip-intel-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .ip-box {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .ip-box-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .ip-kv-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    .ip-kv-label {
+      color: var(--text-secondary);
+    }
+    .ip-kv-val {
+      font-family: 'JetBrains Mono', monospace;
+      color: #f1f5f9;
+      font-weight: 500;
+      text-align: right;
+      word-break: break-all;
+    }
+    .abuse-section {
+      background: rgba(244, 63, 94, 0.06);
+      border: 1px solid rgba(244, 63, 94, 0.22);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .abuse-actions-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-abuse {
+      background: rgba(244, 63, 94, 0.16);
+      border: 1px solid rgba(244, 63, 94, 0.35);
+      color: #fda4af;
+      padding: 7px 14px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-abuse:hover {
+      background: rgba(244, 63, 94, 0.3);
+      border-color: rgba(244, 63, 94, 0.6);
+      color: #ffffff;
+      box-shadow: 0 0 12px rgba(244, 63, 94, 0.25);
+    }
+    .btn-intel {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #7dd3fc;
+      padding: 7px 14px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-intel:hover {
+      background: rgba(56, 189, 248, 0.24);
+      color: #ffffff;
+    }
+    .abuse-report-textarea {
+      width: 100%;
+      height: 110px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 10px;
+      color: #cbd5e1;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    .abuse-report-textarea:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+    .ip-clickable {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .ip-clickable:hover {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      text-decoration: underline;
+    }
+    .ip-info-btn {
+      font-size: 10px;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #7dd3fc;
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-left: 4px;
+    }
+    .btn-report-mini {
+      background: rgba(244, 63, 94, 0.15);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      color: #fda4af;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-left: 6px;
+      transition: all 0.15s;
+    }
+    .btn-report-mini:hover {
+      background: rgba(244, 63, 94, 0.3);
+      color: #ffffff;
+    }
   </style>
 </head>
 <body>
@@ -1634,6 +1948,20 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   </div>
 </div>
 
+<!-- IP Threat Intelligence & Abuse Hub Modal -->
+<div class="modal-overlay" id="ip-modal">
+  <div class="ip-modal-card">
+    <div class="modal-header">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size: 20px;">🌐</span>
+        <span class="modal-title">IP Threat Intelligence & Abuse Hub</span>
+      </div>
+      <span class="modal-close" id="ip-modal-close-btn">&times;</span>
+    </div>
+    <div id="ip-modal-content"></div>
+  </div>
+</div>
+
 <script>
 (function() {
   var autoScroll = true;
@@ -1868,7 +2196,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         '<td><span class="' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
         '<td style="max-width:320px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
-        '<td>' + ev.client_ip + '</td>' +
+        '<td><span class="ip-clickable" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' + ev.client_ip + ' <span class="ip-info-btn">ℹ️</span></span></td>' +
         '<td>' + ev.status + '</td>' +
         '<td style="color:' + latencyColor + ';">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
       '</tr>';
@@ -1884,7 +2212,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   window.inspectEvent = function(id) {
     var found = allEvents.find(function(e) { return e.id === id; });
     if (!found) return;
-    modalContent.textContent = JSON.stringify(found, null, 2);
+    modalContent.innerHTML = '<div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">' +
+      '<div>Source IP: <b style="color:#38bdf8; font-family:JetBrains Mono, monospace; font-size:14px;">' + found.client_ip + '</b></div>' +
+      '<button class="btn-action" style="background:rgba(56,189,248,0.15); color:#38bdf8;" onclick="inspectIP(\'' + found.client_ip + '\')">🌐 IP Intel & Abuse Report</button>' +
+    '</div>' +
+    '<pre style="margin:0; overflow-x:auto;">' + JSON.stringify(found, null, 2) + '</pre>';
     modal.style.display = 'flex';
   };
 
@@ -1944,10 +2276,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (stats.top_ips && stats.top_ips.length > 0) {
       var ipHTML = '';
       stats.top_ips.forEach(function(item) {
-        ipHTML += '<tr onclick="filterByIP(\'' + item.name + '\')">' +
-          '<td>' + item.name + '</td>' +
+        ipHTML += '<tr>' +
+          '<td><span class="ip-clickable" onclick="inspectIP(\'' + item.name + '\')">' + item.name + ' <span class="ip-info-btn">ℹ️ Intel</span></span></td>' +
           '<td>' + Number(item.count).toLocaleString() + '</td>' +
-          '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span></td>' +
+          '<td><span class="pill-threat">' + item.blocked + ' Blocked</span> <span class="pill-tarpit">' + item.tarpit + ' Tarpit</span> ' +
+          '<button class="btn-report-mini" onclick="inspectIP(\'' + item.name + '\')">🚨 Report</button></td>' +
         '</tr>';
       });
       if (topIpsTbody.innerHTML !== ipHTML) {
@@ -2284,6 +2617,228 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
     sourcesContainer.innerHTML = sHTML;
   }
+
+  // IP Intelligence & Abuse Hub
+  var ipModal = document.getElementById('ip-modal');
+  var ipModalClose = document.getElementById('ip-modal-close-btn');
+  if (ipModalClose) {
+    ipModalClose.addEventListener('click', function() { ipModal.style.display = 'none'; });
+  }
+  window.addEventListener('click', function(e) {
+    if (e.target === ipModal) ipModal.style.display = 'none';
+  });
+
+  function getFlagEmoji(countryCode) {
+    if (!countryCode || countryCode === 'LAN' || countryCode === 'LOCAL') return '🏠';
+    if (countryCode.length !== 2) return '🌐';
+    var c1 = countryCode.toUpperCase().charCodeAt(0);
+    var c2 = countryCode.toUpperCase().charCodeAt(1);
+    if (c1 < 65 || c1 > 90 || c2 < 65 || c2 > 90) return '🌐';
+    return String.fromCodePoint(127397 + c1, 127397 + c2);
+  }
+
+  function generateAbuseReport(ip, info, eventsForIP) {
+    var now = new Date().toISOString();
+    var isp = (info && info.isp) ? info.isp : 'Network Provider';
+    var as = (info && info.as) ? info.as : 'Unknown AS';
+    var loc = ((info && info.city) ? info.city + ', ' : '') + ((info && info.country) ? info.country : 'Unknown Location');
+
+    var rulesSet = {};
+    var pathsSet = {};
+    var sampleLines = [];
+    eventsForIP.forEach(function(ev) {
+      if (ev.rule) rulesSet[ev.rule] = true;
+      if (ev.path) pathsSet[ev.path] = true;
+      if (sampleLines.length < 6) {
+        sampleLines.push('[' + (ev.time_str || ev.timestamp || 'N/A') + '] ' + ev.method + ' ' + ev.path + ' -> HTTP ' + ev.status + ' (' + ev.verdict + (ev.rule ? ' - Rule: ' + ev.rule : '') + ')');
+      }
+    });
+
+    var rulesList = Object.keys(rulesSet).join(', ') || 'Hostile Automated Scanning / Exploit Probing';
+
+    var report = 'Subject: Abuse Report: Hostile Activity Originating from ' + ip + '\n\n' +
+      'Dear ' + isp + ' Abuse Team,\n\n' +
+      'We are writing to report malicious security incidents originating from an IP address assigned to your network:\n\n' +
+      '  * Offending IP: ' + ip + '\n' +
+      '  * Network Provider: ' + isp + ' (' + as + ')\n' +
+      '  * Origin Location: ' + loc + '\n' +
+      '  * Reported At (UTC): ' + now + '\n' +
+      '  * Attack Categories: ' + rulesList + '\n' +
+      '  * Target Gateway: RouteWarden SOC Protected Ingress\n\n' +
+      'Incident Summary:\n' +
+      'The aforementioned IP address engaged in unauthorized access attempts, vulnerability scanning, and hostile exploitation against our services.\n\n' +
+      'Sample Incident Logs:\n' +
+      (sampleLines.length > 0 ? sampleLines.join('\n') : '[Sample: Hostile vulnerability scan detected by RouteWarden]') + '\n\n' +
+      'Please investigate this activity and take appropriate administrative action to mitigate further abuse.\n\n' +
+      'Regards,\n' +
+      'Security Operations Center (RouteWarden Gateway Defense)';
+
+    return report;
+  }
+
+  window.inspectIP = function(ip) {
+    if (!ip) return;
+    var modal = document.getElementById('ip-modal');
+    var content = document.getElementById('ip-modal-content');
+    content.innerHTML = '<div style="text-align:center; padding:40px; color:#94a3b8;"><div class="pulse-dot" style="margin:0 auto 12px auto;"></div>Fetching IP geolocation & threat intelligence via ip-api.com for <b>' + ip + '</b>...</div>';
+    modal.style.display = 'flex';
+
+    var eventsForIP = allEvents.filter(function(e) { return e.client_ip === ip; });
+    var totalHits = eventsForIP.length;
+    var blockedHits = eventsForIP.filter(function(e) { return e.verdict === 'BLOCK'; }).length;
+    var tarpitHits = eventsForIP.filter(function(e) { return e.verdict === 'TARPIT'; }).length;
+
+    var rulesMap = {};
+    eventsForIP.forEach(function(e) {
+      if (e.rule) rulesMap[e.rule] = (rulesMap[e.rule] || 0) + 1;
+    });
+    var rulesList = Object.keys(rulesMap).join(', ') || 'None';
+
+    function onData(info) {
+      renderIPModal(ip, info, totalHits, blockedHits, tarpitHits, rulesList, eventsForIP);
+    }
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/ip-lookup?ip=' + encodeURIComponent(ip), true);
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 200) {
+          try {
+            var data = JSON.parse(xhr.responseText);
+            onData(data);
+            return;
+          } catch(e) {}
+        }
+        // Fallback directly to ip-api.com
+        var fXhr = new XMLHttpRequest();
+        fXhr.open('GET', 'http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query', true);
+        fXhr.onreadystatechange = function() {
+          if (fXhr.readyState === 4) {
+            try {
+              var d = JSON.parse(fXhr.responseText);
+              onData(d);
+            } catch(err) {
+              onData({ status: 'fail', message: 'Unable to connect to ip-api.com' });
+            }
+          }
+        };
+        fXhr.send();
+      }
+    };
+    xhr.send();
+  };
+
+  function renderIPModal(ip, info, totalHits, blockedHits, tarpitHits, rulesList, eventsForIP) {
+    var content = document.getElementById('ip-modal-content');
+    var isPrivate = (info && info.is_private) || (info && info.message === 'reserved range');
+    var countryCode = (info && info.country_code) || (info && info.countryCode) || (isPrivate ? 'LAN' : '');
+    var flag = getFlagEmoji(countryCode);
+    var country = (info && info.country) || (isPrivate ? 'Local / Private Network' : 'Unknown Country');
+    var city = (info && info.city) || (isPrivate ? 'Local Subnet' : 'Unknown City');
+    var region = (info && info.region_name) || (info && info.regionName) || (info && info.region) || '';
+    var isp = (info && info.isp) || (isPrivate ? 'RFC 1918 / Loopback' : 'Unknown ISP');
+    var org = (info && info.org) || (info && info.isp) || 'Unknown Organization';
+    var asNum = (info && info.as) || 'N/A';
+    var timezone = (info && info.timezone) || 'N/A';
+    var latLon = (info && info.lat && info.lon) ? (info.lat + ', ' + info.lon) : 'N/A';
+
+    var abuseReportText = generateAbuseReport(ip, info, eventsForIP);
+
+    var html = '<div class="ip-header-banner">' +
+      '<div>' +
+        '<div class="ip-title-address">' +
+          '<span>' + ip + '</span>' +
+          '<button class="btn-action" style="padding:4px 8px; font-size:11px;" onclick="copyText(\'' + ip + '\', this)">📋 Copy</button>' +
+        '</div>' +
+        '<div style="margin-top:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+          '<span class="ip-geo-badge">' + flag + ' ' + country + (city ? ' — ' + city : '') + '</span>' +
+          '<span style="font-size:11px; color:#94a3b8; font-family:JetBrains Mono, monospace;">' + org + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex; gap:8px;">' +
+        '<button class="btn-action" style="background:rgba(56,189,248,0.15); color:#38bdf8;" onclick="filterAndCloseIP(\'' + ip + '\')">🔍 Filter Logs</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="ip-intel-grid">' +
+      '<div class="ip-box">' +
+        '<div class="ip-box-title">🌍 Geolocation & Network (https://ip-api.com/)</div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Country:</span><span class="ip-kv-val">' + flag + ' ' + country + ' (' + (countryCode || 'N/A') + ')</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">City / Region:</span><span class="ip-kv-val">' + city + (region ? ', ' + region : '') + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">ISP:</span><span class="ip-kv-val">' + isp + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Autonomous System:</span><span class="ip-kv-val">' + asNum + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Coordinates:</span><span class="ip-kv-val">' + latLon + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Timezone:</span><span class="ip-kv-val">' + timezone + '</span></div>' +
+      '</div>' +
+
+      '<div class="ip-box">' +
+        '<div class="ip-box-title">🛡️ RouteWarden Gateway Telemetry</div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Observed Hits:</span><span class="ip-kv-val" style="color:#ffffff;">' + totalHits + ' requests</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Blocked (403):</span><span class="ip-kv-val" style="color:#fb7185;">' + blockedHits + ' threats</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Tarpitted (429):</span><span class="ip-kv-val" style="color:#fcd34d;">' + tarpitHits + ' throttled</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Triggered Rules:</span><span class="ip-kv-val" style="color:#e2e8f0;">' + rulesList + '</span></div>' +
+        '<div class="ip-kv-row"><span class="ip-kv-label">Threat Severity:</span><span class="ip-kv-val">' + (blockedHits > 0 ? '<span class="pill-threat">HOSTILE</span>' : (tarpitHits > 0 ? '<span class="pill-tarpit">SUSPICIOUS</span>' : '<span class="pill-clean">BENIGN</span>')) + '</span></div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="abuse-section">' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">' +
+        '<span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#fb7185;">🚨 Abuse Reporting & Investigation</span>' +
+        '<div class="abuse-actions-row">' +
+          '<a href="https://www.abuseipdb.com/check/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-abuse">🚨 Report on AbuseIPDB</a>' +
+          '<a href="https://www.virustotal.com/gui/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-intel">🔬 VirusTotal</a>' +
+          '<a href="https://who.is/whois-ip/ip-address/' + encodeURIComponent(ip) + '" target="_blank" rel="noopener noreferrer" class="btn-intel">🌐 WHOIS</a>' +
+        '</div>' +
+      '</div>' +
+
+      '<div style="font-size:11px; color:#cbd5e1; margin-top:2px;">Standardized incident report generated from RouteWarden logs (ready to submit to upstream host / CERT):</div>' +
+      '<textarea class="abuse-report-textarea" id="abuse-report-text" readonly>' + abuseReportText + '</textarea>' +
+
+      '<div style="display:flex; justify-content:flex-end; gap:10px; align-items:center; flex-wrap:wrap;">' +
+        '<button class="btn-action" id="btn-copy-report" onclick="copyReport()"><span id="copy-report-icon">📋</span> Copy Incident Report</button>' +
+        '<a href="mailto:abuse@' + encodeURIComponent(isp.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com') + '?subject=' + encodeURIComponent('Abuse Report: Malicious Activity from ' + ip) + '&body=' + encodeURIComponent(abuseReportText) + '" class="btn-action" style="text-decoration:none;">📧 Mail Host Abuse Contact</a>' +
+      '</div>' +
+    '</div>';
+
+    content.innerHTML = html;
+  }
+
+  window.filterAndCloseIP = function(ip) {
+    document.getElementById('ip-modal').style.display = 'none';
+    filterByIP(ip);
+  };
+
+  window.copyText = function(text, btn) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        var orig = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
+        setTimeout(function() { btn.innerHTML = orig; }, 1800);
+      });
+    }
+  };
+
+  window.copyReport = function() {
+    var area = document.getElementById('abuse-report-text');
+    if (!area) return;
+    area.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(area.value).then(function() {
+        var btn = document.getElementById('btn-copy-report');
+        if (btn) {
+          btn.innerHTML = '<span>✅</span> Report Copied!';
+          setTimeout(function() { btn.innerHTML = '<span>📋</span> Copy Incident Report'; }, 2000);
+        }
+      });
+    } else {
+      document.execCommand('copy');
+      var btn = document.getElementById('btn-copy-report');
+      if (btn) {
+        btn.innerHTML = '<span>✅</span> Report Copied!';
+        setTimeout(function() { btn.innerHTML = '<span>📋</span> Copy Incident Report'; }, 2000);
+      }
+    }
+  };
 
   // Fetch initial stats
   function fetchStats() {

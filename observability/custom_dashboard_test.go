@@ -165,4 +165,47 @@ func TestCustomDashboard_HTTPEndpoints(t *testing.T) {
 	if _, ok := stats["total_events"]; !ok {
 		t.Errorf("expected total_events key in /api/stats")
 	}
+
+	// 3. GET /api/ip-lookup with private IP should return 200 and is_private=true
+	reqIP := httptest.NewRequest("GET", "/api/ip-lookup?ip=127.0.0.1", nil)
+	rrIP := httptest.NewRecorder()
+	handler.ServeHTTP(rrIP, reqIP)
+
+	if rrIP.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for GET /api/ip-lookup?ip=127.0.0.1, got %d", rrIP.Code)
+	}
+	var ipInfo observability.IPDetails
+	if err := json.Unmarshal(rrIP.Body.Bytes(), &ipInfo); err != nil {
+		t.Fatalf("failed to parse /api/ip-lookup JSON: %v", err)
+	}
+	if !ipInfo.IsPrivate {
+		t.Errorf("expected is_private=true for 127.0.0.1")
+	}
+	if ipInfo.CountryCode != "LAN" {
+		t.Errorf("expected country_code=LAN, got %q", ipInfo.CountryCode)
+	}
+
+	// 4. GET /api/ip-lookup without IP parameter should return 400 Bad Request
+	reqNoIP := httptest.NewRequest("GET", "/api/ip-lookup", nil)
+	rrNoIP := httptest.NewRecorder()
+	handler.ServeHTTP(rrNoIP, reqNoIP)
+	if rrNoIP.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for /api/ip-lookup without IP, got %d", rrNoIP.Code)
+	}
+
+	// 5. Test direct LookupIP function for invalid and empty inputs
+	emptyLookup := observability.LookupIP("")
+	if emptyLookup.Status != "fail" {
+		t.Errorf("expected fail status for empty IP, got %s", emptyLookup.Status)
+	}
+
+	invalidLookup := observability.LookupIP("not-an-ip")
+	if invalidLookup.Status != "fail" {
+		t.Errorf("expected fail status for invalid IP, got %s", invalidLookup.Status)
+	}
+
+	privLookup := observability.LookupIP("192.168.1.50")
+	if !privLookup.IsPrivate || privLookup.Status != "success" {
+		t.Errorf("expected success and is_private=true for 192.168.1.50")
+	}
 }

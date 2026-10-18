@@ -741,6 +741,20 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 		ServeSSE(w, r, globalStore)
 	})
 
+	mux.HandleFunc("/api/ip-lookup", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+		if ip == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "ip parameter required"})
+			return
+		}
+		info := LookupIP(ip)
+		_ = json.NewEncoder(w).Encode(info)
+	})
+
 	mux.HandleFunc("/api/v1/pubkey", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
