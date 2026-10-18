@@ -230,7 +230,15 @@ func handleDashboard(args []string) {
 		fs.StringVar(label, "l", "", "Alias for --label")
 		noOpen := fs.Bool("no-open", false, "Do not automatically open the browser")
 		exportOnly := fs.Bool("export", false, "Export dashboard files without starting")
+		geoipDB := fs.String("geoip-db", "", "Path to MaxMind GeoLite2-Country.mmdb or GeoLite2-City.mmdb database (or set GEOIP_DB / MAXMIND_DB)")
+		fs.StringVar(geoipDB, "maxmind", "", "Alias for --geoip-db")
 		_ = fs.Parse(remainingArgs)
+
+		if *geoipDB != "" {
+			if err := observability.InitMaxMind(*geoipDB); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Warning: Failed to load specified MaxMind database (%s): %v\n", *geoipDB, err)
+			}
+		}
 
 		if *exportOnly {
 			target := *dir

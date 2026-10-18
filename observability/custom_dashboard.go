@@ -688,6 +688,11 @@ var (
 )
 
 func initBuiltinIPDB() {
+	// Attempt auto-discovery of local MaxMind database
+	maxmindOnce.Do(func() {
+		_ = InitMaxMind()
+	})
+
 	rawEntries := []struct {
 		cidr        string
 		country     string
@@ -974,8 +979,8 @@ func lookupBuiltinIPDB(ip net.IP) (string, string) {
 }
 
 // AutoDetectCountry automatically determines the country and country code for an IP address.
-// It checks in-memory cache first, then the built-in zero-dependency IP database, and
-// asynchronously triggers background enrichment via ip-api.com for public IPs.
+// It checks in-memory cache first, then the MaxMind database if loaded, followed by the
+// built-in zero-dependency IP database, and triggers asynchronous background enrichment via ip-api.com.
 func AutoDetectCountry(ipStr string) (string, string) {
 	ipStr = strings.TrimSpace(ipStr)
 	if ipStr == "" {
@@ -996,33 +1001,38 @@ func AutoDetectCountry(ipStr string) (string, string) {
 		return "Unknown", ""
 	}
 
-	// 2. Built-in IP Database lookup
+	// 2. MaxMind GeoIP database lookup (if loaded and not loopback/private)
+	if IsMaxMindLoaded() && !parsed.IsLoopback() && !parsed.IsPrivate() && !parsed.IsLinkLocalUnicast() && !parsed.IsUnspecified() {
+		if cName, cCode, ok := LookupMaxMind(parsed); ok {
+			return cName, cCode
+		}
+	}
+
+	// 3. Built-in IP Database lookup (includes detailed private/LAN and RFC CIDR matches)
 	country, code := lookupBuiltinIPDB(parsed)
 
-	// 3. Background enrich if public IP and not already queried
-	if !parsed.IsLoopback() && !parsed.IsPrivate() && !parsed.IsLinkLocalUnicast() && !parsed.IsUnspecified() {
-		ipCacheMu.Lock()
-		if _, exists := ipCache[ipStr]; !exists {
-			ipCache[ipStr] = cachedIP{
-				details: &IPDetails{
-					IP:          ipStr,
-					Country:     country,
-					CountryCode: code,
-					Status:      "pending",
-				},
-				fetchedAt: time.Now(),
-			}
-			go func(targetIP string) {
-				LookupIP(targetIP)
-			}(ipStr)
+	// 5. Background enrich if public IP and not already queried
+	ipCacheMu.Lock()
+	if _, exists := ipCache[ipStr]; !exists {
+		ipCache[ipStr] = cachedIP{
+			details: &IPDetails{
+				IP:          ipStr,
+				Country:     country,
+				CountryCode: code,
+				Status:      "pending",
+			},
+			fetchedAt: time.Now(),
 		}
-		ipCacheMu.Unlock()
+		go func(targetIP string) {
+			LookupIP(targetIP)
+		}(ipStr)
 	}
+	ipCacheMu.Unlock()
 
 	return country, code
 }
 
-// LookupIP queries IP intelligence using ip-api.com with local caching and private IP handling.
+// LookupIP queries IP intelligence using ip-api.com with local caching, MaxMind GeoIP, and private IP handling.
 func LookupIP(ipStr string) *IPDetails {
 	ipStr = strings.TrimSpace(ipStr)
 	if ipStr == "" {
@@ -1058,11 +1068,44 @@ func LookupIP(ipStr string) *IPDetails {
 	}
 	ipCacheMu.RUnlock()
 
+	// Check MaxMind GeoIP if loaded
+	if IsMaxMindLoaded() {
+		if cName, cCode, ok := LookupMaxMind(parsed); ok {
+			details := &IPDetails{
+				IP:          ipStr,
+				Status:      "success",
+				Country:     cName,
+				CountryCode: cCode,
+				ISP:         "MaxMind GeoIP",
+				Org:         "MaxMind Database (" + MaxMindDBPath() + ")",
+			}
+			ipCacheMu.Lock()
+			ipCache[ipStr] = cachedIP{
+				details:   details,
+				fetchedAt: time.Now(),
+			}
+			ipCacheMu.Unlock()
+			return details
+		}
+	}
+
 	// Query ip-api.com over HTTP (fast, free tier)
 	client := &http.Client{Timeout: 4 * time.Second}
 	apiURL := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query", url.QueryEscape(ipStr))
 	resp, err := client.Get(apiURL)
 	if err != nil {
+		if IsMaxMindLoaded() {
+			if cName, cCode, ok := LookupMaxMind(parsed); ok {
+				return &IPDetails{
+					IP:          ipStr,
+					Status:      "success",
+					Country:     cName,
+					CountryCode: cCode,
+					ISP:         "MaxMind GeoIP",
+					Org:         "MaxMind Database (" + MaxMindDBPath() + ")",
+				}
+			}
+		}
 		cName, cCode := lookupBuiltinIPDB(parsed)
 		return &IPDetails{
 			IP:          ipStr,
@@ -1077,6 +1120,18 @@ func LookupIP(ipStr string) *IPDetails {
 
 	var details IPDetails
 	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+		if IsMaxMindLoaded() {
+			if cName, cCode, ok := LookupMaxMind(parsed); ok {
+				return &IPDetails{
+					IP:          ipStr,
+					Status:      "success",
+					Country:     cName,
+					CountryCode: cCode,
+					ISP:         "MaxMind GeoIP",
+					Org:         "MaxMind Database (" + MaxMindDBPath() + ")",
+				}
+			}
+		}
 		cName, cCode := lookupBuiltinIPDB(parsed)
 		return &IPDetails{
 			IP:          ipStr,
@@ -1091,7 +1146,18 @@ func LookupIP(ipStr string) *IPDetails {
 		details.IP = ipStr
 	}
 	if details.Country == "" {
-		details.Country, details.CountryCode = lookupBuiltinIPDB(parsed)
+		if IsMaxMindLoaded() {
+			if cName, cCode, ok := LookupMaxMind(parsed); ok {
+				details.Country = cName
+				details.CountryCode = cCode
+				if details.ISP == "" {
+					details.ISP = "MaxMind GeoIP"
+				}
+			}
+		}
+		if details.Country == "" {
+			details.Country, details.CountryCode = lookupBuiltinIPDB(parsed)
+		}
 	}
 
 	// Cache successful or recognized lookups

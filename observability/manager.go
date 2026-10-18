@@ -431,6 +431,11 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		fmt.Println("🐳 Auto-Discovery:     Listening for containers with label 'routewarden=true'")
 	}
 	fmt.Printf("🔑 Server Public Key:  %s\n", serverPubStr[:min(20, len(serverPubStr))]+"...")
+	if IsMaxMindLoaded() {
+		fmt.Printf("🌍 MaxMind Database:   %s\n", MaxMindDBPath())
+	} else {
+		fmt.Printf("🌍 Country Detection:  Auto (Built-in CIDR & RIR DB + MaxMind discovery)\n")
+	}
 	fmt.Printf("⚡ Memory Footprint:   ~8MB (Zero external dependencies)\n")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
