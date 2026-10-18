@@ -1340,7 +1340,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       margin: 0 0 10px;
       font-family: var(--mono);
       font-weight: 700;
-      font-size: clamp(6.5px, 0.95vw, 10px);
+      font-size: clamp(5px, 0.76vw, 8.5px);
       line-height: 1.15;
       white-space: pre;
       color: var(--text);
@@ -2333,11 +2333,12 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   <!-- ── Masthead with ASCII Wordmark & Spec Datasheet ─────── -->
   <header class="masthead">
     <div>
-      <pre class="wordmark"><span class="hl"> ____   ___  _   _ _____ _____</span><span class="sub"> _    _  _   ____  ____  _____ _   _ </span>
-<span class="hl">|  _ \ / _ \| | | |_   _| ____|</span><span class="sub">| |  | |/ \ |  _ \|  _ \| ____| \ | |</span>
-<span class="hl">| |_) | | | | | | | | | |  _|  </span><span class="sub">| |  | / _ \| |_) | | | |  _| |  \| |</span>
-<span class="hl">|  _ <| |_| | |_| | | | | |___ </span><span class="sub">| |/\| / ___ \  _ <| |_| | |___| |\  |</span>
-<span class="hl">|_| \_\___/ \___/  |_| |_____|</span><span class="sub">|__/\__/_/   \_\_| \_\____/|_____|_| \_|</span></pre>
+      <pre class="wordmark"><span class="hl">██████╗  ██████╗ ██╗   ██╗████████╗███████╗</span> <span class="sub">██╗    ██╗ █████╗ ██████╗ ██████╗ ███████╗███╗   ██╗</span>
+<span class="hl">██╔══██╗██╔═══██╗██║   ██║╚══██╔══╝██╔════╝</span> <span class="sub">██║    ██║██╔══██╗██╔══██╗██╔══██╗██╔════╝████╗  ██║</span>
+<span class="hl">██████╔╝██║   ██║██║   ██║   ██║   █████╗  </span> <span class="sub">██║ █╗ ██║███████║██████╔╝██║  ██║█████╗  ██╔██╗ ██║</span>
+<span class="hl">██╔══██╗██║   ██║██║   ██║   ██║   ██╔══╝  </span> <span class="sub">██║███╗██║██╔══██║██╔══██╗██║  ██║██╔══╝  ██║╚██╗██║</span>
+<span class="hl">██║  ██║╚██████╔╝╚██████╔╝   ██║   ███████╗</span> <span class="sub">╚███╔███╔╝██║  ██║██║  ██║██████╔╝███████╗██║ ╚████║</span>
+<span class="hl">╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝</span> <span class="sub"> ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═══╝</span></pre>
       <p class="lede">Real-time Reverse Proxy Intrusion Telemetry & Threat Defense</p>
       <p class="lede tight">Deterministic zero-knowledge cipher stream, edge tarpitting & active geo-surveillance.</p>
     </div>
