@@ -3161,7 +3161,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div class="chart-card">
       <div class="card-cap">
         <span>🚨 TOP ATTACKING CLIENT IPS</span>
-        <span style="font-size:10.5px; color:var(--overlay);">Click row to inspect</span>
       </div>
       <div style="max-height:260px; overflow:auto;">
         <table class="intel-table">
