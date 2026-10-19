@@ -48,8 +48,10 @@ changelog:
       - "^docs:"
       - "^test:"
 
-brews:
+homebrew_casks:
   - name: rwarden
+    binaries:
+      - rwarden
     repository:
       owner: routewarden
       name: homebrew-tap
@@ -57,13 +59,17 @@ brews:
     commit_author:
       name: routewarden-bot
       email: bot@routewarden.dev
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    directory: Formula
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Casks
     homepage: "https://routewarden.github.io"
     description: "Unified Edge & L4 Protocol Security Suite CLI"
-    license: "MIT"
-    test: |
-      system "#{bin}/rwarden version"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"]
+          end
+
 
 nfpms:
   - id: packages
