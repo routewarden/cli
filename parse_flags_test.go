@@ -144,6 +144,34 @@ func TestParseFlagsLenient(t *testing.T) {
 			t.Errorf("expected file=/var/log/access.log, got %s", *file)
 		}
 	})
+
+	t.Run("flag value starting with dash", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		header := fs.String("header", "", "header")
+
+		args := []string{"--header", "-X-Header: value", "pos1"}
+		err := parseFlagsLenient(fs, args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if *header != "-X-Header: value" {
+			t.Errorf("expected header='-X-Header: value', got %q", *header)
+		}
+		if !reflect.DeepEqual(fs.Args(), []string{"pos1"}) {
+			t.Errorf("expected positional args [pos1], got %v", fs.Args())
+		}
+	})
+
+	t.Run("unknown flag does not consume next positional arg", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		fs.SetOutput(&dummyWriter{})
+
+		args := []string{"-unknown-flag", "pos1", "pos2"}
+		err := parseFlagsLenient(fs, args)
+		if err == nil {
+			t.Errorf("expected error for unknown flag")
+		}
+	})
 }
 
 type dummyWriter struct{}

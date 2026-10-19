@@ -27,7 +27,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.0.0"
+var version = "5.0.1"
 
 type stringSlice []string
 
@@ -68,6 +68,9 @@ Commands:
   sandbox     Spin up an ephemeral gateway container (Traefik, Caddy, NGINX) to test live
                 e.g. rwarden sandbox caddy [Caddyfile]
                 e.g. rwarden sandbox traefik --test
+  up          Launch real-time SOC security dashboard (shortcut for 'dashboard up')
+                e.g. rwarden up --port 7890
+                e.g. rwarden up -d --auth admin:secret
   dashboard   Launch or manage the real-time SOC security dashboard
                 e.g. rwarden dashboard
                 e.g. rwarden dashboard -d
@@ -152,6 +155,9 @@ func main() {
 	case "dashboard":
 		handleDashboard(os.Args[2:])
 
+	case "up", "start":
+		handleDashboard(append([]string{"up"}, os.Args[2:]...))
+
 	case "keys":
 		handleKeys(os.Args[2:])
 
@@ -223,8 +229,14 @@ func handleDashboard(args []string) {
 		checkDaemonStatus("dashboard", "RouteWarden Dashboard")
 
 	case "up", "start":
+		defaultPort := 7890
+		if pStr := os.Getenv("PORT"); pStr != "" {
+			if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+				defaultPort = p
+			}
+		}
 		fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-		port := fs.Int("port", 7890, "Port for SOC dashboard UI (default: 7890)")
+		port := fs.Int("port", defaultPort, "Port for SOC dashboard UI (default: 7890 or PORT env var)")
 		dir := fs.String("dir", "", "Directory to store dashboard configs (default: ~/.routewarden/dashboard)")
 		file := fs.String("file", "", "Log file to monitor (default: auto-discovered docker containers)")
 		fs.StringVar(file, "f", "", "Alias for --file")
@@ -242,8 +254,14 @@ func handleDashboard(args []string) {
 		fs.StringVar(auth, "a", "", "Alias for --auth")
 		user := fs.String("user", "", "Optional HTTP Basic Auth username (used with --password)")
 		pass := fs.String("password", "", "Optional HTTP Basic Auth password (used with --user)")
-		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, default: all interfaces)")
+		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, or set RW_DASHBOARD_HOST)")
 		_ = parseFlagsLenient(fs, remainingArgs)
+
+		if *host == "" {
+			if envHost := os.Getenv("RW_DASHBOARD_HOST"); envHost != "" {
+				*host = envHost
+			}
+		}
 
 		if *detach && os.Getenv("_RW_DETACHED") != "1" {
 			bindHost := *host
@@ -357,12 +375,15 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 					flags = append(flags, arg)
 					continue
 				}
+				flags = append(flags, arg)
+				if i+1 < len(args) {
+					flags = append(flags, args[i+1])
+					i++
+				}
+				continue
 			}
+			// Unknown flag: do not consume the next argument
 			flags = append(flags, arg)
-			if i+1 < len(args) && (!strings.HasPrefix(args[i+1], "-") || args[i+1] == "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
 		} else {
 			posArgs = append(posArgs, arg)
 		}
@@ -373,17 +394,10 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 func handleGenerate(args []string) {
 	fs := flag.NewFlagSet("generate", flag.ExitOnError)
 	target := fs.String("target", "", "Target gateway format: traefik-yaml, traefik-toml, traefik-labels, caddy, nginx, tcp-warden")
-	shortTarget := fs.String("t", "", "Alias for --target")
+	fs.StringVar(target, "t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to RouteWarden JSON config file (or '-' for stdin)")
-	shortConfig := fs.String("c", "", "Alias for --config")
+	fs.StringVar(configPath, "c", "", "Alias for --config")
 	_ = parseFlagsLenient(fs, args)
-
-	if *shortTarget != "" && *target == "" {
-		*target = *shortTarget
-	}
-	if *shortConfig != "" && *configPath == "" {
-		*configPath = *shortConfig
-	}
 
 	for _, arg := range fs.Args() {
 		if *target == "" {
@@ -449,9 +463,9 @@ func handleSandbox(args []string) {
 	}
 	fs := flag.NewFlagSet("sandbox", flag.ExitOnError)
 	target := fs.String("target", "", "Target gateway to run: traefik, caddy, nginx (optional if inferrable from config)")
-	shortTarget := fs.String("t", "", "Alias for --target")
+	fs.StringVar(target, "t", "", "Alias for --target")
 	configPath := fs.String("config", "", "Path to gateway config (traefik.toml, traefik.yaml, docker-compose.yaml, Caddyfile, nginx.conf, or routewarden.json, or '-' for stdin)")
-	shortConfig := fs.String("c", "", "Alias for --config")
+	fs.StringVar(configPath, "c", "", "Alias for --config")
 	formatFlag := fs.String("format", "", "Explicit config format: json, traefik-toml, traefik-yaml, traefik-labels, caddy, nginx")
 	labelsFlag := fs.String("labels", "", "Direct Traefik Docker labels string (e.g. 'traefik.http.middlewares.warden...')")
 	probePathFlag := fs.String("probe-path", "", "Additional custom endpoint path to probe during live test")
@@ -462,20 +476,13 @@ func handleSandbox(args []string) {
 	pluginPath := fs.String("plugin-path", "", "Local path to RouteWarden plugin directory to mount for development")
 	imgOverride := fs.String("image", "", "Custom container image override")
 	printConfig := fs.Bool("print-config", false, "Print generated gateway configuration before starting container")
-	shortPrint := fs.Bool("p", false, "Alias for --print-config")
+	fs.BoolVar(printConfig, "p", false, "Alias for --print-config")
 	dryRun := fs.Bool("dry-run", false, "Generate config and print docker command without running container")
-	shortDryRun := fs.Bool("n", false, "Alias for --dry-run")
+	fs.BoolVar(dryRun, "n", false, "Alias for --dry-run")
 	runTest := fs.Bool("test", false, "Run automated live HTTP test assertions against container then teardown")
 	detach := fs.Bool("detach", false, "Run container in background mode")
-	shortDetach := fs.Bool("d", false, "Alias for --detach")
+	fs.BoolVar(detach, "d", false, "Alias for --detach")
 	_ = parseFlagsLenient(fs, args)
-
-	if *shortTarget != "" && *target == "" {
-		*target = *shortTarget
-	}
-	if *shortConfig != "" && *configPath == "" {
-		*configPath = *shortConfig
-	}
 	for _, arg := range fs.Args() {
 		argLower := strings.ToLower(arg)
 		if argLower == "traefik" || argLower == "caddy" || argLower == "nginx" {
@@ -487,9 +494,9 @@ func handleSandbox(args []string) {
 		}
 	}
 
-	shouldPrint := *printConfig || *shortPrint
-	shouldDetach := *detach || *shortDetach
-	isDryRun := *dryRun || *shortDryRun
+	shouldPrint := *printConfig
+	shouldDetach := *detach
+	isDryRun := *dryRun
 
 	// Determine target
 	normTarget := strings.ToLower(strings.TrimSpace(*target))
@@ -858,15 +865,15 @@ func handleTest(args []string) {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	testPath := fs.String("path", "", "Request path to evaluate (e.g. /.env or /api/v1)")
 	testQuery := fs.String("query", "", "Request query string to evaluate (optional)")
-	shortQuery := fs.String("q", "", "Alias for --query")
+	fs.StringVar(testQuery, "q", "", "Alias for --query")
 	testBody := fs.String("body", "", "Request body payload to evaluate (optional)")
-	shortBody := fs.String("b", "", "Alias for --body")
+	fs.StringVar(testBody, "b", "", "Alias for --body")
 	testMethod := fs.String("method", "GET", "HTTP method (default: GET)")
-	shortMethodX := fs.String("X", "", "Alias for --method (HTTP method)")
-	shortMethodM := fs.String("m", "", "Alias for --method (HTTP method)")
+	fs.StringVar(testMethod, "X", "GET", "Alias for --method (HTTP method)")
+	fs.StringVar(testMethod, "m", "GET", "Alias for --method (HTTP method)")
 	testIP := fs.String("ip", "", "Client IP address to evaluate against allowedIps (optional)")
 	configPath := fs.String("config", "", "Optional path to RouteWarden JSON config file (or '-' for stdin)")
-	shortConfig := fs.String("c", "", "Alias for --config")
+	fs.StringVar(configPath, "c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
 	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
 
@@ -874,21 +881,6 @@ func handleTest(args []string) {
 	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
 	fs.Var(&headerList, "H", "Alias for --header (repeatable)")
 	_ = parseFlagsLenient(fs, args)
-
-	if *shortMethodX != "" {
-		*testMethod = *shortMethodX
-	} else if *shortMethodM != "" {
-		*testMethod = *shortMethodM
-	}
-	if *shortQuery != "" && *testQuery == "" {
-		*testQuery = *shortQuery
-	}
-	if *shortBody != "" && *testBody == "" {
-		*testBody = *shortBody
-	}
-	if *shortConfig != "" && *configPath == "" {
-		*configPath = *shortConfig
-	}
 	if *testPath == "" && len(fs.Args()) > 0 {
 		*testPath = fs.Args()[0]
 	}

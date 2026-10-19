@@ -14,6 +14,7 @@ func TestShellCompletions_Unit(t *testing.T) {
 		"diff",
 		"sandbox",
 		"dashboard",
+		"up",
 		"keys",
 		"register",
 		"push",
