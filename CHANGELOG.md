@@ -2,7 +2,26 @@
 
 All notable changes to the RouteWarden CLI (`rwarden`) are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the CLI adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v5.0.1] - 2026-10-19 (Latest)
+## [v5.0.3] - 2026-10-19 (Latest)
+
+### Changed
+- **Homebrew Cask Migration & GoReleaser Deprecation Fix**:
+  - Migrated GoReleaser release specification from deprecated `brews:` to modern `homebrew_casks:` with explicit binary linkage (`binaries: [rwarden]`) and Casks directory target (`directory: Casks`), fully resolving the GoReleaser v2 deprecation warning (`brews should not be used anymore`).
+
+### Fixed
+- **macOS Gatekeeper Quarantine Extended Attribute Stripping**:
+  - Added an automated post-install hook in Homebrew Cask specification running `/usr/bin/xattr -dr com.apple.quarantine` on macOS installations. This removes the `com.apple.quarantine` extended attribute from staged binaries, eliminating macOS Gatekeeper "rwarden is damaged and cannot be opened" alerts for unsigned releases.
+- **Seamless Homebrew Tap Migration (`tap_migrations.json`)**:
+  - Configured `tap_migrations.json` (`"rwarden": "rwarden"`) in the `routewarden/homebrew-tap` repository to seamlessly redirect existing formula installations to the cask distribution during `brew upgrade` without requiring manual uninstallation.
+- **Response Mode Status Code Defaulting in Configuration Generator**:
+  - Updated `ResolveResponse()` in `engine` to apply mode-specific status code defaults when omitted (`gzipBomb` &rarr; `200`, `fakeSuccess` &rarr; `200`, `rateLimitChallenge` &rarr; `429`, `redirect` &rarr; `302`).
+  - Ensures CLI generator commands (`rwarden generate --target traefik-yaml|traefik-toml|traefik-labels|caddy|nginx`) emit valid, active-defense status codes rather than falling back to default `403`.
+- **Automated Version Synchronization**:
+  - Synchronized release version constants across CLI micro-binaries (`rwarden`, `rwarden-shipper`, `rwarden-dashboard`), Dockerfiles, terminal authentication screen, custom SOC dashboard badges, SARIF report generators, docs registry, and installer scripts.
+
+---
+
+## [v5.0.1] - 2026-10-19
 
 ### Added
 - **Top-Level `rwarden up` Command**:

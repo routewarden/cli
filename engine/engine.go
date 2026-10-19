@@ -737,7 +737,7 @@ func (cfg *Config) Generate(target string) (string, error) {
 // ResolveResponse returns a normalized ResponseConfig incorporating top-level mode/action aliases.
 func (cfg *Config) ResolveResponse() (string, int, string) {
 	mode := "text"
-	status := 403
+	status := 0
 	body := ""
 
 	if cfg.StatusCode != 0 {
@@ -763,6 +763,26 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 		if strings.TrimSpace(cfg.Mode) != "" {
 			mode = strings.TrimSpace(cfg.Mode)
 		}
+	}
+
+	// Mode-specific status defaults when not explicitly provided by user
+	if (cfg.Response == nil || cfg.Response.StatusCode == 0) && (cfg.StatusCode == 0 || cfg.StatusCode == 403) {
+		switch strings.ToLower(mode) {
+		case "gzipbomb", "bomb":
+			status = 200
+		case "fakesuccess", "decoy":
+			status = 200
+		case "ratelimit", "ratelimitchallenge", "backoff":
+			status = 429
+		case "redirect":
+			status = 302
+		default:
+			if status == 0 {
+				status = 403
+			}
+		}
+	} else if status == 0 {
+		status = 403
 	}
 
 	return mode, status, body

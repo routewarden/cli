@@ -268,6 +268,48 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("ResolveResponse defaults status codes per mode", func(t *testing.T) {
+		tests := []struct {
+			mode           string
+			topCode        int
+			respCode       int
+			expectedStatus int
+		}{
+			{mode: "gzipBomb", expectedStatus: 200},
+			{mode: "bomb", expectedStatus: 200},
+			{mode: "fakeSuccess", expectedStatus: 200},
+			{mode: "decoy", expectedStatus: 200},
+			{mode: "rateLimitChallenge", expectedStatus: 429},
+			{mode: "rateLimit", expectedStatus: 429},
+			{mode: "backoff", expectedStatus: 429},
+			{mode: "redirect", expectedStatus: 302},
+			{mode: "text", expectedStatus: 403},
+			{mode: "json", expectedStatus: 403},
+			{mode: "html", expectedStatus: 403},
+			{mode: "xml", expectedStatus: 403},
+			// Explicit overrides
+			{mode: "gzipBomb", respCode: 403, expectedStatus: 403},
+			{mode: "gzipBomb", respCode: 418, expectedStatus: 418},
+			{mode: "gzipBomb", topCode: 418, expectedStatus: 418},
+		}
+
+		for _, tc := range tests {
+			cfg := engine.CreateConfig()
+			if tc.topCode != 0 {
+				cfg.StatusCode = tc.topCode
+			}
+			cfg.Response = &engine.ResponseConfig{
+				Mode:       tc.mode,
+				StatusCode: tc.respCode,
+			}
+			_, status, _ := cfg.ResolveResponse()
+			if status != tc.expectedStatus {
+				t.Errorf("mode %s (respCode=%d, topCode=%d): expected status %d, got %d",
+					tc.mode, tc.respCode, tc.topCode, tc.expectedStatus, status)
+			}
+		}
+	})
 }
 
 func TestEngine_EvaluateEdgeCases(t *testing.T) {
