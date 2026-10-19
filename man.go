@@ -48,6 +48,9 @@ Emit system roff/troff manual page.
 \fBsandbox\fR \fItarget\fR [\fIconfig\fR]
 Spin up an ephemeral, isolated Traefik, Caddy, or NGINX container in Docker to test live request traffic against policies.
 .TP
+\fBup\fR [\fIoptions\fR]
+Launch the real-time SOC security dashboard (shortcut for \fBdashboard up\fR). Supports \fB--port\fR, \fB--auth\fR, and \fB--detach\fR (\fB-d\fR).
+.TP
 \fBdashboard\fR [\fIup\fR|\fIdown\fR|\fIstatus\fR|\fIstop\fR|\fIexport\fR]
 Launch and manage the real-time SOC security dashboard (supports \fB--detach\fR / \fB-d\fR).
 .TP

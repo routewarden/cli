@@ -106,12 +106,14 @@ func (e *logEvent) toCombinedLog() string {
 		}
 	}
 	t := time.Now().UTC()
-	if e.Timestamp != "" {
-		if parsed, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+	tsRaw := e.Timestamp
+	if tsRaw == "" {
+		tsRaw = e.TimestampAlt
+	}
+	if tsRaw != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, tsRaw); err == nil {
 			t = parsed
-		}
-	} else if e.TimestampAlt != "" {
-		if parsed, err := time.Parse(time.RFC3339, e.TimestampAlt); err == nil {
+		} else if parsed, err := time.Parse("2006-01-02 15:04:05", tsRaw); err == nil {
 			t = parsed
 		}
 	}
@@ -198,6 +200,7 @@ func handleMonitor(args []string) {
 	msgChan := make(chan streamMsg, 500)
 	go func() {
 		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			msgChan <- streamMsg{Container: "", Line: scanner.Text()}
 		}
@@ -313,6 +316,7 @@ func streamContainerLogs(ctx context.Context, target containerTarget, tailLines 
 	readPipe := func(r io.Reader) {
 		defer streamWg.Done()
 		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -555,8 +559,13 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 
 		timeStr := ev.Timestamp
 		if timeStr == "" {
+			timeStr = ev.TimestampAlt
+		}
+		if timeStr == "" {
 			timeStr = time.Now().Format("15:04:05")
-		} else if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		} else if t, err := time.Parse(time.RFC3339Nano, timeStr); err == nil {
+			timeStr = t.Format("15:04:05")
+		} else if t, err := time.Parse("2006-01-02 15:04:05", timeStr); err == nil {
 			timeStr = t.Format("15:04:05")
 		}
 

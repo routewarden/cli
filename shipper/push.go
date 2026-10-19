@@ -76,13 +76,28 @@ func HandlePush(args []string, version string) {
 	containersToTail := ResolveContainerList(containerFlags)
 	runDockerDiscovery := *dockerMode || (len(filesToMonitor) == 0 && len(containersToTail) == 0)
 
+	if *urlFlag == "" {
+		if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
+			*urlFlag = envURL
+		} else if envURL := os.Getenv("RW_URL"); envURL != "" {
+			*urlFlag = envURL
+		}
+	}
+	if *keyFlag == "" {
+		if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
+			*keyFlag = envKey
+		} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
+			*keyFlag = envKey
+		}
+	}
+
 	// Load configuration
 	agentCfg, err := LoadAgentConfig(*configPath)
 	if err != nil && (*urlFlag == "" || *keyFlag == "") {
 		fmt.Fprintln(os.Stderr, "❌ RouteWarden is not registered on this node, and --url / --key were not provided.")
 		fmt.Fprintln(os.Stderr, "\nTo register this server, run:")
 		fmt.Fprintln(os.Stderr, "  rwarden register --url http://<dashboard-ip>:7890 --key <agent-token>")
-		fmt.Fprintln(os.Stderr, "\nOr push directly with flags:")
+		fmt.Fprintln(os.Stderr, "\nOr push directly with flags (or RW_DASHBOARD_URL and RW_AGENT_KEY):")
 		fmt.Fprintln(os.Stderr, "  rwarden push --url http://<dashboard-ip>:7890 --key <agent-token> --docker")
 		os.Exit(1)
 	}
@@ -120,6 +135,10 @@ func HandlePush(args []string, version string) {
 	var serverPubKey *ecdh.PublicKey
 	if serverPubKeyStr != "" {
 		if pk, err := crypto.DecodePublicKey(serverPubKeyStr); err == nil {
+			serverPubKey = pk
+		}
+	} else if dashboardURL != "" {
+		if pk := fetchServerPubKey(dashboardURL); pk != nil {
 			serverPubKey = pk
 		}
 	}
@@ -250,6 +269,7 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 		_ = cmd.Wait()
 	}()
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -278,6 +298,7 @@ func TailContainerToChan(ctx context.Context, containerName, tailLines string, o
 
 	readPipe := func(r io.Reader) {
 		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -501,4 +522,27 @@ func minLen(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func fetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(strings.TrimRight(dashboardURL, "/") + "/api/v1/pubkey")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+	var body struct {
+		PublicKey string `json:"public_key"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&body); err != nil || body.PublicKey == "" {
+		return nil
+	}
+	pk, err := crypto.DecodePublicKey(body.PublicKey)
+	if err != nil {
+		return nil
+	}
+	return pk
 }

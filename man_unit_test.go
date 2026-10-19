@@ -6,9 +6,10 @@ import (
 )
 
 func TestGenerateManPage_Unit(t *testing.T) {
-	man := GenerateManPage("5.0.0")
+	man := GenerateManPage(version)
 
-	if !strings.Contains(man, `.TH RWARDEN 1 "October 2026" "rwarden 5.0.0" "RouteWarden Manual"`) {
+	expectedHeader := `.TH RWARDEN 1 "October 2026" "rwarden ` + version + `" "RouteWarden Manual"`
+	if !strings.Contains(man, expectedHeader) {
 		t.Errorf("missing roff header in man page: %s", man[:min(100, len(man))])
 	}
 
@@ -28,6 +29,7 @@ func TestGenerateManPage_Unit(t *testing.T) {
 		`\fBman\fR`,
 		`\fBsandbox\fR`,
 		`\fBdashboard\fR`,
+		`\fBup\fR`,
 		`\fBkeys\fR`,
 		`\fBregister\fR`,
 		`\fBpush\fR`,

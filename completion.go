@@ -42,7 +42,7 @@ _rwarden_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="test validate generate audit diff sandbox dashboard keys register push monitor tui status stop completion man cleanup schema version help"
+    local commands="up test validate generate audit diff sandbox dashboard keys register push monitor tui status stop completion man cleanup schema version help"
     local generate_targets="traefik-yaml traefik-toml traefik-labels caddy nginx tcp-warden"
     local dashboard_cmds="up down status stop export"
     local push_cmds="status stop"
@@ -74,7 +74,7 @@ _rwarden_completions() {
                 return 0
             fi
             ;;
-        dashboard)
+        dashboard|up)
             if [ "$cword" -eq 2 ]; then
                 COMPREPLY=( $(compgen -W "$dashboard_cmds" -- "$cur") )
                 return 0
@@ -181,6 +181,7 @@ func generateZshCompletion() string {
 _rwarden() {
     local -a commands
     commands=(
+        'up:Launch real-time SOC security dashboard'
         'test:Simulate request path and anti-evasion inspection'
         'validate:Validate a RouteWarden configuration file against JSON schema'
         'generate:Generate gateway configuration snippet'
@@ -233,7 +234,7 @@ _rwarden() {
                         '1:base config:_files -g "*.json"' \
                         '2:candidate config:_files -g "*.json"'
                     ;;
-                dashboard)
+                dashboard|up)
                     _arguments \
                         '1:subcommand:(up down status stop export)' \
                         '--port[SOC dashboard HTTP port]:port:' \
@@ -299,6 +300,7 @@ func generateFishCompletion() string {
 complete -c rwarden -f
 
 # Main commands
+complete -c rwarden -n "__fish_use_subcommand" -a up -d "Launch real-time SOC security dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a test -d "Simulate path and query anti-evasion evaluation"
 complete -c rwarden -n "__fish_use_subcommand" -a validate -d "Validate configuration against JSON schema"
 complete -c rwarden -n "__fish_use_subcommand" -a generate -d "Compile policy into gateway config"
@@ -342,7 +344,7 @@ func generatePowerShellCompletion() string {
 Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'status', 'stop', 'completion', 'man', 'cleanup', 'schema', 'version')
+    $commands = @('up', 'test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'status', 'stop', 'completion', 'man', 'cleanup', 'schema', 'version')
     $elements = $commandAst.Elements
 
     if ($elements.Count -eq 2) {

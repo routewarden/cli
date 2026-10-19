@@ -10,7 +10,7 @@ The canonical release version of `rwarden` is stored in [`version.json`](version
 
 ```json
 {
-  "version": "v5.0.0"
+  "version": "v5.0.1"
 }
 ```
 
@@ -22,10 +22,18 @@ Whenever you prepare a release, update this file or use the automated synchroniz
 
 When publishing a new release, version numbers must stay in sync across:
 1. **`version.json`**: Canonical version tracking.
-2. **`main.go`**: Runtime CLI version string (`var version = "4.0.1"`).
-3. **`package.json`**: CLI package version.
-4. **`README.md`**: CLI output examples (`# rwarden version 4.0.1`).
-5. **`VERSIONING.md`**: Canonical version tracking documentation.
+2. **`main.go`**: Runtime CLI version string (`var version = "5.0.1"`).
+3. **`cmd/shipper/main.go`**: Standalone shipper micro-binary version string.
+4. **`cmd/dashboard/main.go`**: Standalone dashboard micro-binary version string.
+5. **`observability/manager.go`**: Dashboard API response & engine version (`var Version = "5.0.1"`).
+6. **`observability/custom_dashboard.go`**: SOC Dashboard HTML badges & core runtime tags.
+7. **`observability/auth_screen.go`**: Terminal auth login screen banner.
+8. **`engine/audit.go`**: SARIF security linter report metadata.
+9. **`README.md`**: CLI output examples (`# rwarden version 5.0.1`).
+10. **`VERSIONING.md`**: Canonical version tracking documentation.
+11. **`Dockerfile*`**: Multi-stage build documentation headers (`Dockerfile`, `Dockerfile.dashboard`, `Dockerfile.shipper`).
+12. **`observability/ingest_test.go` & `integration_test.go`**: Automated test suite assertions.
+13. **Documentation Registry**: `docs/docs/version.json` and installer fallback when in RouteWarden monorepo.
 
 > **Note**: The universal installer is maintained centrally and served directly at `https://routewarden.github.io/install.sh`.
 
@@ -33,9 +41,10 @@ To automate this across all files, run [`scripts/update-version.sh`](scripts/upd
 
 ### Mode A: Pass target version via CLI
 ```bash
-./scripts/update-version.sh v1.1.0
+./scripts/update-version.sh v5.0.1
+# or without 'v' prefix:
+./scripts/update-version.sh 5.0.1
 ```
-*(or via npm script: `npm run version:update v1.1.0`)*
 
 ### Mode B: Read directly from `version.json`
 Edit [`version.json`](version.json) manually, then run:

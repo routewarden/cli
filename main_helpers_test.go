@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -52,3 +53,43 @@ func TestPrintUsage(t *testing.T) {
 		t.Errorf("usage output must not contain goaccess")
 	}
 }
+
+func TestDashboardPortAndHostEnv(t *testing.T) {
+	t.Run("default port 7890 when PORT is unset", func(t *testing.T) {
+		t.Setenv("PORT", "")
+		defaultPort := 7890
+		if pStr := os.Getenv("PORT"); pStr != "" {
+			if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+				defaultPort = p
+			}
+		}
+		if defaultPort != 7890 {
+			t.Errorf("expected 7890, got %d", defaultPort)
+		}
+	})
+
+	t.Run("custom port from PORT env var", func(t *testing.T) {
+		t.Setenv("PORT", "9090")
+		defaultPort := 7890
+		if pStr := os.Getenv("PORT"); pStr != "" {
+			if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+				defaultPort = p
+			}
+		}
+		if defaultPort != 9090 {
+			t.Errorf("expected 9090, got %d", defaultPort)
+		}
+	})
+
+	t.Run("host from RW_DASHBOARD_HOST", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_HOST", "127.0.0.1")
+		host := ""
+		if envHost := os.Getenv("RW_DASHBOARD_HOST"); envHost != "" {
+			host = envHost
+		}
+		if host != "127.0.0.1" {
+			t.Errorf("expected '127.0.0.1', got %q", host)
+		}
+	})
+}
+

@@ -76,8 +76,8 @@ func TestIngest_GetPubKey(t *testing.T) {
 	if res["public_key"] != serverPubStr {
 		t.Errorf("expected public_key %q, got %q", serverPubStr, res["public_key"])
 	}
-	if res["version"] != "5.0.0" {
-		t.Errorf("expected version 5.0.0, got %s", res["version"])
+	if res["version"] != Version {
+		t.Errorf("expected version %s, got %s", Version, res["version"])
 	}
 }
 

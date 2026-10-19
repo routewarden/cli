@@ -433,7 +433,7 @@ func TestIntegration_ZeroSocket_FullHandshakeAndPushLifecycle(t *testing.T) {
 	if err := json.Unmarshal(pubRec.Body.Bytes(), &pubResp); err != nil {
 		t.Fatalf("parse pubkey response: %v", err)
 	}
-	if pubResp.PublicKey == "" || pubResp.Version != "5.0.0" {
+	if pubResp.PublicKey == "" || pubResp.Version != observability.Version {
 		t.Fatalf("unexpected pubkey response: %+v", pubResp)
 	}
 

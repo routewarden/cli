@@ -135,8 +135,23 @@ func HandleRegister(args []string) {
 	configPath := fs.String("config", "", "Custom path to store agent configuration (default: ~/.routewarden/agent.json)")
 	_ = ParseFlagsLenient(fs, args)
 
+	if *dashboardURL == "" {
+		if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
+			*dashboardURL = envURL
+		} else if envURL := os.Getenv("RW_URL"); envURL != "" {
+			*dashboardURL = envURL
+		}
+	}
+	if *agentToken == "" {
+		if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
+			*agentToken = envKey
+		} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
+			*agentToken = envKey
+		}
+	}
+
 	if *dashboardURL == "" || *agentToken == "" {
-		fmt.Fprintln(os.Stderr, "Error: Both --url and --key are required for registration.")
+		fmt.Fprintln(os.Stderr, "Error: Both --url and --key are required for registration (or set RW_DASHBOARD_URL and RW_AGENT_KEY).")
 		fmt.Fprintln(os.Stderr, "\nUsage:")
 		fmt.Fprintln(os.Stderr, "  rwarden register --url http://<dashboard-ip>:7890 --key <agent-token>")
 		os.Exit(1)
