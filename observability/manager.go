@@ -28,7 +28,7 @@ import (
 )
 
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
-var Version = "5.0.1"
+var Version = "5.0.2"
 
 // DefaultDir returns the default directory where dashboard files are stored.
 func DefaultDir() string {
