@@ -96,4 +96,64 @@ func TestAuditAndDiff_IntegrationCLI(t *testing.T) {
 			t.Errorf("expected error for missing diff file, got code %d, stderr: %s", code, stderr)
 		}
 	})
+
+	t.Run("audit with snake_case JSON passes", func(t *testing.T) {
+		snakeConfig := `{
+			"enable_default_patterns": true,
+			"block_patterns": ["(?i)^/admin/secret.*$"],
+			"allowed_ips": ["10.0.0.1"],
+			"check_query": true
+		}`
+		snakePath := filepath.Join(tmpDir, "snake.json")
+		if err := os.WriteFile(snakePath, []byte(snakeConfig), 0644); err != nil {
+			t.Fatal(err)
+		}
+		stdout, stderr, code := runCLI(t, "audit", snakePath, "--format", "json")
+		if code != 0 {
+			t.Fatalf("expected audit exit 0 for snake_case config, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, `"criticalCount": 0`) {
+			t.Errorf("expected 0 critical issues for valid snake_case config: %s", stdout)
+		}
+	})
+
+	t.Run("audit from stdin with '-'", func(t *testing.T) {
+		inputJSON := `{"enableDefaultPatterns": true, "blockPatterns": ["(?i)^/admin"]}`
+		stdout, stderr, code := runCLIWithStdin(t, inputJSON, "audit", "-")
+		if code != 0 {
+			t.Fatalf("expected audit exit 0 for stdin, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "stdin") {
+			t.Errorf("expected output to mention stdin, got: %s", stdout)
+		}
+	})
+
+	t.Run("audit all valid response modes under strict mode", func(t *testing.T) {
+		modes := []string{"captcha", "gzipbomb", "redirect", "fakesuccess", "ratelimit", "proxy", "xml", "infinitestream"}
+		for _, m := range modes {
+			cfgJSON := `{"enableDefaultPatterns": true, "blockPatterns": ["(?i)^/admin"], "mode": "` + m + `"}`
+			cfgPath := filepath.Join(tmpDir, "mode_"+m+".json")
+			if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0644); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, code := runCLI(t, "audit", cfgPath, "--strict")
+			if code != 0 {
+				t.Fatalf("expected mode %q to pass strict audit, got code %d. stdout: %s, stderr: %s", m, code, stdout, stderr)
+			}
+			if strings.Contains(stdout, "RW-A012") {
+				t.Errorf("expected mode %q not to trigger RW-A012 warning: %s", m, stdout)
+			}
+		}
+	})
+
+	t.Run("diff with stdin '-'", func(t *testing.T) {
+		stdout, stderr, code := runCLIWithStdin(t, baseConfig, "diff", "-", candidatePath, "--format", "json")
+		if code != 0 {
+			t.Fatalf("expected diff with stdin to succeed, got %d. stderr: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, `"hasDifferences": true`) {
+			t.Errorf("expected diff from stdin to report differences: %s", stdout)
+		}
+	})
 }
+

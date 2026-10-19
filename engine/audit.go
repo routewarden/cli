@@ -232,24 +232,59 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 			Remediation: "Use standard client error codes such as 403 (Forbidden), 404 (Not Found), or 429 (Too Many Requests).",
 		})
 	}
+	if cfg.Response != nil && cfg.Response.StatusCode != 0 && (cfg.Response.StatusCode < 100 || cfg.Response.StatusCode > 599) {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A011",
+			Severity:    SeverityCritical,
+			Title:       "Invalid HTTP Status Code in Response Config",
+			Message:     fmt.Sprintf("HTTP response.statusCode %d is outside the valid range 100-599.", cfg.Response.StatusCode),
+			Field:       "response.statusCode",
+			Remediation: "Use standard client error codes such as 403 (Forbidden), 404 (Not Found), or 429 (Too Many Requests).",
+		})
+	}
 
 	// ── Rule RW-A012: Insecure Response Mode Check ──────────────────────────
 	validModes := map[string]bool{
-		"text":       true,
-		"json":       true,
-		"silentdrop": true,
-		"tarpit":     true,
-		"custom":     true,
-		"default":    true,
+		"text":                 true,
+		"json":                 true,
+		"html":                 true,
+		"captcha":              true,
+		"redirect":             true,
+		"silentdrop":           true,
+		"silent_drop":          true,
+		"drop":                 true,
+		"gzipbomb":             true,
+		"gzip_bomb":            true,
+		"bomb":                 true,
+		"tarpit":               true,
+		"fakesuccess":          true,
+		"fake_success":         true,
+		"decoy":                true,
+		"ratelimit":            true,
+		"ratelimitchallenge":   true,
+		"rate_limit_challenge": true,
+		"backoff":              true,
+		"proxy":                true,
+		"mirror":               true,
+		"infinitestream":       true,
+		"infinite_stream":      true,
+		"garbagestream":        true,
+		"xml":                  true,
+		"custom":               true,
+		"default":              true,
 	}
-	if cfg.Mode != "" && !validModes[strings.ToLower(cfg.Mode)] {
+	modeToCheck := cfg.Mode
+	if modeToCheck == "" && cfg.Response != nil && cfg.Response.Mode != "" {
+		modeToCheck = cfg.Response.Mode
+	}
+	if modeToCheck != "" && !validModes[strings.ToLower(modeToCheck)] {
 		report.Issues = append(report.Issues, AuditIssue{
 			Code:        "RW-A012",
 			Severity:    SeverityWarning,
 			Title:       "Unrecognized Response Mode",
-			Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", cfg.Mode),
+			Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", modeToCheck),
 			Field:       "mode",
-			Remediation: "Use one of: 'text', 'json', 'silentDrop', 'tarpit', or 'custom'.",
+			Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', or 'xml'.",
 		})
 	}
 

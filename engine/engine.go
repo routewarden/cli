@@ -95,6 +95,314 @@ type Config struct {
 	Response                   *ResponseConfig `json:"response,omitempty"`
 }
 
+// UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
+func (c *CaptchaConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Provider     string `json:"provider"`
+		SiteKey      string `json:"siteKey"`
+		SiteKeySnake string `json:"site_key"`
+		Title        string `json:"title"`
+		Template     string `json:"template"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Provider = raw.Provider
+	if raw.SiteKey != "" {
+		c.SiteKey = raw.SiteKey
+	} else {
+		c.SiteKey = raw.SiteKeySnake
+	}
+	c.Title = raw.Title
+	c.Template = raw.Template
+	return nil
+}
+
+// UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
+func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Mode                          string            `json:"mode"`
+		StatusCode                    int               `json:"statusCode"`
+		StatusCodeSnake               int               `json:"status_code"`
+		ContentType                   string            `json:"contentType"`
+		ContentTypeSnake              string            `json:"content_type"`
+		Body                          string            `json:"body"`
+		Headers                       map[string]string `json:"headers"`
+		RedirectURL                   string            `json:"redirectUrl"`
+		RedirectURLSnake              string            `json:"redirect_url"`
+		ProxyURL                      string            `json:"proxyUrl"`
+		ProxyURLSnake                 string            `json:"proxy_url"`
+		Captcha                       *CaptchaConfig    `json:"captcha"`
+		GzipBombMB                    int               `json:"gzipBombMB"`
+		GzipBombMBSnake               int               `json:"gzip_bomb_mb"`
+		GzipBombMb                    int               `json:"gzipBombMb"`
+		RetryAfterSeconds             int               `json:"retryAfterSeconds"`
+		RetryAfterSecondsSnake        int               `json:"retry_after_seconds"`
+		TarpitDelayMs                 int               `json:"tarpitDelayMs"`
+		TarpitDelayMsSnake            int               `json:"tarpit_delay_ms"`
+		TarpitMaxDurationSeconds      int               `json:"tarpitMaxDurationSeconds"`
+		TarpitMaxDurationSecondsSnake int               `json:"tarpit_max_duration_seconds"`
+		StreamSizeMB                  int               `json:"streamSizeMB"`
+		StreamSizeMBSnake             int               `json:"stream_size_mb"`
+		StreamSizeMb                  int               `json:"streamSizeMb"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Mode = raw.Mode
+	if raw.StatusCode != 0 {
+		r.StatusCode = raw.StatusCode
+	} else if raw.StatusCodeSnake != 0 {
+		r.StatusCode = raw.StatusCodeSnake
+	}
+	if raw.ContentType != "" {
+		r.ContentType = raw.ContentType
+	} else {
+		r.ContentType = raw.ContentTypeSnake
+	}
+	r.Body = raw.Body
+	r.Headers = raw.Headers
+	if raw.RedirectURL != "" {
+		r.RedirectURL = raw.RedirectURL
+	} else {
+		r.RedirectURL = raw.RedirectURLSnake
+	}
+	if raw.ProxyURL != "" {
+		r.ProxyURL = raw.ProxyURL
+	} else {
+		r.ProxyURL = raw.ProxyURLSnake
+	}
+	r.Captcha = raw.Captcha
+	if raw.GzipBombMB != 0 {
+		r.GzipBombMB = raw.GzipBombMB
+	} else if raw.GzipBombMBSnake != 0 {
+		r.GzipBombMB = raw.GzipBombMBSnake
+	} else if raw.GzipBombMb != 0 {
+		r.GzipBombMB = raw.GzipBombMb
+	}
+	if raw.RetryAfterSeconds != 0 {
+		r.RetryAfterSeconds = raw.RetryAfterSeconds
+	} else if raw.RetryAfterSecondsSnake != 0 {
+		r.RetryAfterSeconds = raw.RetryAfterSecondsSnake
+	}
+	if raw.TarpitDelayMs != 0 {
+		r.TarpitDelayMs = raw.TarpitDelayMs
+	} else if raw.TarpitDelayMsSnake != 0 {
+		r.TarpitDelayMs = raw.TarpitDelayMsSnake
+	}
+	if raw.TarpitMaxDurationSeconds != 0 {
+		r.TarpitMaxDurationSeconds = raw.TarpitMaxDurationSeconds
+	} else if raw.TarpitMaxDurationSecondsSnake != 0 {
+		r.TarpitMaxDurationSeconds = raw.TarpitMaxDurationSecondsSnake
+	}
+	if raw.StreamSizeMB != 0 {
+		r.StreamSizeMB = raw.StreamSizeMB
+	} else if raw.StreamSizeMBSnake != 0 {
+		r.StreamSizeMB = raw.StreamSizeMBSnake
+	} else if raw.StreamSizeMb != 0 {
+		r.StreamSizeMB = raw.StreamSizeMb
+	}
+	return nil
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to support both camelCase and snake_case tags,
+// and ensures proper specification defaults for boolean and scalar fields.
+func (cfg *Config) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ConfigFile                      string          `json:"configFile"`
+		ConfigFileSnake                 string          `json:"config_file"`
+		Enabled                         *bool           `json:"enabled"`
+		EnableDefaultPatterns           *bool           `json:"enableDefaultPatterns"`
+		EnableDefaultPatternsSnake      *bool           `json:"enable_default_patterns"`
+		EnableDefaultAllowPatterns      *bool           `json:"enableDefaultAllowPatterns"`
+		EnableDefaultAllowPatternsSnake *bool           `json:"enable_default_allow_patterns"`
+		BlockPatterns                   []string        `json:"blockPatterns"`
+		BlockPatternsSnake              []string        `json:"block_patterns"`
+		AllowPatterns                   []string        `json:"allowPatterns"`
+		AllowPatternsSnake              []string        `json:"allow_patterns"`
+		AllowedIPs                      []string        `json:"allowedIps"`
+		AllowedIPsSnake                 []string        `json:"allowed_ips"`
+		TrustedProxies                  []string        `json:"trustedProxies"`
+		TrustedProxiesSnake             []string        `json:"trusted_proxies"`
+		Methods                         []string        `json:"methods"`
+		StatusCode                      *int            `json:"statusCode"`
+		StatusCodeSnake                 *int            `json:"status_code"`
+		CustomResponseText              *string         `json:"customResponseText"`
+		CustomResponseTextSnake         *string         `json:"custom_response_text"`
+		Mode                            *string         `json:"mode"`
+		CheckQuery                      *bool           `json:"checkQuery"`
+		CheckQuerySnake                 *bool           `json:"check_query"`
+		CheckHeaders                    []string        `json:"checkHeaders"`
+		CheckHeadersSnake               []string        `json:"check_headers"`
+		CheckBody                       *bool           `json:"checkBody"`
+		CheckBodySnake                  *bool           `json:"check_body"`
+		CheckBodyMaxBytes               *int64          `json:"checkBodyMaxBytes"`
+		CheckBodyMaxBytesSnake          *int64          `json:"check_body_max_bytes"`
+		CheckBodyPatterns               []string        `json:"checkBodyPatterns"`
+		CheckBodyPatternsSnake          []string        `json:"check_body_patterns"`
+		Debug                           *bool           `json:"debug"`
+		SecurityLog                     *bool           `json:"securityLog"`
+		SecurityLogSnake                *bool           `json:"security_log"`
+		Response                        *ResponseConfig `json:"response"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// 1. Config file
+	if raw.ConfigFile != "" {
+		cfg.ConfigFile = raw.ConfigFile
+	}
+	if raw.ConfigFileSnake != "" {
+		cfg.ConfigFileSnake = raw.ConfigFileSnake
+		if cfg.ConfigFile == "" {
+			cfg.ConfigFile = raw.ConfigFileSnake
+		}
+	}
+
+	// 2. Booleans with specification default true
+	if raw.Enabled != nil {
+		cfg.Enabled = *raw.Enabled
+	} else if !cfg.Enabled && raw.ConfigFile == "" && raw.ConfigFileSnake == "" {
+		cfg.Enabled = true
+	}
+
+	if raw.EnableDefaultPatterns != nil {
+		cfg.EnableDefaultPatterns = *raw.EnableDefaultPatterns
+	} else if raw.EnableDefaultPatternsSnake != nil {
+		cfg.EnableDefaultPatterns = *raw.EnableDefaultPatternsSnake
+	} else if !cfg.EnableDefaultPatterns && raw.ConfigFile == "" && raw.ConfigFileSnake == "" {
+		cfg.EnableDefaultPatterns = true
+	}
+
+	if raw.EnableDefaultAllowPatterns != nil {
+		cfg.EnableDefaultAllowPatterns = *raw.EnableDefaultAllowPatterns
+	} else if raw.EnableDefaultAllowPatternsSnake != nil {
+		cfg.EnableDefaultAllowPatterns = *raw.EnableDefaultAllowPatternsSnake
+	} else if !cfg.EnableDefaultAllowPatterns && raw.ConfigFile == "" && raw.ConfigFileSnake == "" {
+		cfg.EnableDefaultAllowPatterns = true
+	}
+
+	if raw.SecurityLog != nil {
+		cfg.SecurityLog = *raw.SecurityLog
+	} else if raw.SecurityLogSnake != nil {
+		cfg.SecurityLog = *raw.SecurityLogSnake
+	} else if !cfg.SecurityLog && raw.ConfigFile == "" && raw.ConfigFileSnake == "" {
+		cfg.SecurityLog = true
+	}
+
+	// 3. String slices
+	if raw.BlockPatterns != nil {
+		cfg.BlockPatterns = raw.BlockPatterns
+	} else if raw.BlockPatternsSnake != nil {
+		cfg.BlockPatterns = raw.BlockPatternsSnake
+	} else if cfg.BlockPatterns == nil {
+		cfg.BlockPatterns = []string{}
+	}
+
+	if raw.AllowPatterns != nil {
+		cfg.AllowPatterns = raw.AllowPatterns
+	} else if raw.AllowPatternsSnake != nil {
+		cfg.AllowPatterns = raw.AllowPatternsSnake
+	} else if cfg.AllowPatterns == nil {
+		cfg.AllowPatterns = []string{}
+	}
+
+	if raw.AllowedIPs != nil {
+		cfg.AllowedIPs = raw.AllowedIPs
+	} else if raw.AllowedIPsSnake != nil {
+		cfg.AllowedIPs = raw.AllowedIPsSnake
+	} else if cfg.AllowedIPs == nil {
+		cfg.AllowedIPs = []string{}
+	}
+
+	if raw.TrustedProxies != nil {
+		cfg.TrustedProxies = raw.TrustedProxies
+	} else if raw.TrustedProxiesSnake != nil {
+		cfg.TrustedProxies = raw.TrustedProxiesSnake
+	} else if cfg.TrustedProxies == nil {
+		cfg.TrustedProxies = []string{}
+	}
+
+	if raw.Methods != nil {
+		cfg.Methods = raw.Methods
+	} else if len(cfg.Methods) == 0 {
+		cfg.Methods = []string{"GET"}
+	}
+
+	if raw.CheckHeaders != nil {
+		cfg.CheckHeaders = raw.CheckHeaders
+	} else if raw.CheckHeadersSnake != nil {
+		cfg.CheckHeaders = raw.CheckHeadersSnake
+	} else if cfg.CheckHeaders == nil {
+		cfg.CheckHeaders = []string{}
+	}
+
+	if raw.CheckBodyPatterns != nil {
+		cfg.CheckBodyPatterns = raw.CheckBodyPatterns
+	} else if raw.CheckBodyPatternsSnake != nil {
+		cfg.CheckBodyPatterns = raw.CheckBodyPatternsSnake
+	} else if cfg.CheckBodyPatterns == nil {
+		cfg.CheckBodyPatterns = []string{}
+	}
+
+	// 4. Other scalars
+	if raw.StatusCode != nil {
+		cfg.StatusCode = *raw.StatusCode
+	} else if raw.StatusCodeSnake != nil {
+		cfg.StatusCode = *raw.StatusCodeSnake
+	} else if cfg.StatusCode == 0 {
+		cfg.StatusCode = 403
+	}
+
+	if raw.CustomResponseText != nil {
+		cfg.CustomResponseText = *raw.CustomResponseText
+	} else if raw.CustomResponseTextSnake != nil {
+		cfg.CustomResponseText = *raw.CustomResponseTextSnake
+	} else if cfg.CustomResponseText == "" {
+		cfg.CustomResponseText = "403 Forbidden: Access to sensitive endpoint is blocked"
+	}
+
+	if raw.Mode != nil {
+		cfg.Mode = *raw.Mode
+	} else if cfg.Mode == "" {
+		cfg.Mode = "text"
+	}
+
+	if raw.CheckQuery != nil {
+		cfg.CheckQuery = *raw.CheckQuery
+	} else if raw.CheckQuerySnake != nil {
+		cfg.CheckQuery = *raw.CheckQuerySnake
+	}
+
+	if raw.CheckBody != nil {
+		cfg.CheckBody = *raw.CheckBody
+	} else if raw.CheckBodySnake != nil {
+		cfg.CheckBody = *raw.CheckBodySnake
+	}
+
+	if raw.CheckBodyMaxBytes != nil {
+		cfg.CheckBodyMaxBytes = *raw.CheckBodyMaxBytes
+	} else if raw.CheckBodyMaxBytesSnake != nil {
+		cfg.CheckBodyMaxBytes = *raw.CheckBodyMaxBytesSnake
+	} else if cfg.CheckBodyMaxBytes == 0 {
+		cfg.CheckBodyMaxBytes = 65536
+	}
+
+	if raw.Debug != nil {
+		cfg.Debug = *raw.Debug
+	}
+
+	// 5. Nested response
+	if raw.Response != nil {
+		cfg.Response = raw.Response
+	} else if cfg.Response == nil {
+		cfg.Response = &ResponseConfig{Mode: "text"}
+	}
+
+	return nil
+}
+
 // GetConfigFile returns the configured base config file path (resolving camelCase and snake_case aliases).
 func (cfg *Config) GetConfigFile() string {
 	if cfg.ConfigFile != "" {
@@ -248,13 +556,109 @@ func NewEngine(cfg *Config) (*Engine, error) {
 			return nil, fmt.Errorf("cannot parse configFile %q: %w", cfg.ConfigFile, err)
 		}
 		filePath := cfg.ConfigFile
-		inlineData, err := json.Marshal(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("cannot re-encode inline config: %w", err)
+
+		// Apply explicit inline overrides onto fileCfg
+		defaultCfg := CreateConfig()
+		if cfg.Enabled != defaultCfg.Enabled {
+			fileCfg.Enabled = cfg.Enabled
 		}
-		if err := json.Unmarshal(inlineData, fileCfg); err != nil {
-			return nil, fmt.Errorf("cannot merge inline config: %w", err)
+		if cfg.EnableDefaultPatterns != defaultCfg.EnableDefaultPatterns {
+			fileCfg.EnableDefaultPatterns = cfg.EnableDefaultPatterns
 		}
+		if cfg.EnableDefaultAllowPatterns != defaultCfg.EnableDefaultAllowPatterns {
+			fileCfg.EnableDefaultAllowPatterns = cfg.EnableDefaultAllowPatterns
+		}
+		if len(cfg.BlockPatterns) > 0 {
+			fileCfg.BlockPatterns = cfg.BlockPatterns
+		}
+		if len(cfg.AllowPatterns) > 0 {
+			fileCfg.AllowPatterns = cfg.AllowPatterns
+		}
+		if len(cfg.AllowedIPs) > 0 {
+			fileCfg.AllowedIPs = cfg.AllowedIPs
+		}
+		if len(cfg.TrustedProxies) > 0 {
+			fileCfg.TrustedProxies = cfg.TrustedProxies
+		}
+		if len(cfg.Methods) > 0 && !(len(cfg.Methods) == 1 && cfg.Methods[0] == "GET") {
+			fileCfg.Methods = cfg.Methods
+		}
+		if cfg.StatusCode != 0 && cfg.StatusCode != defaultCfg.StatusCode {
+			fileCfg.StatusCode = cfg.StatusCode
+		}
+		if cfg.CustomResponseText != "" && cfg.CustomResponseText != defaultCfg.CustomResponseText {
+			fileCfg.CustomResponseText = cfg.CustomResponseText
+		}
+		if cfg.Mode != "" && cfg.Mode != defaultCfg.Mode {
+			fileCfg.Mode = cfg.Mode
+		}
+		if cfg.CheckQuery != defaultCfg.CheckQuery {
+			fileCfg.CheckQuery = cfg.CheckQuery
+		}
+		if len(cfg.CheckHeaders) > 0 {
+			fileCfg.CheckHeaders = cfg.CheckHeaders
+		}
+		if cfg.CheckBody != defaultCfg.CheckBody {
+			fileCfg.CheckBody = cfg.CheckBody
+		}
+		if cfg.CheckBodyMaxBytes != 0 && cfg.CheckBodyMaxBytes != defaultCfg.CheckBodyMaxBytes {
+			fileCfg.CheckBodyMaxBytes = cfg.CheckBodyMaxBytes
+		}
+		if len(cfg.CheckBodyPatterns) > 0 {
+			fileCfg.CheckBodyPatterns = cfg.CheckBodyPatterns
+		}
+		if cfg.Debug != defaultCfg.Debug {
+			fileCfg.Debug = cfg.Debug
+		}
+		if cfg.SecurityLog != defaultCfg.SecurityLog {
+			fileCfg.SecurityLog = cfg.SecurityLog
+		}
+		if cfg.Response != nil {
+			if fileCfg.Response == nil {
+				fileCfg.Response = cfg.Response
+			} else {
+				if cfg.Response.Mode != "" && cfg.Response.Mode != "text" {
+					fileCfg.Response.Mode = cfg.Response.Mode
+				}
+				if cfg.Response.StatusCode != 0 {
+					fileCfg.Response.StatusCode = cfg.Response.StatusCode
+				}
+				if cfg.Response.ContentType != "" {
+					fileCfg.Response.ContentType = cfg.Response.ContentType
+				}
+				if cfg.Response.Body != "" {
+					fileCfg.Response.Body = cfg.Response.Body
+				}
+				if len(cfg.Response.Headers) > 0 {
+					fileCfg.Response.Headers = cfg.Response.Headers
+				}
+				if cfg.Response.RedirectURL != "" {
+					fileCfg.Response.RedirectURL = cfg.Response.RedirectURL
+				}
+				if cfg.Response.ProxyURL != "" {
+					fileCfg.Response.ProxyURL = cfg.Response.ProxyURL
+				}
+				if cfg.Response.Captcha != nil {
+					fileCfg.Response.Captcha = cfg.Response.Captcha
+				}
+				if cfg.Response.GzipBombMB != 0 {
+					fileCfg.Response.GzipBombMB = cfg.Response.GzipBombMB
+				}
+				if cfg.Response.RetryAfterSeconds != 0 {
+					fileCfg.Response.RetryAfterSeconds = cfg.Response.RetryAfterSeconds
+				}
+				if cfg.Response.TarpitDelayMs != 0 {
+					fileCfg.Response.TarpitDelayMs = cfg.Response.TarpitDelayMs
+				}
+				if cfg.Response.TarpitMaxDurationSeconds != 0 {
+					fileCfg.Response.TarpitMaxDurationSeconds = cfg.Response.TarpitMaxDurationSeconds
+				}
+				if cfg.Response.StreamSizeMB != 0 {
+					fileCfg.Response.StreamSizeMB = cfg.Response.StreamSizeMB
+				}
+			}
+		}
+
 		fileCfg.ConfigFile = filePath
 		cfg = fileCfg
 	}

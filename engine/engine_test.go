@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1273,6 +1274,132 @@ func TestEngine_ConfigFile_LoadAndOverride(t *testing.T) {
 	evalSnake := engSnake.EvaluateWithClientIP("GET", "/admin/settings", "", nil, "192.168.1.1")
 	if !evalSnake.Blocked {
 		t.Errorf("expected /admin/settings to be blocked using config_file alias")
+	}
+	if engSnake.Config.Response.Mode != "json" {
+		t.Errorf("expected base response.mode 'json' to be preserved, got: %s", engSnake.Config.Response.Mode)
+	}
+}
+
+func TestConfig_SnakeCaseUnmarshal(t *testing.T) {
+	rawJSON := `{
+		"config_file": "/path/to/base.json",
+		"enabled": true,
+		"enable_default_patterns": false,
+		"enable_default_allow_patterns": false,
+		"block_patterns": ["(?i)^/secret/.*$"],
+		"allow_patterns": ["(?i)^/secret/public$"],
+		"allowed_ips": ["192.168.1.50"],
+		"trusted_proxies": ["10.0.0.1"],
+		"status_code": 404,
+		"custom_response_text": "Custom blocked text",
+		"check_query": true,
+		"check_headers": ["X-Forwarded-Uri"],
+		"check_body": true,
+		"check_body_max_bytes": 32768,
+		"check_body_patterns": ["(?i)grant_type=password"],
+		"security_log": false,
+		"response": {
+			"mode": "redirect",
+			"status_code": 307,
+			"redirect_url": "https://example.com/blocked",
+			"proxy_url": "http://127.0.0.1:8080",
+			"gzip_bomb_mb": 20,
+			"retry_after_seconds": 600,
+			"tarpit_delay_ms": 2000,
+			"tarpit_max_duration_seconds": 120,
+			"stream_size_mb": 50,
+			"captcha": {
+				"provider": "hcaptcha",
+				"site_key": "0xABC123DEF456"
+			}
+		}
+	}`
+
+	var cfg engine.Config
+	if err := json.Unmarshal([]byte(rawJSON), &cfg); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if cfg.ConfigFile != "/path/to/base.json" {
+		t.Errorf("expected config_file parsed into ConfigFile, got: %s", cfg.ConfigFile)
+	}
+	if !cfg.Enabled {
+		t.Errorf("expected enabled == true")
+	}
+	if cfg.EnableDefaultPatterns {
+		t.Errorf("expected enable_default_patterns == false")
+	}
+	if cfg.EnableDefaultAllowPatterns {
+		t.Errorf("expected enable_default_allow_patterns == false")
+	}
+	if len(cfg.BlockPatterns) != 1 || cfg.BlockPatterns[0] != "(?i)^/secret/.*$" {
+		t.Errorf("unexpected blockPatterns: %v", cfg.BlockPatterns)
+	}
+	if len(cfg.AllowPatterns) != 1 || cfg.AllowPatterns[0] != "(?i)^/secret/public$" {
+		t.Errorf("unexpected allowPatterns: %v", cfg.AllowPatterns)
+	}
+	if len(cfg.AllowedIPs) != 1 || cfg.AllowedIPs[0] != "192.168.1.50" {
+		t.Errorf("unexpected allowedIps: %v", cfg.AllowedIPs)
+	}
+	if len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0] != "10.0.0.1" {
+		t.Errorf("unexpected trustedProxies: %v", cfg.TrustedProxies)
+	}
+	if cfg.StatusCode != 404 {
+		t.Errorf("expected status_code 404, got %d", cfg.StatusCode)
+	}
+	if cfg.CustomResponseText != "Custom blocked text" {
+		t.Errorf("expected custom_response_text, got: %s", cfg.CustomResponseText)
+	}
+	if !cfg.CheckQuery {
+		t.Errorf("expected check_query == true")
+	}
+	if len(cfg.CheckHeaders) != 1 || cfg.CheckHeaders[0] != "X-Forwarded-Uri" {
+		t.Errorf("unexpected checkHeaders: %v", cfg.CheckHeaders)
+	}
+	if !cfg.CheckBody {
+		t.Errorf("expected check_body == true")
+	}
+	if cfg.CheckBodyMaxBytes != 32768 {
+		t.Errorf("expected check_body_max_bytes 32768, got %d", cfg.CheckBodyMaxBytes)
+	}
+	if len(cfg.CheckBodyPatterns) != 1 || cfg.CheckBodyPatterns[0] != "(?i)grant_type=password" {
+		t.Errorf("unexpected checkBodyPatterns: %v", cfg.CheckBodyPatterns)
+	}
+	if cfg.SecurityLog {
+		t.Errorf("expected security_log == false")
+	}
+	if cfg.Response == nil {
+		t.Fatalf("expected non-nil response")
+	}
+	if cfg.Response.Mode != "redirect" {
+		t.Errorf("expected response.mode 'redirect', got: %s", cfg.Response.Mode)
+	}
+	if cfg.Response.StatusCode != 307 {
+		t.Errorf("expected response.status_code 307, got: %d", cfg.Response.StatusCode)
+	}
+	if cfg.Response.RedirectURL != "https://example.com/blocked" {
+		t.Errorf("expected redirect_url, got: %s", cfg.Response.RedirectURL)
+	}
+	if cfg.Response.ProxyURL != "http://127.0.0.1:8080" {
+		t.Errorf("expected proxy_url, got: %s", cfg.Response.ProxyURL)
+	}
+	if cfg.Response.GzipBombMB != 20 {
+		t.Errorf("expected gzip_bomb_mb 20, got: %d", cfg.Response.GzipBombMB)
+	}
+	if cfg.Response.RetryAfterSeconds != 600 {
+		t.Errorf("expected retry_after_seconds 600, got: %d", cfg.Response.RetryAfterSeconds)
+	}
+	if cfg.Response.TarpitDelayMs != 2000 {
+		t.Errorf("expected tarpit_delay_ms 2000, got: %d", cfg.Response.TarpitDelayMs)
+	}
+	if cfg.Response.TarpitMaxDurationSeconds != 120 {
+		t.Errorf("expected tarpit_max_duration_seconds 120, got: %d", cfg.Response.TarpitMaxDurationSeconds)
+	}
+	if cfg.Response.StreamSizeMB != 50 {
+		t.Errorf("expected stream_size_mb 50, got: %d", cfg.Response.StreamSizeMB)
+	}
+	if cfg.Response.Captcha == nil || cfg.Response.Captcha.SiteKey != "0xABC123DEF456" {
+		t.Errorf("expected captcha.site_key parsed, got: %+v", cfg.Response.Captcha)
 	}
 }
 
