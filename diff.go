@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -19,7 +20,7 @@ func handleDiff(args []string) {
 
 	var files []string
 	for _, arg := range fs.Args() {
-		if !strings.HasPrefix(arg, "-") {
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
 			files = append(files, arg)
 		}
 	}
@@ -37,29 +38,37 @@ func handleDiff(args []string) {
 	baseFile := files[0]
 	candidateFile := files[1]
 
-	baseData, err := os.ReadFile(baseFile)
+	readFile := func(path string) ([]byte, error) {
+		if path == "-" {
+			return io.ReadAll(os.Stdin)
+		}
+		return os.ReadFile(path)
+	}
+
+	baseData, err := readFile(baseFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading base file %s: %v\n", baseFile, err)
 		os.Exit(1)
 	}
 
-	candidateData, err := os.ReadFile(candidateFile)
+	candidateData, err := readFile(candidateFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading candidate file %s: %v\n", candidateFile, err)
 		os.Exit(1)
 	}
 
-	var baseCfg, candidateCfg engine.Config
-	if err := json.Unmarshal(baseData, &baseCfg); err != nil {
+	baseCfg := engine.CreateConfig()
+	candidateCfg := engine.CreateConfig()
+	if err := json.Unmarshal(baseData, baseCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing base JSON %s: %v\n", baseFile, err)
 		os.Exit(1)
 	}
-	if err := json.Unmarshal(candidateData, &candidateCfg); err != nil {
+	if err := json.Unmarshal(candidateData, candidateCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing candidate JSON %s: %v\n", candidateFile, err)
 		os.Exit(1)
 	}
 
-	diff := engine.DiffConfigs(&baseCfg, &candidateCfg, baseFile, candidateFile)
+	diff := engine.DiffConfigs(baseCfg, candidateCfg, baseFile, candidateFile)
 
 	if strings.ToLower(*format) == "json" {
 		out, err := json.MarshalIndent(diff, "", "  ")

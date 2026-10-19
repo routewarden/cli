@@ -21,7 +21,7 @@ func handleAudit(args []string) {
 
 	filename := "routewarden.json"
 	for _, arg := range fs.Args() {
-		if !strings.HasPrefix(arg, "-") {
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
 			filename = arg
 			break
 		}
@@ -41,13 +41,13 @@ func handleAudit(args []string) {
 		os.Exit(1)
 	}
 
-	var cfg engine.Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	cfg := engine.CreateConfig()
+	if err := json.Unmarshal(data, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration %s: %v\n", filename, err)
 		os.Exit(1)
 	}
 
-	report := engine.AuditConfig(&cfg, filename)
+	report := engine.AuditConfig(cfg, filename)
 
 	switch strings.ToLower(*format) {
 	case "json":
