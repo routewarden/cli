@@ -5,35 +5,57 @@ package daemon
 import (
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 func SetDetachedProcAttr(cmd *exec.Cmd) {
-	// On Windows, detachment is handled via default process creation flags
+	// Detach background process from the current console window
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | 0x08000008,
+	}
 }
 
 func CheckProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	proc, err := os.FindProcess(pid)
+	const da = syscall.PROCESS_QUERY_INFORMATION | syscall.SYNCHRONIZE
+	h, err := syscall.OpenProcess(da, false, uint32(pid))
 	if err != nil {
+		if errno, ok := err.(syscall.Errno); ok && errno == syscall.ERROR_ACCESS_DENIED {
+			return true
+		}
 		return false
 	}
-	return proc != nil
+	defer syscall.CloseHandle(h)
+
+	var exitCode uint32
+	if err := syscall.GetExitCodeProcess(h, &exitCode); err != nil {
+		return false
+	}
+	const stillActive = 259
+	if exitCode != stillActive {
+		return false
+	}
+	wait, err := syscall.WaitForSingleObject(h, 0)
+	if err != nil {
+		return true
+	}
+	return wait == syscall.WAIT_TIMEOUT
 }
 
 func TerminateProcess(pid int) error {
-	proc, err := os.FindProcess(pid)
+	if pid <= 0 {
+		return os.ErrProcessDone
+	}
+	h, err := syscall.OpenProcess(syscall.PROCESS_TERMINATE, false, uint32(pid))
 	if err != nil {
 		return err
 	}
-	return proc.Kill()
+	defer syscall.CloseHandle(h)
+	return syscall.TerminateProcess(h, 1)
 }
 
 func KillProcess(pid int) error {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return proc.Kill()
+	return TerminateProcess(pid)
 }

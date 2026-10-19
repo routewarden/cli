@@ -77,3 +77,55 @@ func TestResolveContainerList(t *testing.T) {
 		}
 	})
 }
+
+func TestPushEnvironmentVariables(t *testing.T) {
+	resolveCredentials := func(cliURL, cliKey string) (string, string) {
+		url := cliURL
+		key := cliKey
+		if url == "" {
+			if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
+				url = envURL
+			} else if envURL := os.Getenv("RW_URL"); envURL != "" {
+				url = envURL
+			}
+		}
+		if key == "" {
+			if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
+				key = envKey
+			} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
+				key = envKey
+			}
+		}
+		return url, key
+	}
+
+	t.Run("RW_DASHBOARD_URL and RW_AGENT_KEY", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://soc.internal:7890")
+		t.Setenv("RW_AGENT_KEY", "rw_sec_123456789")
+		url, key := resolveCredentials("", "")
+		if url != "http://soc.internal:7890" || key != "rw_sec_123456789" {
+			t.Errorf("unexpected resolved: url=%s, key=%s", url, key)
+		}
+	})
+
+	t.Run("RW_URL and RW_KEY fallback", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "")
+		t.Setenv("RW_AGENT_KEY", "")
+		t.Setenv("RW_URL", "http://soc-fallback:7890")
+		t.Setenv("RW_KEY", "rw_sec_fallback_key")
+		url, key := resolveCredentials("", "")
+		if url != "http://soc-fallback:7890" || key != "rw_sec_fallback_key" {
+			t.Errorf("unexpected fallback resolved: url=%s, key=%s", url, key)
+		}
+	})
+
+	t.Run("CLI flags take precedence over environment variables", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://env-url:7890")
+		t.Setenv("RW_AGENT_KEY", "env_key")
+		url, key := resolveCredentials("http://cli-override:7890", "cli_key")
+		if url != "http://cli-override:7890" || key != "cli_key" {
+			t.Errorf("expected CLI flags to override env: url=%s, key=%s", url, key)
+		}
+	})
+}
+

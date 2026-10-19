@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/routewarden/cli/daemon"
@@ -12,7 +13,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.0.0"
+var version = "5.0.1"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Dashboard (` + version + `) — Standalone Real-Time SOC Security Dashboard
@@ -84,8 +85,14 @@ func main() {
 }
 
 func handleDashboardUp(args []string) {
+	defaultPort := 7890
+	if pStr := os.Getenv("PORT"); pStr != "" {
+		if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+			defaultPort = p
+		}
+	}
 	fs := flag.NewFlagSet("dashboard", flag.ExitOnError)
-	port := fs.Int("port", 7890, "Port for SOC dashboard UI (default: 7890)")
+	port := fs.Int("port", defaultPort, "Port for SOC dashboard UI (default: 7890 or PORT env var)")
 	dir := fs.String("dir", "", "Directory to store dashboard configs (default: ~/.routewarden/dashboard)")
 	file := fs.String("file", "", "Log file to monitor")
 	fs.StringVar(file, "f", "", "Alias for --file")
@@ -105,6 +112,12 @@ func handleDashboardUp(args []string) {
 	pass := fs.String("password", "", "Optional HTTP Basic Auth password")
 	host := fs.String("host", "", "Host IP interface to bind")
 	_ = shipper.ParseFlagsLenient(fs, args)
+
+	if *host == "" {
+		if envHost := os.Getenv("RW_DASHBOARD_HOST"); envHost != "" {
+			*host = envHost
+		}
+	}
 
 	if *detach && os.Getenv("_RW_DETACHED") != "1" {
 		bindHost := *host
@@ -211,6 +224,9 @@ func handleDashboardKeys(args []string) {
 		fmt.Printf("  Agent ID:     %s\n", key.ID)
 		fmt.Printf("  Token:        %s\n", rawToken)
 		fmt.Println("─────────────────────────────────────────────────────────────")
+		fmt.Println("💡 To connect a remote server, run this on the remote host:")
+		fmt.Printf("   rwarden register --url http://<dashboard-ip>:7890 --key %s\n\n", rawToken)
+		fmt.Println("   rwarden push")
 
 	case "list", "ls":
 		fs := flag.NewFlagSet("keys list", flag.ExitOnError)

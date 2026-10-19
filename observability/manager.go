@@ -27,6 +27,9 @@ import (
 	"github.com/routewarden/cli/crypto"
 )
 
+// Version represents the active version of RouteWarden Observability & Dashboard engine.
+var Version = "5.0.1"
+
 // DefaultDir returns the default directory where dashboard files are stored.
 func DefaultDir() string {
 	home, err := os.UserHomeDir()
@@ -77,13 +80,14 @@ type SourceInfo struct {
 }
 
 var (
-	sourceMu     sync.RWMutex
-	currSource   SourceInfo
-	agentMu      sync.RWMutex
-	agents       = make(map[string]*RemoteAgentInfo)
-	totalEvents  int64
-	blockedCount int64
-	tarpitCount  int64
+	sourceMu       sync.RWMutex
+	currSource     SourceInfo
+	agentMu        sync.RWMutex
+	agents         = make(map[string]*RemoteAgentInfo)
+	totalEvents    int64
+	blockedCount   int64
+	tarpitCount    int64
+	dashboardLogMu sync.Mutex
 )
 
 func recordMetric(status int, verdict string) {
@@ -131,7 +135,7 @@ func getActiveAgents() []*RemoteAgentInfo {
 	var list []*RemoteAgentInfo
 	now := time.Now().UTC()
 	for _, a := range agents {
-		if parsed, err := time.Parse(time.RFC3339, a.LastSeen); err == nil {
+		if parsed, err := time.Parse(time.RFC3339Nano, a.LastSeen); err == nil {
 			diff := now.Sub(parsed)
 			if diff > 5*time.Minute {
 				a.Status = "offline"
@@ -259,12 +263,14 @@ func toCombinedLog(line string) string {
 		}
 
 		t := time.Now().UTC()
-		if ev.Timestamp != "" {
-			if parsed, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+		tsRaw := ev.Timestamp
+		if tsRaw == "" {
+			tsRaw = ev.TimestampAlt
+		}
+		if tsRaw != "" {
+			if parsed, err := time.Parse(time.RFC3339Nano, tsRaw); err == nil {
 				t = parsed
-			}
-		} else if ev.TimestampAlt != "" {
-			if parsed, err := time.Parse(time.RFC3339, ev.TimestampAlt); err == nil {
+			} else if parsed, err := time.Parse("2006-01-02 15:04:05", tsRaw); err == nil {
 				t = parsed
 			}
 		}
@@ -417,9 +423,11 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		globalStore.SeedDemoData()
 	}
 
-	// Continuously stream new logs from discovered containers and watch lifecycle
+	// Continuously stream new logs from discovered containers or monitored file
 	if file == "" {
 		go watchAndStreamContainers(dashboardCtx, label, container, targets, logFile)
+	} else {
+		go watchAndStreamFile(dashboardCtx, file, logFile)
 	}
 
 	// Server keypair for decryption
@@ -595,14 +603,17 @@ func watchAndStreamContainers(ctx context.Context, label string, specificContain
 
 			readPipe := func(r io.Reader) {
 				scanner := bufio.NewScanner(r)
+				scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 				for scanner.Scan() {
 					text := scanner.Text()
 					combined := toCombinedLog(text)
 					if combined != "" {
-						mu.Lock()
-						_, _ = out.WriteString(combined + "\n")
-						_ = out.Sync()
-						mu.Unlock()
+						dashboardLogMu.Lock()
+						if out != nil {
+							_, _ = out.WriteString(combined + "\n")
+							_ = out.Sync()
+						}
+						dashboardLogMu.Unlock()
 						globalStore.ParseAndIngest(text, target.Name)
 					}
 				}
@@ -667,18 +678,114 @@ func tailFileToLog(ctx context.Context, filePath string, out *os.File) {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		text := scanner.Text()
 		line := toCombinedLog(text)
 		if line != "" {
-			_, _ = out.WriteString(line + "\n")
+			dashboardLogMu.Lock()
+			if out != nil {
+				_, _ = out.WriteString(line + "\n")
+			}
+			dashboardLogMu.Unlock()
 			globalStore.ParseAndIngest(text, "file")
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		_ = err
 	}
-	_ = out.Sync()
+	dashboardLogMu.Lock()
+	if out != nil {
+		_ = out.Sync()
+	}
+	dashboardLogMu.Unlock()
+}
+
+func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	// Seek to end of file to stream only new incoming events
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		offset = 0
+	}
+
+	reader := bufio.NewReaderSize(f, 64*1024)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			line = strings.TrimRight(line, "\r\n")
+			if line != "" {
+				combined := toCombinedLog(line)
+				if combined != "" {
+					dashboardLogMu.Lock()
+					if out != nil {
+						_, _ = out.WriteString(combined + "\n")
+						_ = out.Sync()
+					}
+					dashboardLogMu.Unlock()
+					globalStore.ParseAndIngest(line, "file")
+				}
+			}
+			newOffset, _ := f.Seek(0, io.SeekCurrent)
+			if newOffset > 0 {
+				offset = newOffset
+			}
+			continue
+		}
+
+		if err == io.EOF {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			fi, statErr := os.Stat(filePath)
+			if statErr != nil {
+				continue
+			}
+
+			// Handle truncation (file truncated smaller than current offset)
+			if fi.Size() < offset {
+				_, _ = f.Seek(0, io.SeekStart)
+				offset = 0
+				reader.Reset(f)
+				continue
+			}
+
+			// Handle file rotation (different inode/identity)
+			curFi, _ := f.Stat()
+			if curFi != nil && !os.SameFile(fi, curFi) {
+				newFile, openErr := os.Open(filePath)
+				if openErr == nil {
+					_ = f.Close()
+					f = newFile
+					offset = 0
+					reader.Reset(f)
+				}
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}
 }
 
 func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
@@ -778,7 +885,6 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 
 // NewDashboardHandlerWithAuth constructs the HTTP handler for the dashboard and API endpoints with optional Basic Auth.
 func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, serverPubStr string, logFile *os.File, wsProxy http.Handler, reportPath string, authStr string) http.Handler {
-	var logMu sync.Mutex
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
@@ -997,7 +1103,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"public_key": serverPubStr,
-			"version":    "5.0.0",
+			"version":    Version,
 		})
 	})
 
@@ -1113,7 +1219,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 		// Convert and write events
 		count := 0
-		logMu.Lock()
+		dashboardLogMu.Lock()
 		for _, rawEv := range payload.Events {
 			evStr := string(rawEv)
 			if strings.HasPrefix(evStr, `"`) && strings.HasSuffix(evStr, `"`) {
@@ -1134,7 +1240,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		if logFile != nil {
 			_ = logFile.Sync()
 		}
-		logMu.Unlock()
+		dashboardLogMu.Unlock()
 
 		clientIP := extractClientIP(r)
 		UpdateAgentLastSeen(key.ID, dir)
@@ -1224,7 +1330,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 		if authStr == "" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "user": creds.Username})
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "user": creds.Username})
 			return
 		}
 

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -50,3 +51,86 @@ func TestToCombinedLog(t *testing.T) {
 		t.Errorf("expected debug line to be dropped, got %s", res)
 	}
 }
+
+func TestDashboardEnvironmentVariables(t *testing.T) {
+	resolveAuthAndHost := func(options ...string) (string, string) {
+		var authStr string
+		var hostStr string
+		if len(options) > 0 {
+			authStr = strings.TrimSpace(options[0])
+		}
+		if len(options) > 1 {
+			hostStr = strings.TrimSpace(options[1])
+		}
+		if authStr == "" {
+			authStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_AUTH"))
+		}
+		if authStr == "" {
+			u := strings.TrimSpace(os.Getenv("RW_DASHBOARD_USER"))
+			p := strings.TrimSpace(os.Getenv("RW_DASHBOARD_PASS"))
+			if p == "" {
+				p = strings.TrimSpace(os.Getenv("RW_DASHBOARD_PASSWORD"))
+			}
+			if u != "" {
+				authStr = u + ":" + p
+			}
+		}
+		if hostStr == "" {
+			hostStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_HOST"))
+		}
+		return authStr, hostStr
+	}
+
+	t.Run("RW_DASHBOARD_AUTH env var", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_AUTH", "admin:supersecret")
+		auth, host := resolveAuthAndHost()
+		if auth != "admin:supersecret" {
+			t.Errorf("expected 'admin:supersecret', got %q", auth)
+		}
+		if host != "" {
+			t.Errorf("expected empty host, got %q", host)
+		}
+	})
+
+	t.Run("RW_DASHBOARD_USER and RW_DASHBOARD_PASS", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_AUTH", "")
+		t.Setenv("RW_DASHBOARD_USER", "soc-op")
+		t.Setenv("RW_DASHBOARD_PASS", "key123")
+		auth, _ := resolveAuthAndHost()
+		if auth != "soc-op:key123" {
+			t.Errorf("expected 'soc-op:key123', got %q", auth)
+		}
+	})
+
+	t.Run("RW_DASHBOARD_PASSWORD fallback", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_AUTH", "")
+		t.Setenv("RW_DASHBOARD_USER", "soc-admin")
+		t.Setenv("RW_DASHBOARD_PASS", "")
+		t.Setenv("RW_DASHBOARD_PASSWORD", "longpassword")
+		auth, _ := resolveAuthAndHost()
+		if auth != "soc-admin:longpassword" {
+			t.Errorf("expected 'soc-admin:longpassword', got %q", auth)
+		}
+	})
+
+	t.Run("RW_DASHBOARD_HOST env var", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_HOST", "127.0.0.1")
+		_, host := resolveAuthAndHost()
+		if host != "127.0.0.1" {
+			t.Errorf("expected '127.0.0.1', got %q", host)
+		}
+	})
+
+	t.Run("Explicit options take precedence over env vars", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_AUTH", "env-user:env-pass")
+		t.Setenv("RW_DASHBOARD_HOST", "10.0.0.1")
+		auth, host := resolveAuthAndHost("cli-user:cli-pass", "0.0.0.0")
+		if auth != "cli-user:cli-pass" {
+			t.Errorf("expected CLI auth to override env, got %q", auth)
+		}
+		if host != "0.0.0.0" {
+			t.Errorf("expected CLI host to override env, got %q", host)
+		}
+	})
+}
+

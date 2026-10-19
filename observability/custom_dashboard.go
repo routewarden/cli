@@ -186,6 +186,25 @@ func (s *EventStore) Subscribe() (chan *SecurityEvent, func()) {
 	return ch, unsubscribe
 }
 
+func parseFlexibleTimestamp(ts string) (time.Time, bool) {
+	if ts == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", ts); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("02/Jan/2006:15:04:05 -0700", ts); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("02/Jan/2006:15:04:05", ts); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 // Add adds a structured security event to the store and broadcasts it.
 func (s *EventStore) Add(ev *SecurityEvent) {
 	s.ingestInternal(ev, true)
@@ -225,7 +244,7 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 	}
 
 	if ev.TimeStr == "" {
-		if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+		if t, ok := parseFlexibleTimestamp(ev.Timestamp); ok {
 			ev.TimeStr = t.Local().Format("15:04:05")
 		} else {
 			ev.TimeStr = time.Now().Format("15:04:05")
@@ -259,7 +278,7 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 
 	// Timeline bucket (HH:MM)
 	bucketKey := time.Now().Format("15:04")
-	if t, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil {
+	if t, ok := parseFlexibleTimestamp(ev.Timestamp); ok {
 		bucketKey = t.Local().Format("15:04")
 	}
 	tb, exists := s.timeline[bucketKey]
@@ -310,6 +329,23 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 			ipItem.Country = ev.Country
 			ipItem.CountryCode = ev.CountryCode
 		}
+		if len(s.ipCounts) > 5000 {
+			for k, v := range s.ipCounts {
+				if v.Count <= 1 {
+					delete(s.ipCounts, k)
+				}
+			}
+			if len(s.ipCounts) > 4000 {
+				pruned := 0
+				for k := range s.ipCounts {
+					delete(s.ipCounts, k)
+					pruned++
+					if pruned >= 2000 {
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// Top Countries
@@ -349,6 +385,23 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 		if ev.Rule != "" {
 			pathItem.Rule = ev.Rule
 		}
+		if len(s.pathCounts) > 5000 {
+			for k, v := range s.pathCounts {
+				if v.Count <= 1 {
+					delete(s.pathCounts, k)
+				}
+			}
+			if len(s.pathCounts) > 4000 {
+				pruned := 0
+				for k := range s.pathCounts {
+					delete(s.pathCounts, k)
+					pruned++
+					if pruned >= 2000 {
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// Top Rules
@@ -363,6 +416,13 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 			ruleItem.Blocked++
 		} else if isTarpit {
 			ruleItem.Tarpit++
+		}
+		if len(s.ruleCounts) > 2000 {
+			for k, v := range s.ruleCounts {
+				if v.Count <= 1 {
+					delete(s.ruleCounts, k)
+				}
+			}
 		}
 	}
 
@@ -484,6 +544,11 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 			ev.Timestamp = le.Timestamp
 		} else if le.TimestampAlt != "" {
 			ev.Timestamp = le.TimestampAlt
+		}
+		if t, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
+			ev.TimeStr = t.Local().Format("15:04:05")
+		} else if t, err := time.Parse("2006-01-02 15:04:05", ev.Timestamp); err == nil {
+			ev.TimeStr = t.Local().Format("15:04:05")
 		}
 
 		s.Add(ev)
@@ -3576,7 +3641,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div style="display:flex; align-items:center; gap:8px;">
       <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
       <span>ROUTEWARDEN</span>
-      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.0.0</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.0.1</span>
     </div>
     <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
     <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
@@ -3636,8 +3701,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.0.0 // Traffic & Security Engine</span>
-            <span class="spec-pill spec-pill-green">CORE v5.0.0</span>
+            <span class="spec-val">RouteWarden Core v5.0.1 // Traffic & Security Engine</span>
+            <span class="spec-pill spec-pill-green">CORE v5.0.1</span>
           </div>
         </div>
         <div class="spec-row">

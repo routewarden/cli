@@ -5,7 +5,7 @@
 #   BUILDPLATFORM  – native platform of the builder host  (e.g. linux/amd64)
 #   TARGETOS       – target OS                            (e.g. linux)
 #   TARGETARCH     – target CPU arch                      (e.g. arm64)
-#   VERSION        – binary version string                (e.g. v5.0.0)
+#   VERSION        – binary version string                (e.g. v5.0.1)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build binary
@@ -40,5 +40,5 @@ RUN apk --no-cache add ca-certificates tzdata docker-cli
 COPY --from=builder /bin/rwarden /usr/local/bin/rwarden
 
 WORKDIR /
-ENTRYPOINT ["/usr/local/bin/rwarden", "push"]
-CMD ["--docker"]
+ENTRYPOINT ["/usr/local/bin/rwarden"]
+CMD ["push", "--docker"]

@@ -22,22 +22,34 @@ func ParseFlagsLenient(fs *flag.FlagSet, args []string) error {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flagArgs = append(flagArgs, arg)
+		if arg == "--" {
+			posArgs = append(posArgs, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "-") && arg != "-" {
 			name := strings.TrimLeft(arg, "-")
 			if strings.Contains(name, "=") {
+				flagArgs = append(flagArgs, arg)
+				continue
+			}
+			if name == "help" || name == "h" {
+				flagArgs = append(flagArgs, arg)
 				continue
 			}
 			f := fs.Lookup(name)
 			if f != nil {
 				if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+					flagArgs = append(flagArgs, arg)
 					continue
 				}
-				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flagArgs = append(flagArgs, arg)
+				if i+1 < len(args) {
+					flagArgs = append(flagArgs, args[i+1])
 					i++
-					flagArgs = append(flagArgs, args[i])
 				}
+				continue
 			}
+			flagArgs = append(flagArgs, arg)
 		} else {
 			posArgs = append(posArgs, arg)
 		}
