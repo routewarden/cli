@@ -65,6 +65,8 @@ func HandlePush(args []string, version string) {
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
 	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
+	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
+	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
 	_ = ParseFlagsLenient(fs, args)
 
 	filesToMonitor := ResolveFileList(fileFlags, fs.Args())
@@ -187,9 +189,16 @@ func HandlePush(args []string, version string) {
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		eventsURL := dashboardURL + "/api/v1/events"
+		ts := time.Now().Format("15:04:05")
 		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, eventsToPush); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to push event(s): %v\n", err)
+			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push event(s): %v\n", ts, err)
 			os.Exit(1)
+		}
+		fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(eventsToPush), len(eventsToPush))
+		if *verbose {
+			for _, ev := range eventsToPush {
+				fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+			}
 		}
 		fmt.Printf("✅ Successfully pushed %d event(s) to RouteWarden dashboard\n", len(eventsToPush))
 		return
@@ -199,11 +208,33 @@ func HandlePush(args []string, version string) {
 	if hasStdin {
 		client := &http.Client{Timeout: 10 * time.Second}
 		eventsURL := dashboardURL + "/api/v1/events"
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+
+		stdinChan := make(chan string, 1000)
+		scannerErrChan := make(chan error, 1)
+
+		go func() {
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line != "" {
+					select {
+					case stdinChan <- line:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				scannerErrChan <- err
+			}
+			close(stdinChan)
+		}()
 
 		var buffer []string
 		totalPushed := 0
+		ticker := time.NewTicker(*flushInterval)
+		defer ticker.Stop()
 
 		flush := func() error {
 			if len(buffer) == 0 {
@@ -211,33 +242,58 @@ func HandlePush(args []string, version string) {
 			}
 			batch := buffer
 			buffer = nil
+			ts := time.Now().Format("15:04:05")
 			if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push event batch: %v\n", ts, err)
 				return err
 			}
 			totalPushed += len(batch)
+			fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(batch), totalPushed)
+			if *verbose {
+				for _, ev := range batch {
+					fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+				}
+			}
 			return nil
 		}
 
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
+		done := false
+		for !done {
+			select {
+			case <-ctx.Done():
+				_ = flush()
+				fmt.Printf("[%s] ✅ STDIN stream interrupted. Total events pushed: %d\n", time.Now().Format("15:04:05"), totalPushed)
+				return
+
+			case line, ok := <-stdinChan:
+				if !ok {
+					done = true
+					break
+				}
 				buffer = append(buffer, line)
 				if len(buffer) >= *batchSize {
 					if err := flush(); err != nil {
-						fmt.Fprintf(os.Stderr, "❌ Failed to push event batch: %v\n", err)
 						os.Exit(1)
 					}
+				}
+
+			case <-ticker.C:
+				if err := flush(); err != nil {
+					os.Exit(1)
 				}
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error reading from STDIN: %v\n", err)
-			os.Exit(1)
+		select {
+		case err := <-scannerErrChan:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Error reading from STDIN: %v\n", err)
+				os.Exit(1)
+			}
+		default:
 		}
 
 		if err := flush(); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to push final event batch: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -253,6 +309,12 @@ func HandlePush(args []string, version string) {
 		fmt.Println("  Encryption:      🔒 End-to-End Encrypted (X25519 + AES-256-GCM)")
 	} else {
 		fmt.Println("  Encryption:      Standard HTTPS/HTTP")
+	}
+	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
+	if *verbose {
+		fmt.Println("  Logging:         Verbose enabled (event-level previews)")
+	} else {
+		fmt.Println("  Logging:         Active (batch-level confirmation)")
 	}
 
 	// Setup ring buffer
@@ -314,6 +376,7 @@ func HandlePush(args []string, version string) {
 	eventsURL := dashboardURL + "/api/v1/events"
 
 	var buffer []string
+	totalShipped := 0
 	ticker := time.NewTicker(*flushInterval)
 	defer ticker.Stop()
 
@@ -323,14 +386,25 @@ func HandlePush(args []string, version string) {
 		}
 		batch := buffer
 		buffer = nil
-		_ = SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch)
+		ts := time.Now().Format("15:04:05")
+		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push batch of %d event(s): %v\n", ts, len(batch), err)
+			return
+		}
+		totalShipped += len(batch)
+		fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(batch), totalShipped)
+		if *verbose {
+			for _, ev := range batch {
+				fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+			}
+		}
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			flush()
-			fmt.Println("\n✅ Remote shipper stopped.")
+			fmt.Printf("\n✅ Remote shipper stopped. (Total events pushed: %d)\n", totalShipped)
 			return
 
 		case line := <-eventChan:
@@ -352,9 +426,11 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	cmd := exec.CommandContext(ctx, "tail", "-F", "-n", tailLines, path)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to open pipe: %v\n", path, err)
 		return
 	}
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to start tail command: %v\n", path, err)
 		return
 	}
 	defer func() {
@@ -370,7 +446,9 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		if ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v\n", path, err)
+		}
 	}
 }
 
@@ -378,13 +456,16 @@ func TailContainerToChan(ctx context.Context, containerName, tailLines string, o
 	cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", tailLines, containerName)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to open stdout pipe: %v\n", containerName, err)
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to open stderr pipe: %v\n", containerName, err)
 		return
 	}
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to start docker logs: %v\n", containerName, err)
 		return
 	}
 
@@ -396,6 +477,11 @@ func TailContainerToChan(ctx context.Context, containerName, tailLines string, o
 			case <-ctx.Done():
 				return
 			case out <- scanner.Text():
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			if ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Scanner error: %v\n", containerName, err)
 			}
 		}
 	}

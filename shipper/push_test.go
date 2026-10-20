@@ -311,3 +311,30 @@ func TestShipper_ParseFlagsLenient(t *testing.T) {
 		t.Errorf("unexpected positional args: %v", fs.Args())
 	}
 }
+
+func TestShipper_ParseFlagsLenient_Verbose(t *testing.T) {
+	fs := flag.NewFlagSet("test_verbose", flag.ContinueOnError)
+	verbose := fs.Bool("verbose", false, "verbose mode")
+	fs.BoolVar(verbose, "v", false, "alias")
+
+	args := []string{"-v", "app.log"}
+	if err := ParseFlagsLenient(fs, args); err != nil {
+		t.Fatalf("ParseFlagsLenient failed: %v", err)
+	}
+	if !*verbose {
+		t.Error("expected verbose to be true with -v")
+	}
+
+	fs2 := flag.NewFlagSet("test_verbose2", flag.ContinueOnError)
+	verbose2 := fs2.Bool("verbose", false, "verbose mode")
+	fs2.BoolVar(verbose2, "v", false, "alias")
+
+	args2 := []string{"--verbose"}
+	if err := ParseFlagsLenient(fs2, args2); err != nil {
+		t.Fatalf("ParseFlagsLenient failed: %v", err)
+	}
+	if !*verbose2 {
+		t.Error("expected verbose2 to be true with --verbose")
+	}
+}
+

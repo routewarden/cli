@@ -13,7 +13,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.1.0"
+var version = "5.2.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Dashboard (` + version + `) — Standalone Real-Time SOC Security Dashboard
