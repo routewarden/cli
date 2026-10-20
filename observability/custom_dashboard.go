@@ -817,6 +817,15 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, store *EventStore) {
 	ch, unsubscribe := store.Subscribe()
 	defer unsubscribe()
 
+	if IsVerboseLogging() {
+		ts := time.Now().Format("15:04:05")
+		clientIP := extractClientIP(r)
+		fmt.Printf("[%s] 📡 [SSE] Client connected from %s\n", ts, clientIP)
+		defer func() {
+			fmt.Printf("[%s] 📡 [SSE] Client disconnected: %s\n", time.Now().Format("15:04:05"), clientIP)
+		}()
+	}
+
 	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ok\"}\n\n")
 	flusher.Flush()
 

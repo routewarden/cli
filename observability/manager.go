@@ -30,6 +30,25 @@ import (
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
 var Version = "5.2.0"
 
+var (
+	verboseLogging   bool
+	verboseLoggingMu sync.RWMutex
+)
+
+// SetVerboseLogging enables or disables verbose event-level console logging.
+func SetVerboseLogging(v bool) {
+	verboseLoggingMu.Lock()
+	defer verboseLoggingMu.Unlock()
+	verboseLogging = v
+}
+
+// IsVerboseLogging returns whether verbose event-level console logging is enabled.
+func IsVerboseLogging() bool {
+	verboseLoggingMu.RLock()
+	defer verboseLoggingMu.RUnlock()
+	return verboseLogging || os.Getenv("RW_VERBOSE") == "1" || os.Getenv("RW_DEBUG") == "1"
+}
+
 // DefaultDir returns the default directory where dashboard files are stored.
 func DefaultDir() string {
 	home, err := os.UserHomeDir()
@@ -318,7 +337,7 @@ func getFreePort() (int, error) {
 }
 
 // Up starts the live SOC security dashboard and multiplexes logs from Docker containers or file.
-// Optional auth ("user:pass") and host interface ("127.0.0.1" or "0.0.0.0") can be provided in options.
+// Optional auth ("user:pass"), host interface ("127.0.0.1" or "0.0.0.0"), and verbose mode ("true") can be provided in options.
 func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string, options ...string) error {
 	var authStr string
 	var hostStr string
@@ -327,6 +346,12 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	}
 	if len(options) > 1 {
 		hostStr = strings.TrimSpace(options[1])
+	}
+	if len(options) > 2 {
+		vOpt := strings.ToLower(strings.TrimSpace(options[2]))
+		if vOpt == "true" || vOpt == "1" || vOpt == "verbose" {
+			SetVerboseLogging(true)
+		}
 	}
 	if authStr == "" {
 		authStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_AUTH"))
@@ -493,6 +518,11 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		fmt.Printf("🌍 Country Detection:  Auto (Built-in CIDR & RIR DB + MaxMind discovery)\n")
 	}
 	fmt.Printf("⚡ Memory Footprint:   ~8MB (Zero external dependencies)\n")
+	if IsVerboseLogging() {
+		fmt.Println("📢 Ingest Logging:     Verbose enabled (event-level previews)")
+	} else {
+		fmt.Println("📢 Ingest Logging:     Active (real-time ingest confirmation)")
+	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
 
@@ -1112,9 +1142,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Register] Unauthorized registration attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1122,8 +1155,10 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		}
 
 		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
 		registerOrTouchAgent(key.ID, key.Name, "", clientIP, 0)
+
+		ts := time.Now().Format("15:04:05")
+		fmt.Printf("[%s] 🤝 [Register] Registered agent '%s' (id: %s, ip: %s)\n", ts, key.Name, key.ID, clientIP)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1139,9 +1174,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Heartbeat] Unauthorized heartbeat attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1154,8 +1192,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		_ = json.NewDecoder(r.Body).Decode(&hb)
 
 		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
 		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
+
+		if IsVerboseLogging() {
+			ts := time.Now().Format("15:04:05")
+			fmt.Printf("[%s] 💓 [Heartbeat] Agent '%s' (host: %s, ip: %s)\n", ts, key.Name, hb.Hostname, clientIP)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -1167,9 +1209,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			return
 		}
 
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Unauthorized event push attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1178,22 +1223,28 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Failed to read body from %s (%s): %v\n", ts, key.Name, clientIP, err)
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}
 
 		// Try decrypting if payload is EncryptedPayload
+		isEncrypted := false
 		var plaintext = bodyBytes
 		var encPayload crypto.EncryptedPayload
 		if err := json.Unmarshal(bodyBytes, &encPayload); err == nil && encPayload.Ciphertext != "" && encPayload.EphemeralPub != "" {
 			dec, err := crypto.Decrypt(serverPriv, &encPayload)
 			if err != nil {
+				ts := time.Now().Format("15:04:05")
+				fmt.Fprintf(os.Stderr, "[%s] ❌ [Ingest] Decryption failed for payload from %s (%s): %v\n", ts, key.Name, clientIP, err)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
 				return
 			}
 			plaintext = dec
+			isEncrypted = true
 		}
 
 		type EventPayload struct {
@@ -1210,6 +1261,8 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 					payload.Events = append(payload.Events, json.RawMessage([]byte(strconv.Quote(s))))
 				}
 			} else {
+				ts := time.Now().Format("15:04:05")
+				fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Invalid payload format from %s (%s)\n", ts, key.Name, clientIP)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload format"})
@@ -1219,6 +1272,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 		// Convert and write events
 		count := 0
+		var eventPreviews []string
 		dashboardLogMu.Lock()
 		for _, rawEv := range payload.Events {
 			evStr := string(rawEv)
@@ -1235,6 +1289,9 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 				}
 				globalStore.ParseAndIngest(evStr, key.Name)
 				count++
+				if IsVerboseLogging() {
+					eventPreviews = append(eventPreviews, evStr)
+				}
 			}
 		}
 		if logFile != nil {
@@ -1242,9 +1299,24 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		}
 		dashboardLogMu.Unlock()
 
-		clientIP := extractClientIP(r)
 		UpdateAgentLastSeen(key.ID, dir)
 		registerOrTouchAgent(key.ID, key.Name, payload.Hostname, clientIP, count)
+
+		ts := time.Now().Format("15:04:05")
+		hostInfo := payload.Hostname
+		if hostInfo == "" {
+			hostInfo = key.Name
+		}
+		if isEncrypted {
+			fmt.Printf("[%s] 🔒 Ingested batch of %d event(s) (encrypted) from agent '%s' (host: %s, ip: %s)\n", ts, count, key.Name, hostInfo, clientIP)
+		} else {
+			fmt.Printf("[%s] 📥 Ingested batch of %d event(s) from agent '%s' (host: %s, ip: %s)\n", ts, count, key.Name, hostInfo, clientIP)
+		}
+		if IsVerboseLogging() {
+			for _, ev := range eventPreviews {
+				fmt.Printf("[%s]    ↳ [%s] %s\n", ts, key.Name, ev)
+			}
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)

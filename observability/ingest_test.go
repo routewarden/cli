@@ -3,6 +3,7 @@ package observability
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -371,3 +372,136 @@ func TestIngest_SourcesAPI_AndAgentAging(t *testing.T) {
 		}
 	}
 }
+
+func TestIngest_Logging_RegisterAndEvents(t *testing.T) {
+	_, rawToken, serverPubStr, _, handler, cleanup := setupTestDashboard(t)
+	defer cleanup()
+
+	// 1. Capture registration logging
+	var regStdout, regStderr string
+	{
+		oldOut := os.Stdout
+		oldErr := os.Stderr
+		rOut, wOut, _ := os.Pipe()
+		rErr, wErr, _ := os.Pipe()
+		os.Stdout = wOut
+		os.Stderr = wErr
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/register", nil)
+		req.Header.Set("Authorization", "Bearer "+rawToken)
+		req.RemoteAddr = "198.51.100.88:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		_ = wOut.Close()
+		_ = wErr.Close()
+		os.Stdout = oldOut
+		os.Stderr = oldErr
+
+		var outBuf, errBuf bytes.Buffer
+		_, _ = io.Copy(&outBuf, rOut)
+		_, _ = io.Copy(&errBuf, rErr)
+		regStdout = outBuf.String()
+		regStderr = errBuf.String()
+	}
+
+	if !strings.Contains(regStdout, "🤝 [Register] Registered agent 'edge-eu-node-1'") {
+		t.Errorf("expected registration confirmation log, got stdout:\n%s\nstderr:\n%s", regStdout, regStderr)
+	}
+
+	// 2. Capture plain event ingest logging
+	var evStdout string
+	{
+		oldOut := os.Stdout
+		rOut, wOut, _ := os.Pipe()
+		os.Stdout = wOut
+
+		payload := `{"hostname":"edge-node-x","events":["{\"client_ip\":\"203.0.113.1\",\"path\":\"/test\"}"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/events", bytes.NewBufferString(payload))
+		req.Header.Set("Authorization", "Bearer "+rawToken)
+		req.RemoteAddr = "198.51.100.88:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		_ = wOut.Close()
+		os.Stdout = oldOut
+
+		var outBuf bytes.Buffer
+		_, _ = io.Copy(&outBuf, rOut)
+		evStdout = outBuf.String()
+	}
+
+	if !strings.Contains(evStdout, "📥 Ingested batch of 1 event(s) from agent 'edge-eu-node-1'") {
+		t.Errorf("expected event ingest log in stdout, got:\n%s", evStdout)
+	}
+
+	// 3. Capture encrypted event ingest logging
+	serverPub, err := crypto.DecodePublicKey(serverPubStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainBytes := []byte(`{"hostname":"edge-enc-node","events":["{\"client_ip\":\"203.0.113.2\",\"path\":\"/enc\"}"]}`)
+	encrypted, err := crypto.Encrypt(serverPub, plainBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encBytes, _ := json.Marshal(encrypted)
+
+	var encStdout string
+	{
+		oldOut := os.Stdout
+		rOut, wOut, _ := os.Pipe()
+		os.Stdout = wOut
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/events", bytes.NewReader(encBytes))
+		req.Header.Set("Authorization", "Bearer "+rawToken)
+		req.RemoteAddr = "198.51.100.88:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		_ = wOut.Close()
+		os.Stdout = oldOut
+
+		var outBuf bytes.Buffer
+		_, _ = io.Copy(&outBuf, rOut)
+		encStdout = outBuf.String()
+	}
+
+	if !strings.Contains(encStdout, "🔒 Ingested batch of 1 event(s) (encrypted) from agent 'edge-eu-node-1'") {
+		t.Errorf("expected encrypted event ingest log, got:\n%s", encStdout)
+	}
+}
+
+func TestIngest_Logging_VerbosePreviews(t *testing.T) {
+	_, rawToken, _, _, handler, cleanup := setupTestDashboard(t)
+	defer cleanup()
+
+	SetVerboseLogging(true)
+	defer SetVerboseLogging(false)
+
+	oldOut := os.Stdout
+	rOut, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	payload := `{"hostname":"verbose-node","events":["{\"client_ip\":\"203.0.113.99\",\"path\":\"/admin-panel\"}"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/events", bytes.NewBufferString(payload))
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.RemoteAddr = "198.51.100.99:12345"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	_ = wOut.Close()
+	os.Stdout = oldOut
+
+	var outBuf bytes.Buffer
+	_, _ = io.Copy(&outBuf, rOut)
+	stdout := outBuf.String()
+
+	if !strings.Contains(stdout, "📥 Ingested batch of 1 event(s)") {
+		t.Errorf("expected ingest batch line, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "↳ [edge-eu-node-1]") || !strings.Contains(stdout, "/admin-panel") {
+		t.Errorf("expected verbose event preview in stdout, got:\n%s", stdout)
+	}
+}
+
