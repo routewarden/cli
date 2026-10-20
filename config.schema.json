@@ -179,10 +179,10 @@
           "$ref": "#/$defs/CaptchaConfig"
         },
         "gzipBombMB": {
-          "type": "integer",
+          "type": "number",
           "default": 10,
-          "minimum": 1,
-          "description": "Decompressed size in megabytes for gzipBomb mode."
+          "exclusiveMinimum": 0,
+          "description": "Decompressed size in megabytes for gzipBomb mode (supports decimal values, e.g. 0.5)."
         },
         "retryAfterSeconds": {
           "type": "integer",

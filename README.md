@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.0.3
+# rwarden version 5.1.0
 ```
 
 ---
@@ -157,14 +157,27 @@ For full details on the release workflow, see [VERSIONING.md](VERSIONING.md).
 
 ### Uninstallation
 
-`rwarden` installs as a single standalone binary without hidden system daemons or dependencies. To remove it:
+`rwarden` packages include automated pre-removal hooks that gracefully stop any background services (dashboard, push shipper) and active sandbox containers:
 
 ```bash
-# Default system-wide installation:
-sudo rm -f /usr/local/bin/rwarden
+# Homebrew (automatically executes uninstall hook):
+brew uninstall rwarden
 
-# Or user-local installation:
-rm -f ~/.local/bin/rwarden
+# Debian / Ubuntu (automatically executes preremove script):
+sudo apt remove rwarden
+
+# RHEL / Fedora (RPM):
+sudo rpm -e rwarden
+
+# Alpine Linux (APK):
+apk del rwarden
+
+# Universal automated uninstaller:
+curl -fsSL https://routewarden.github.io/uninstall.sh | bash
+
+# Manual binary removal:
+rwarden stop && rwarden cleanup
+sudo rm -f /usr/local/bin/rwarden
 ```
 
 ---

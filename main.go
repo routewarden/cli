@@ -27,7 +27,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.0.3"
+var version = "5.1.0"
 
 type stringSlice []string
 
@@ -89,6 +89,8 @@ Commands:
                 e.g. rwarden push -d
                 e.g. rwarden push --docker --detach
                 e.g. rwarden push -f /var/log/nginx/access.log -f /var/log/caddy/access.log
+                e.g. rwarden push -e '{"client_ip":"198.51.100.1","path":"/.env","verdict":"BLOCK"}'
+                e.g. echo "access log line" | rwarden push --stdin
                 e.g. rwarden push --docker -f /var/log/nginx/*.log -c custom-gateway
                 e.g. rwarden push status
                 e.g. rwarden push stop

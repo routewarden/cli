@@ -9,6 +9,7 @@ import (
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -63,7 +64,7 @@ type ResponseConfig struct {
 	RedirectURL              string            `json:"redirectUrl,omitempty"`
 	ProxyURL                 string            `json:"proxyUrl,omitempty"`
 	Captcha                  *CaptchaConfig    `json:"captcha,omitempty"`
-	GzipBombMB               int               `json:"gzipBombMB,omitempty"`
+	GzipBombMB               float64           `json:"gzipBombMB,omitempty"`
 	RetryAfterSeconds        int               `json:"retryAfterSeconds,omitempty"`
 	TarpitDelayMs            int               `json:"tarpitDelayMs,omitempty"`
 	TarpitMaxDurationSeconds int               `json:"tarpitMaxDurationSeconds,omitempty"`
@@ -118,6 +119,33 @@ func (c *CaptchaConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func parseFlexibleFloat(val any) float64 {
+	switch v := val.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f
+		}
+	case string:
+		v = strings.TrimSpace(v)
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return 0
+}
+
+func formatFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
 // UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
 func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 	var raw struct {
@@ -133,9 +161,9 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 		ProxyURL                      string            `json:"proxyUrl"`
 		ProxyURLSnake                 string            `json:"proxy_url"`
 		Captcha                       *CaptchaConfig    `json:"captcha"`
-		GzipBombMB                    int               `json:"gzipBombMB"`
-		GzipBombMBSnake               int               `json:"gzip_bomb_mb"`
-		GzipBombMb                    int               `json:"gzipBombMb"`
+		GzipBombMB                    any               `json:"gzipBombMB"`
+		GzipBombMBSnake               any               `json:"gzip_bomb_mb"`
+		GzipBombMb                    any               `json:"gzipBombMb"`
 		RetryAfterSeconds             int               `json:"retryAfterSeconds"`
 		RetryAfterSecondsSnake        int               `json:"retry_after_seconds"`
 		TarpitDelayMs                 int               `json:"tarpitDelayMs"`
@@ -173,12 +201,12 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 		r.ProxyURL = raw.ProxyURLSnake
 	}
 	r.Captcha = raw.Captcha
-	if raw.GzipBombMB != 0 {
-		r.GzipBombMB = raw.GzipBombMB
-	} else if raw.GzipBombMBSnake != 0 {
-		r.GzipBombMB = raw.GzipBombMBSnake
-	} else if raw.GzipBombMb != 0 {
-		r.GzipBombMB = raw.GzipBombMb
+	if val := parseFlexibleFloat(raw.GzipBombMB); val > 0 {
+		r.GzipBombMB = val
+	} else if val := parseFlexibleFloat(raw.GzipBombMBSnake); val > 0 {
+		r.GzipBombMB = val
+	} else if val := parseFlexibleFloat(raw.GzipBombMb); val > 0 {
+		r.GzipBombMB = val
 	}
 	if raw.RetryAfterSeconds != 0 {
 		r.RetryAfterSeconds = raw.RetryAfterSeconds
@@ -1284,7 +1312,7 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			fmt.Fprintf(&b, "            proxyUrl: %q\n", cfg.Response.ProxyURL)
 		}
 		if cfg.Response.GzipBombMB > 0 {
-			fmt.Fprintf(&b, "            gzipBombMB: %d\n", cfg.Response.GzipBombMB)
+			fmt.Fprintf(&b, "            gzipBombMB: %s\n", formatFloat(cfg.Response.GzipBombMB))
 		}
 		if cfg.Response.RetryAfterSeconds > 0 {
 			fmt.Fprintf(&b, "            retryAfterSeconds: %d\n", cfg.Response.RetryAfterSeconds)
@@ -1448,7 +1476,7 @@ func (cfg *Config) GenerateTraefikTOML() string {
 			fmt.Fprintf(&b, "  proxyUrl = %q\n", cfg.Response.ProxyURL)
 		}
 		if cfg.Response.GzipBombMB > 0 {
-			fmt.Fprintf(&b, "  gzipBombMB = %d\n", cfg.Response.GzipBombMB)
+			fmt.Fprintf(&b, "  gzipBombMB = %s\n", formatFloat(cfg.Response.GzipBombMB))
 		}
 		if cfg.Response.RetryAfterSeconds > 0 {
 			fmt.Fprintf(&b, "  retryAfterSeconds = %d\n", cfg.Response.RetryAfterSeconds)
@@ -1571,7 +1599,7 @@ func (cfg *Config) GenerateTraefikLabels() string {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.proxyUrl=%s\"\n", esc)
 		}
 		if cfg.Response.GzipBombMB > 0 {
-			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.gzipBombMB=%d\"\n", cfg.Response.GzipBombMB)
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.gzipBombMB=%s\"\n", formatFloat(cfg.Response.GzipBombMB))
 		}
 		if cfg.Response.RetryAfterSeconds > 0 {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.retryAfterSeconds=%d\"\n", cfg.Response.RetryAfterSeconds)
@@ -1696,7 +1724,7 @@ func (cfg *Config) GenerateCaddyfile() string {
 				fmt.Fprintf(&b, "        proxy_url %q\n", cfg.Response.ProxyURL)
 			}
 			if cfg.Response.GzipBombMB > 0 {
-				fmt.Fprintf(&b, "        gzip_bomb_mb %d\n", cfg.Response.GzipBombMB)
+				fmt.Fprintf(&b, "        gzip_bomb_mb %s\n", formatFloat(cfg.Response.GzipBombMB))
 			}
 			if cfg.Response.RetryAfterSeconds > 0 {
 				fmt.Fprintf(&b, "        retry_after_seconds %d\n", cfg.Response.RetryAfterSeconds)
@@ -1834,7 +1862,7 @@ func (cfg *Config) GenerateNginxLua() string {
 			fmt.Fprintf(&b, "        proxy_url = %q,\n", cfg.Response.ProxyURL)
 		}
 		if cfg.Response.GzipBombMB > 0 {
-			fmt.Fprintf(&b, "        gzip_bomb_mb = %d,\n", cfg.Response.GzipBombMB)
+			fmt.Fprintf(&b, "        gzip_bomb_mb = %s,\n", formatFloat(cfg.Response.GzipBombMB))
 		}
 		if cfg.Response.RetryAfterSeconds > 0 {
 			fmt.Fprintf(&b, "        retry_after_seconds = %d,\n", cfg.Response.RetryAfterSeconds)
