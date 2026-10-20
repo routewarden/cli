@@ -291,4 +291,3 @@ func TestSendBatchWithRetry_ManualEventsEncrypted(t *testing.T) {
 		t.Fatalf("expected decrypted event %s, got: %v", manualEvents[0], decryptedEvents)
 	}
 }
-

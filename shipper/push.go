@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -65,6 +66,8 @@ func HandlePush(args []string, version string) {
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
 	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
+	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
+	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
 	_ = ParseFlagsLenient(fs, args)
 
 	filesToMonitor := ResolveFileList(fileFlags, fs.Args())
@@ -187,9 +190,16 @@ func HandlePush(args []string, version string) {
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		eventsURL := dashboardURL + "/api/v1/events"
+		ts := time.Now().Format("15:04:05")
 		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, eventsToPush); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to push event(s): %v\n", err)
+			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push event(s): %v\n", ts, err)
 			os.Exit(1)
+		}
+		fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(eventsToPush), len(eventsToPush))
+		if *verbose {
+			for _, ev := range eventsToPush {
+				fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+			}
 		}
 		fmt.Printf("✅ Successfully pushed %d event(s) to RouteWarden dashboard\n", len(eventsToPush))
 		return
@@ -199,11 +209,33 @@ func HandlePush(args []string, version string) {
 	if hasStdin {
 		client := &http.Client{Timeout: 10 * time.Second}
 		eventsURL := dashboardURL + "/api/v1/events"
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+
+		stdinChan := make(chan string, 1000)
+		scannerErrChan := make(chan error, 1)
+
+		go func() {
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line != "" {
+					select {
+					case stdinChan <- line:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				scannerErrChan <- err
+			}
+			close(stdinChan)
+		}()
 
 		var buffer []string
 		totalPushed := 0
+		ticker := time.NewTicker(*flushInterval)
+		defer ticker.Stop()
 
 		flush := func() error {
 			if len(buffer) == 0 {
@@ -211,33 +243,58 @@ func HandlePush(args []string, version string) {
 			}
 			batch := buffer
 			buffer = nil
+			ts := time.Now().Format("15:04:05")
 			if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push event batch: %v\n", ts, err)
 				return err
 			}
 			totalPushed += len(batch)
+			fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(batch), totalPushed)
+			if *verbose {
+				for _, ev := range batch {
+					fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+				}
+			}
 			return nil
 		}
 
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
+		done := false
+		for !done {
+			select {
+			case <-ctx.Done():
+				_ = flush()
+				fmt.Printf("[%s] ✅ STDIN stream interrupted. Total events pushed: %d\n", time.Now().Format("15:04:05"), totalPushed)
+				return
+
+			case line, ok := <-stdinChan:
+				if !ok {
+					done = true
+					break
+				}
 				buffer = append(buffer, line)
 				if len(buffer) >= *batchSize {
 					if err := flush(); err != nil {
-						fmt.Fprintf(os.Stderr, "❌ Failed to push event batch: %v\n", err)
 						os.Exit(1)
 					}
+				}
+
+			case <-ticker.C:
+				if err := flush(); err != nil {
+					os.Exit(1)
 				}
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Error reading from STDIN: %v\n", err)
-			os.Exit(1)
+		select {
+		case err := <-scannerErrChan:
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Error reading from STDIN: %v\n", err)
+				os.Exit(1)
+			}
+		default:
 		}
 
 		if err := flush(); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to push final event batch: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -253,6 +310,12 @@ func HandlePush(args []string, version string) {
 		fmt.Println("  Encryption:      🔒 End-to-End Encrypted (X25519 + AES-256-GCM)")
 	} else {
 		fmt.Println("  Encryption:      Standard HTTPS/HTTP")
+	}
+	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
+	if *verbose {
+		fmt.Println("  Logging:         Verbose enabled (event-level previews)")
+	} else {
+		fmt.Println("  Logging:         Active (batch-level confirmation)")
 	}
 
 	// Setup ring buffer
@@ -279,6 +342,50 @@ func HandlePush(args []string, version string) {
 		}
 		fmt.Printf("  Auto-Discovery:  Watching Docker containers with label %s\n", labelDesc)
 		go WatchDockerContainersToChan(ctx, *customLabel, *tailLines, eventChan)
+	}
+
+	// Dynamic observer: continuously watch for new log files matching glob patterns or directories
+	var hasGlobOrDir bool
+	for _, flagVal := range append(append([]string{}, fileFlags...), fs.Args()...) {
+		for part := range strings.SplitSeq(flagVal, ",") {
+			part = strings.TrimSpace(part)
+			if strings.ContainsAny(part, "*?[]") {
+				hasGlobOrDir = true
+				break
+			}
+			if fi, err := os.Stat(part); err == nil && fi.IsDir() {
+				hasGlobOrDir = true
+				break
+			}
+		}
+	}
+	if hasGlobOrDir {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			monitored := make(map[string]bool)
+			for _, f := range filesToMonitor {
+				monitored[f] = true
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					current := ResolveFileList(fileFlags, fs.Args())
+					for _, f := range current {
+						if f == "-" {
+							continue
+						}
+						if !monitored[f] {
+							monitored[f] = true
+							fmt.Printf("📄 [File] Attached to new log file: %s\n", f)
+							go TailFileToChan(ctx, f, *tailLines, eventChan)
+						}
+					}
+				}
+			}
+		}()
 	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
@@ -314,6 +421,7 @@ func HandlePush(args []string, version string) {
 	eventsURL := dashboardURL + "/api/v1/events"
 
 	var buffer []string
+	totalShipped := 0
 	ticker := time.NewTicker(*flushInterval)
 	defer ticker.Stop()
 
@@ -323,14 +431,25 @@ func HandlePush(args []string, version string) {
 		}
 		batch := buffer
 		buffer = nil
-		_ = SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch)
+		ts := time.Now().Format("15:04:05")
+		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push batch of %d event(s): %v\n", ts, len(batch), err)
+			return
+		}
+		totalShipped += len(batch)
+		fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(batch), totalShipped)
+		if *verbose {
+			for _, ev := range batch {
+				fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+			}
+		}
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			flush()
-			fmt.Println("\n✅ Remote shipper stopped.")
+			fmt.Printf("\n✅ Remote shipper stopped. (Total events pushed: %d)\n", totalShipped)
 			return
 
 		case line := <-eventChan:
@@ -352,9 +471,13 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	cmd := exec.CommandContext(ctx, "tail", "-F", "-n", tailLines, path)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to open pipe: %v; falling back to native file watcher\n", path, err)
+		StreamFileToChan(ctx, path, tailLines, out)
 		return
 	}
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to start tail command: %v; falling back to native file watcher\n", path, err)
+		StreamFileToChan(ctx, path, tailLines, out)
 		return
 	}
 	defer func() {
@@ -370,7 +493,170 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		if ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v; switching to native file watcher\n", path, err)
+			StreamFileToChan(ctx, path, "0", out)
+		}
+	}
+}
+
+func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- string) {
+	var f *os.File
+	for {
+		var err error
+		f, err = os.Open(path)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
+
+	nTail := 50
+	if tailLines != "" {
+		if n, err := strconv.Atoi(tailLines); err == nil && n >= 0 {
+			nTail = n
+		}
+	}
+
+	if nTail > 0 {
+		fi, err := f.Stat()
+		if err == nil {
+			var seekPos int64
+			if fi.Size() > 256*1024 {
+				seekPos = fi.Size() - 256*1024
+			}
+			_, _ = f.Seek(seekPos, io.SeekStart)
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			var initialLines []string
+			for scanner.Scan() {
+				initialLines = append(initialLines, scanner.Text())
+			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error during initial tail: %v\n", path, scanErr)
+			}
+			if len(initialLines) > nTail {
+				initialLines = initialLines[len(initialLines)-nTail:]
+			}
+			for _, l := range initialLines {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- l:
+				}
+			}
+		}
+	}
+
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		offset = 0
+	}
+
+	reader := bufio.NewReaderSize(f, 64*1024)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	var pendingLine string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			offset += int64(len(line))
+			if pendingLine != "" {
+				line = pendingLine + line
+				pendingLine = ""
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line != "" {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- line:
+				}
+			}
+			continue
+		}
+
+		if err == io.EOF {
+			if len(line) > 0 {
+				offset += int64(len(line))
+				pendingLine += line
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			fi, statErr := os.Stat(path)
+			if statErr != nil {
+				continue
+			}
+
+			// Handle in-place truncation
+			if fi.Size() < offset {
+				_, _ = f.Seek(0, io.SeekStart)
+				offset = 0
+				pendingLine = ""
+				reader.Reset(f)
+				continue
+			}
+
+			// Handle rotation
+			curFi, _ := f.Stat()
+			if curFi != nil && !os.SameFile(fi, curFi) {
+				for {
+					extraLine, rErr := reader.ReadString('\n')
+					if extraLine != "" {
+						combinedStr := pendingLine + extraLine
+						pendingLine = ""
+						trimmed := strings.TrimRight(combinedStr, "\r\n")
+						if trimmed != "" {
+							select {
+							case <-ctx.Done():
+								return
+							case out <- trimmed:
+							}
+						}
+					}
+					if rErr != nil {
+						break
+					}
+				}
+
+				newFile, openErr := os.Open(path)
+				if openErr == nil {
+					_ = f.Close()
+					f = newFile
+					offset = 0
+					pendingLine = ""
+					reader.Reset(f)
+				}
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
 	}
 }
 
@@ -378,13 +664,16 @@ func TailContainerToChan(ctx context.Context, containerName, tailLines string, o
 	cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", tailLines, containerName)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to open stdout pipe: %v\n", containerName, err)
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to open stderr pipe: %v\n", containerName, err)
 		return
 	}
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Failed to start docker logs: %v\n", containerName, err)
 		return
 	}
 
@@ -396,6 +685,11 @@ func TailContainerToChan(ctx context.Context, containerName, tailLines string, o
 			case <-ctx.Done():
 				return
 			case out <- scanner.Text():
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			if ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "⚠️ [Container %s] Scanner error: %v\n", containerName, err)
 			}
 		}
 	}
@@ -449,6 +743,59 @@ func WatchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 		labels = []string{customLabel}
 	}
 
+	if sockPath := os.Getenv("DOCKER_HOST"); sockPath == "" {
+		if fi, err := os.Stat("/var/run/docker.sock"); err == nil && fi.IsDir() {
+			fmt.Fprintln(os.Stderr, "⚠️  [Docker] /var/run/docker.sock is a directory, not a Unix domain socket.")
+			fmt.Fprintln(os.Stderr, "   On macOS (Docker Desktop), the host socket is located at ~/.docker/run/docker.sock.")
+			fmt.Fprintln(os.Stderr, "   Fix: mount -v ~/.docker/run/docker.sock:/var/run/docker.sock")
+			fmt.Fprintln(os.Stderr, "   Or enable 'Allow default Docker socket to be used' in Docker Desktop > Settings > Advanced.")
+		}
+	}
+
+	var lastErrStr string
+	scan := func() {
+		for _, l := range labels {
+			cmd := exec.CommandContext(ctx, "docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
+			outBytes, err := cmd.CombinedOutput()
+			if err != nil {
+				if ctx.Err() == nil {
+					errStr := strings.TrimSpace(string(outBytes))
+					if errStr == "" {
+						errStr = err.Error()
+					}
+					if errStr != lastErrStr {
+						lastErrStr = errStr
+						fmt.Fprintf(os.Stderr, "⚠️  [Docker] Discovery error with label %q: %s\n", l, errStr)
+					}
+				}
+				continue
+			}
+			lastErrStr = ""
+			for _, line := range strings.Split(strings.TrimSpace(string(outBytes)), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				parts := strings.Split(line, "\t")
+				if len(parts) >= 1 && parts[0] != "" {
+					name := parts[0]
+					if len(parts) >= 2 {
+						name = parts[1]
+					}
+					mu.Lock()
+					_, isStreaming := active[parts[0]]
+					mu.Unlock()
+					if !isStreaming {
+						startStream(parts[0], name)
+					}
+				}
+			}
+		}
+	}
+
+	// Scan immediately on startup
+	scan()
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -462,28 +809,7 @@ func WatchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 			mu.Unlock()
 			return
 		case <-ticker.C:
-			for _, l := range labels {
-				cmd := exec.Command("docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
-				outBytes, err := cmd.Output()
-				if err != nil {
-					continue
-				}
-				for _, line := range strings.Split(strings.TrimSpace(string(outBytes)), "\n") {
-					parts := strings.Split(strings.TrimSpace(line), "\t")
-					if len(parts) >= 1 && parts[0] != "" {
-						name := parts[0]
-						if len(parts) >= 2 {
-							name = parts[1]
-						}
-						mu.Lock()
-						_, isStreaming := active[parts[0]]
-						mu.Unlock()
-						if !isStreaming {
-							startStream(parts[0], name)
-						}
-					}
-				}
-			}
+			scan()
 		}
 	}
 }
@@ -564,6 +890,22 @@ func ResolveFileList(flags []string, positionalArgs []string) []string {
 			}
 			return
 		}
+		// Check if it's a directory
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			entries, readErr := os.ReadDir(p)
+			if readErr == nil {
+				for _, entry := range entries {
+					if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".log") || strings.HasSuffix(entry.Name(), ".json") || strings.HasSuffix(entry.Name(), ".txt")) {
+						full := filepath.Join(p, entry.Name())
+						if !seen[full] {
+							seen[full] = true
+							results = append(results, full)
+						}
+					}
+				}
+			}
+			return
+		}
 		// Check if it's a glob pattern
 		if strings.ContainsAny(p, "*?[]") {
 			matches, err := filepath.Glob(p)
@@ -626,13 +968,13 @@ func minLen(a, b int) int {
 func fetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(strings.TrimRight(dashboardURL, "/") + "/api/v1/pubkey")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+	if err != nil {
 		return nil
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
 	var body struct {
 		PublicKey string `json:"public_key"`
 	}

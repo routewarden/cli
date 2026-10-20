@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -156,6 +158,8 @@ func handleMonitor(args []string) {
 	verdictFilter := fs.String("verdict", "", "Filter events by verdict (BLOCK, ALLOW, TARPIT)")
 	ipFilter := fs.String("ip", "", "Filter events by client IP substring")
 	pathFilter := fs.String("path", "", "Filter events by request path substring")
+	followMode := fs.Bool("follow", false, "Continuously follow log file for new changes (like tail -f)")
+	fs.BoolVar(followMode, "F", false, "Alias for --follow")
 	_ = parseFlagsLenient(fs, args)
 
 	if *file == "" && fs.NArg() > 0 && !strings.HasPrefix(fs.Arg(0), "-") {
@@ -177,40 +181,353 @@ func handleMonitor(args []string) {
 		return
 	}
 
-	// File or Stdin mode
-	var reader io.Reader = os.Stdin
-	sourceName := "standard input"
-
 	if *file != "" {
+		if *followMode {
+			runFileMonitor(*file, *tailLines, *verdictFilter, *ipFilter, *pathFilter, *outPath, *rawOutput)
+			return
+		}
+
 		f, err := os.Open(*file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening log file %s: %v\n", *file, err)
 			os.Exit(1)
 		}
 		defer f.Close()
-		reader = f
-		sourceName = *file
+
+		sourceName := *file
+		if !*rawOutput {
+			fmt.Printf("📡 RouteWarden Threat Monitor — Streaming security events from %s\n", sourceName)
+			printFilterNotice(*verdictFilter, *ipFilter, *pathFilter)
+		}
+
+		msgChan := make(chan streamMsg, 500)
+		go func() {
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			for scanner.Scan() {
+				msgChan <- streamMsg{Container: filepath.Base(*file), Line: scanner.Text()}
+			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Scanner error reading from %s: %v\n", sourceName, scanErr)
+			}
+			close(msgChan)
+		}()
+
+		processLogStream(msgChan, *verdictFilter, *ipFilter, *pathFilter, *outPath, *rawOutput)
+		return
 	}
 
+	// Stdin mode
 	if !*rawOutput {
-		fmt.Printf("📡 RouteWarden Threat Monitor — Streaming security events from %s\n", sourceName)
+		fmt.Printf("📡 RouteWarden Threat Monitor — Streaming security events from standard input\n")
 		printFilterNotice(*verdictFilter, *ipFilter, *pathFilter)
 	}
 
 	msgChan := make(chan streamMsg, 500)
 	go func() {
-		scanner := bufio.NewScanner(reader)
+		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			msgChan <- streamMsg{Container: "", Line: scanner.Text()}
 		}
 		if err := scanner.Err(); err != nil {
-			_ = err
+			fmt.Fprintf(os.Stderr, "⚠️  Scanner error reading from standard input: %v\n", err)
 		}
 		close(msgChan)
 	}()
 
 	processLogStream(msgChan, *verdictFilter, *ipFilter, *pathFilter, *outPath, *rawOutput)
+}
+
+func runFileMonitor(filePath, tailLines, verdictFilter, ipFilter, pathFilter, outPath string, rawOutput bool) {
+	if !rawOutput {
+		fmt.Printf("📡 RouteWarden Threat Monitor — Streaming security events from %s\n", filePath)
+		printFilterNotice(verdictFilter, ipFilter, pathFilter)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	go func() {
+		<-sigChan
+		cancel()
+	}()
+
+	msgChan := make(chan streamMsg, 500)
+	isPattern := strings.ContainsAny(filePath, "*?[]")
+
+	var mu sync.Mutex
+	active := make(map[string]context.CancelFunc)
+	var streamWg sync.WaitGroup
+
+	startFileStream := func(p string) {
+		mu.Lock()
+		if _, exists := active[p]; exists {
+			mu.Unlock()
+			return
+		}
+		fCtx, fCancel := context.WithCancel(ctx)
+		active[p] = fCancel
+		mu.Unlock()
+
+		streamWg.Add(1)
+		go func() {
+			defer func() {
+				mu.Lock()
+				delete(active, p)
+				mu.Unlock()
+				streamWg.Done()
+			}()
+			streamFileLogs(fCtx, p, tailLines, msgChan, rawOutput)
+		}()
+	}
+
+	// Resolve initial files
+	if isPattern {
+		matches, _ := filepath.Glob(filePath)
+		for _, m := range matches {
+			startFileStream(m)
+		}
+	} else if fi, err := os.Stat(filePath); err == nil && fi.IsDir() {
+		entries, _ := os.ReadDir(filePath)
+		for _, entry := range entries {
+			if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".log") || strings.HasSuffix(entry.Name(), ".json") || strings.HasSuffix(entry.Name(), ".txt")) {
+				startFileStream(filepath.Join(filePath, entry.Name()))
+			}
+		}
+	} else {
+		startFileStream(filePath)
+	}
+
+	// Dynamic observer: continuously watch for new logfiles if pattern or directory
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				for _, c := range active {
+					c()
+				}
+				mu.Unlock()
+				return
+			case <-ticker.C:
+				if isPattern {
+					matches, _ := filepath.Glob(filePath)
+					for _, m := range matches {
+						mu.Lock()
+						_, running := active[m]
+						mu.Unlock()
+						if !running {
+							if !rawOutput {
+								fmt.Printf("📄 [File] Attached to new log file: %s\n", m)
+							}
+							startFileStream(m)
+						}
+					}
+				} else if fi, err := os.Stat(filePath); err == nil && fi.IsDir() {
+					entries, _ := os.ReadDir(filePath)
+					for _, entry := range entries {
+						if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".log") || strings.HasSuffix(entry.Name(), ".json") || strings.HasSuffix(entry.Name(), ".txt")) {
+							full := filepath.Join(filePath, entry.Name())
+							mu.Lock()
+							_, running := active[full]
+							mu.Unlock()
+							if !running {
+								if !rawOutput {
+									fmt.Printf("📄 [File] Attached to new log file: %s\n", full)
+								}
+								startFileStream(full)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		streamWg.Wait()
+		close(msgChan)
+	}()
+
+	processLogStream(msgChan, verdictFilter, ipFilter, pathFilter, outPath, rawOutput)
+}
+
+func streamFileLogs(ctx context.Context, filePath, tailLines string, out chan<- streamMsg, rawOutput bool) {
+	sourceLabel := filepath.Base(filePath)
+
+	var f *os.File
+	for {
+		var err error
+		f, err = os.Open(filePath)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
+
+	nTail := 50
+	if tailLines != "" {
+		if n, err := strconv.Atoi(tailLines); err == nil && n >= 0 {
+			nTail = n
+		}
+	}
+
+	if nTail > 0 {
+		fi, err := f.Stat()
+		if err == nil {
+			var seekPos int64
+			if fi.Size() > 256*1024 {
+				seekPos = fi.Size() - 256*1024
+			}
+			_, _ = f.Seek(seekPos, io.SeekStart)
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			var initialLines []string
+			for scanner.Scan() {
+				initialLines = append(initialLines, scanner.Text())
+			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error during initial tail: %v\n", filePath, scanErr)
+			}
+			if len(initialLines) > nTail {
+				initialLines = initialLines[len(initialLines)-nTail:]
+			}
+			for _, l := range initialLines {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- streamMsg{Container: sourceLabel, Line: l}:
+				}
+			}
+		}
+	}
+
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		offset = 0
+	}
+
+	reader := bufio.NewReaderSize(f, 64*1024)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	var pendingLine string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			offset += int64(len(line))
+			if pendingLine != "" {
+				line = pendingLine + line
+				pendingLine = ""
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line != "" {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- streamMsg{Container: sourceLabel, Line: line}:
+				}
+			}
+			continue
+		}
+
+		if err == io.EOF {
+			if len(line) > 0 {
+				offset += int64(len(line))
+				pendingLine += line
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			fi, statErr := os.Stat(filePath)
+			if statErr != nil {
+				// File may be temporarily moved or deleted by logrotate
+				continue
+			}
+
+			// 1. Check for in-place truncation
+			if fi.Size() < offset {
+				if !rawOutput {
+					fmt.Printf("✂️  [File] Detected truncation for %s (size %d < offset %d), rewinding to beginning\n", sourceLabel, fi.Size(), offset)
+				}
+				_, _ = f.Seek(0, io.SeekStart)
+				offset = 0
+				pendingLine = ""
+				reader.Reset(f)
+				continue
+			}
+
+			// 2. Check for log rotation (different inode/identity)
+			curFi, _ := f.Stat()
+			if curFi != nil && !os.SameFile(fi, curFi) {
+				if !rawOutput {
+					fmt.Printf("🔄 [File] Detected rotation for %s, re-attaching to new file\n", sourceLabel)
+				}
+				// Drain any remaining lines from the rotated file
+				for {
+					extraLine, rErr := reader.ReadString('\n')
+					if extraLine != "" {
+						combinedStr := pendingLine + extraLine
+						pendingLine = ""
+						trimmed := strings.TrimRight(combinedStr, "\r\n")
+						if trimmed != "" {
+							select {
+							case <-ctx.Done():
+								return
+							case out <- streamMsg{Container: sourceLabel, Line: trimmed}:
+							}
+						}
+					}
+					if rErr != nil {
+						break
+					}
+				}
+
+				newFile, openErr := os.Open(filePath)
+				if openErr == nil {
+					_ = f.Close()
+					f = newFile
+					offset = 0
+					pendingLine = ""
+					reader.Reset(f)
+				}
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}
 }
 
 func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFilter, pathFilter, outPath string, rawOutput, waitMode bool) {
@@ -267,7 +584,11 @@ func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFi
 	if !rawOutput {
 		fmt.Printf("🐳 RouteWarden Docker Monitor — Auto-discovered %d container(s):\n", len(targets))
 		for _, t := range targets {
-			fmt.Printf("   • %s (%s)\n", t.Name, t.ID[:12])
+			idShort := t.ID
+			if len(idShort) > 12 {
+				idShort = idShort[:12]
+			}
+			fmt.Printf("   • %s (%s)\n", t.Name, idShort)
 		}
 		printFilterNotice(verdictFilter, ipFilter, pathFilter)
 	}
@@ -276,20 +597,93 @@ func runDockerMonitor(containerName, customLabel, tailLines, verdictFilter, ipFi
 	defer cancel()
 
 	msgChan := make(chan streamMsg, 1000)
-	var wg sync.WaitGroup
+	var mu sync.Mutex
+	active := make(map[string]context.CancelFunc)
 
-	for _, target := range targets {
-		wg.Add(1)
-		go func(c containerTarget) {
-			defer wg.Done()
-			streamContainerLogs(ctx, c, tailLines, msgChan)
-		}(target)
+	startStream := func(target containerTarget, tail string) {
+		mu.Lock()
+		if _, exists := active[target.ID]; exists {
+			mu.Unlock()
+			return
+		}
+		cCtx, cancelFunc := context.WithCancel(ctx)
+		active[target.ID] = cancelFunc
+		mu.Unlock()
+
+		go func() {
+			defer func() {
+				mu.Lock()
+				delete(active, target.ID)
+				mu.Unlock()
+				if ctx.Err() == nil && !rawOutput {
+					idShort := target.ID
+					if len(idShort) > 12 {
+						idShort = idShort[:12]
+					}
+					fmt.Printf("🛑 [Docker] Container stopped: %s (%s)\n", target.Name, idShort)
+				}
+			}()
+
+			streamContainerLogs(cCtx, target, tail, msgChan)
+		}()
 	}
 
-	// Close msgChan when all streams end
+	for _, target := range targets {
+		startStream(target, tailLines)
+	}
+
+	// Dynamic observer: continuously watch for containers starting or stopping
 	go func() {
-		wg.Wait()
-		close(msgChan)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				for _, c := range active {
+					c()
+				}
+				mu.Unlock()
+				return
+			case <-ticker.C:
+				if containerName != "" {
+					if t, err := findDockerContainer(containerName); err == nil {
+						mu.Lock()
+						_, isStreaming := active[t.ID]
+						mu.Unlock()
+						if !isStreaming {
+							if !rawOutput {
+								idShort := t.ID
+								if len(idShort) > 12 {
+									idShort = idShort[:12]
+								}
+								fmt.Printf("🐳 [Docker] Attached to container: %s (%s)\n", t.Name, idShort)
+							}
+							startStream(*t, "50")
+						}
+					}
+				} else {
+					if discovered, err := discoverDockerContainers(customLabel); err == nil {
+						for _, c := range discovered {
+							mu.Lock()
+							_, isStreaming := active[c.ID]
+							mu.Unlock()
+							if !isStreaming {
+								if !rawOutput {
+									idShort := c.ID
+									if len(idShort) > 12 {
+										idShort = idShort[:12]
+									}
+									fmt.Printf("🐳 [Docker] Attached to container: %s (%s)\n", c.Name, idShort)
+								}
+								startStream(c, "50")
+							}
+						}
+					}
+				}
+			}
+		}
 	}()
 
 	processLogStream(msgChan, verdictFilter, ipFilter, pathFilter, outPath, rawOutput)
@@ -325,7 +719,7 @@ func streamContainerLogs(ctx context.Context, target containerTarget, tailLines 
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			_ = err
+			fmt.Fprintf(os.Stderr, "⚠️  [Docker] Scanner error for container %s: %v\n", target.Name, err)
 		}
 	}
 
@@ -338,6 +732,15 @@ func streamContainerLogs(ctx context.Context, target containerTarget, tailLines 
 }
 
 func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
+	if sockPath := os.Getenv("DOCKER_HOST"); sockPath == "" {
+		if fi, err := os.Stat("/var/run/docker.sock"); err == nil && fi.IsDir() {
+			fmt.Fprintln(os.Stderr, "⚠️  [Docker] /var/run/docker.sock is a directory, not a Unix domain socket.")
+			fmt.Fprintln(os.Stderr, "   On macOS (Docker Desktop), the host socket is located at ~/.docker/run/docker.sock.")
+			fmt.Fprintln(os.Stderr, "   Fix: mount -v ~/.docker/run/docker.sock:/var/run/docker.sock")
+			fmt.Fprintln(os.Stderr, "   Or enable 'Allow default Docker socket to be used' in Docker Desktop > Settings > Advanced.")
+		}
+	}
+
 	labels := []string{"routewarden=true", "routewarden.logs=true"}
 	if customLabel != "" {
 		labels = []string{customLabel}
@@ -346,11 +749,18 @@ func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
 	seen := make(map[string]bool)
 	var containers []containerTarget
 
+	var lastErr error
 	for _, l := range labels {
 		cmd := exec.Command("docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
-		out, err := cmd.Output()
+		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return nil, err
+			errStr := strings.TrimSpace(string(out))
+			if errStr == "" {
+				errStr = err.Error()
+			}
+			fmt.Fprintf(os.Stderr, "⚠️  [Docker] Failed to query containers with label %q: %s\n", l, errStr)
+			lastErr = err
+			continue
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		for _, line := range lines {
@@ -369,6 +779,10 @@ func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
 				containers = append(containers, containerTarget{ID: id, Name: name})
 			}
 		}
+	}
+	// Only propagate an error if every label query failed and we found nothing.
+	if len(containers) == 0 && lastErr != nil {
+		return nil, lastErr
 	}
 	return containers, nil
 }

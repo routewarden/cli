@@ -395,4 +395,3 @@ traefik.http.middlewares.bomb-shield.plugin.routewarden.response.gzip_bomb_mb=0.
 		t.Errorf("expected 'gzipBombMB: 0.5' in YAML, got:\n%s", yamlOut)
 	}
 }
-

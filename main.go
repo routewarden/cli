@@ -27,7 +27,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.1.0"
+var version = "5.2.0"
 
 type stringSlice []string
 
@@ -257,6 +257,8 @@ func handleDashboard(args []string) {
 		user := fs.String("user", "", "Optional HTTP Basic Auth username (used with --password)")
 		pass := fs.String("password", "", "Optional HTTP Basic Auth password (used with --user)")
 		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, or set RW_DASHBOARD_HOST)")
+		verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
+		fs.BoolVar(verbose, "v", false, "Alias for --verbose")
 		_ = parseFlagsLenient(fs, remainingArgs)
 
 		if *host == "" {
@@ -307,7 +309,12 @@ func handleDashboard(args []string) {
 			authStr = *user + ":" + *pass
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host); err != nil {
+		verboseStr := "false"
+		if *verbose {
+			verboseStr = "true"
+		}
+
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)

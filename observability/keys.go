@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 	"github.com/routewarden/cli/crypto"
 )
 
-var keyStoreMu sync.Mutex
+var keyStoreMu sync.RWMutex
 
 // AgentKey represents a registered remote agent key in the store.
 type AgentKey struct {
@@ -177,8 +178,8 @@ func CreateAgentKey(name, dir string) (string, *AgentKey, error) {
 
 // ListAgentKeys returns all registered keys.
 func ListAgentKeys(dir string) ([]AgentKey, error) {
-	keyStoreMu.Lock()
-	defer keyStoreMu.Unlock()
+	keyStoreMu.RLock()
+	defer keyStoreMu.RUnlock()
 
 	store, err := loadKeyStore(defaultKeyStorePath(dir))
 	if err != nil {
@@ -215,8 +216,8 @@ func RevokeAgentKey(idOrName, dir string) error {
 
 // ValidateAgentToken verifies an incoming raw token against the keystore.
 func ValidateAgentToken(rawToken, dir string) (*AgentKey, error) {
-	keyStoreMu.Lock()
-	defer keyStoreMu.Unlock()
+	keyStoreMu.RLock()
+	defer keyStoreMu.RUnlock()
 
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
@@ -230,7 +231,7 @@ func ValidateAgentToken(rawToken, dir string) (*AgentKey, error) {
 	}
 
 	for _, k := range store.Keys {
-		if k.TokenHash == tokenHash {
+		if subtle.ConstantTimeCompare([]byte(k.TokenHash), []byte(tokenHash)) == 1 {
 			if k.Revoked {
 				return nil, fmt.Errorf("key has been revoked")
 			}

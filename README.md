@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.1.0
+# rwarden version 5.2.0
 ```
 
 ---
