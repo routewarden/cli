@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/routewarden/cli/crypto"
@@ -289,5 +290,106 @@ func TestSendBatchWithRetry_ManualEventsEncrypted(t *testing.T) {
 
 	if len(decryptedEvents) != 1 || decryptedEvents[0] != manualEvents[0] {
 		t.Fatalf("expected decrypted event %s, got: %v", manualEvents[0], decryptedEvents)
+	}
+}
+
+func TestIsRouteWardenLog_FilterValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		expected bool
+	}{
+		{
+			name:     "Structured RouteWarden security JSON",
+			line:     `{"time":"2026-10-18T11:40:00Z","client_ip":"192.0.2.1","method":"GET","path":"/.env","verdict":"BLOCK","rule":"dotenv"}`,
+			expected: true,
+		},
+		{
+			name:     "RouteWarden security event with verdict only",
+			line:     `{"client_ip":"198.51.100.1","path":"/admin","verdict":"ALLOW"}`,
+			expected: true,
+		},
+		{
+			name:     "Standard Apache/NGINX combined access log",
+			line:     `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /.env HTTP/1.1" 403 0 "-" "[BLOCK: BlockDotEnv]"`,
+			expected: true,
+		},
+		{
+			name:     "Traefik JSON access log format",
+			line:     `{"ClientHost":"198.51.100.5","RequestPath":"/api/v1/status","RequestMethod":"GET","DownstreamStatus":200}`,
+			expected: true,
+		},
+		{
+			name:     "Layer 4 UDP / tcp-warden security log",
+			line:     `{"timestamp":"2026-10-01T15:30:00Z","plugin":"tcp-warden","client_ip":"198.51.100.22","action":"blocked"}`,
+			expected: true,
+		},
+		{
+			name:     "Docker timestamp prefix with valid RouteWarden JSON",
+			line:     `2026-10-20T14:00:01.123456789Z {"time":"2026-10-20T14:00:01Z","client_ip":"198.51.100.1","path":"/","verdict":"BLOCK"}`,
+			expected: true,
+		},
+		{
+			name:     "Docker timestamp prefix with Combined log",
+			line:     `2026-10-20T14:00:01.123456789Z 198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET / HTTP/1.1" 200 12 "-" "-"`,
+			expected: true,
+		},
+		{
+			name:     "Generic Docker container startup info log (should be filtered out)",
+			line:     `time="2026-10-20T14:00:00Z" level=info msg="Configuration loaded from flags."`,
+			expected: false,
+		},
+		{
+			name:     "NGINX notice banner (should be filtered out)",
+			line:     `2026/10/20 14:00:00 [notice] 1#1: using the "epoll" event method`,
+			expected: false,
+		},
+		{
+			name:     "Application debug message (should be filtered out)",
+			line:     `[DEBUG] (resolver) querying 1.1.1.1 for domain test.internal`,
+			expected: false,
+		},
+		{
+			name:     "Arbitrary JSON without RouteWarden fields (should be filtered out)",
+			line:     `{"level":"info","msg":"heartbeat OK","timestamp":"2026-10-20T14:00:00Z"}`,
+			expected: false,
+		},
+		{
+			name:     "Application error trace (should be filtered out)",
+			line:     `panic: runtime error: invalid memory address or nil pointer dereference`,
+			expected: false,
+		},
+		{
+			name:     "Empty line (should be filtered out)",
+			line:     `   `,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cleanLine, ok := filterRouteWardenLog(tc.line, false)
+			if ok != tc.expected {
+				t.Errorf("filterRouteWardenLog(..., false) for %q got ok=%v, expected %v", tc.line, ok, tc.expected)
+			}
+			if ok && strings.HasPrefix(tc.line, "2026-10-20T14:00:01.123456789Z ") {
+				if strings.HasPrefix(cleanLine, "2026-10-20T14:00:01.123456789Z ") {
+					t.Errorf("expected docker timestamp prefix stripped, got: %s", cleanLine)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterRouteWardenLog_AllLogsBypass(t *testing.T) {
+	rawLine := `[DEBUG] (resolver) querying 1.1.1.1 for domain test.internal`
+	clean, ok := filterRouteWardenLog(rawLine, true)
+	if !ok || clean != rawLine {
+		t.Errorf("expected line to pass when allLogs=true, got ok=%v clean=%q", ok, clean)
+	}
+
+	cleanDefault, okDefault := filterRouteWardenLog(rawLine, false)
+	if okDefault || cleanDefault != "" {
+		t.Errorf("expected line to be filtered when allLogs=false, got ok=%v clean=%q", okDefault, cleanDefault)
 	}
 }
