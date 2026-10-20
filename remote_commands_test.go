@@ -1,10 +1,27 @@
 package main_test
 
 import (
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func newLocalTestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("skipping test in sandbox: socket bind not permitted: %v", err)
+		return nil
+	}
+	ts := httptest.NewUnstartedServer(handler)
+	ts.Listener = l
+	ts.Start()
+	return ts
+}
 
 func TestCLI_KeysCommand(t *testing.T) {
 	tempDir := t.TempDir()
@@ -146,6 +163,219 @@ func TestCLI_PushCommand_Validation(t *testing.T) {
 	}
 	if !strings.Contains(combined, "-flush-interval") && !strings.Contains(combined, "--flush-interval") {
 		t.Errorf("push help missing --flush-interval flag, got:\n%s", combined)
+	}
+	if !strings.Contains(combined, "-event") && !strings.Contains(combined, "--event") {
+		t.Errorf("push help missing --event flag, got:\n%s", combined)
+	}
+	if !strings.Contains(combined, "-stdin") && !strings.Contains(combined, "--stdin") {
+		t.Errorf("push help missing --stdin flag, got:\n%s", combined)
+	}
+}
+
+func TestCLI_Push_ManualEventDirect(t *testing.T) {
+	var receivedEvents []string
+	var receivedAuth string
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			receivedAuth = r.Header.Get("Authorization")
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			receivedEvents = append(receivedEvents, body.Events...)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdout, stderr, code := runCLI(t, "push", "--url", ts.URL, "--key", "rw_sec_manualkey", "-e", `{"client_ip":"198.51.100.1","verdict":"BLOCK"}`)
+	if code != 0 {
+		t.Fatalf("expected push -e to succeed with code 0, got %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 1 event(s)") {
+		t.Errorf("expected success message in stdout, got:\n%s", stdout)
+	}
+	if receivedAuth != "Bearer rw_sec_manualkey" {
+		t.Errorf("expected auth Bearer rw_sec_manualkey, got %s", receivedAuth)
+	}
+	if len(receivedEvents) != 1 || !strings.Contains(receivedEvents[0], "198.51.100.1") {
+		t.Errorf("expected received event, got %v", receivedEvents)
+	}
+}
+
+func TestCLI_Push_ManualMultipleEvents(t *testing.T) {
+	var receivedEvents []string
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			receivedEvents = append(receivedEvents, body.Events...)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdout, stderr, code := runCLI(t, "push", "--url", ts.URL, "--key", "test-key", "-e", "event_one", "-e", "event_two")
+	if code != 0 {
+		t.Fatalf("push failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 2 event(s)") {
+		t.Errorf("expected 2 events confirmation, got:\n%s", stdout)
+	}
+	if len(receivedEvents) != 2 {
+		t.Fatalf("expected 2 events received, got %d", len(receivedEvents))
+	}
+}
+
+func TestCLI_Push_StdinPiped(t *testing.T) {
+	var receivedEvents []string
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			receivedEvents = append(receivedEvents, body.Events...)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdinData := "line1\nline2\nline3\n"
+	stdout, stderr, code := runCLIWithStdin(t, stdinData, "push", "--url", ts.URL, "--key", "test-key", "--stdin")
+	if code != 0 {
+		t.Fatalf("push --stdin failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 3 event(s) from STDIN") {
+		t.Errorf("expected STDIN push confirmation, got:\n%s", stdout)
+	}
+	if len(receivedEvents) != 3 {
+		t.Fatalf("expected 3 events received, got %d: %v", len(receivedEvents), receivedEvents)
+	}
+}
+
+func TestCLI_Push_DashFileStdin(t *testing.T) {
+	var receivedEvents []string
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			receivedEvents = append(receivedEvents, body.Events...)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdinData := "piped_event_alpha\npiped_event_beta\n"
+	stdout, stderr, code := runCLIWithStdin(t, stdinData, "push", "--url", ts.URL, "--key", "test-key", "-f", "-")
+	if code != 0 {
+		t.Fatalf("push -f - failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 2 event(s) from STDIN") {
+		t.Errorf("expected 2 events confirmation from STDIN, got:\n%s", stdout)
+	}
+	if len(receivedEvents) != 2 {
+		t.Fatalf("expected 2 events received, got %d", len(receivedEvents))
+	}
+}
+
+func TestCLI_Push_PositionalDashStdin(t *testing.T) {
+	var receivedEvents []string
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			receivedEvents = append(receivedEvents, body.Events...)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdinData := "positional_dash_event\n"
+	stdout, stderr, code := runCLIWithStdin(t, stdinData, "push", "--url", ts.URL, "--key", "test-key", "-")
+	if code != 0 {
+		t.Fatalf("push - failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 1 event(s) from STDIN") {
+		t.Errorf("expected 1 event confirmation from STDIN, got:\n%s", stdout)
+	}
+	if len(receivedEvents) != 1 || receivedEvents[0] != "positional_dash_event" {
+		t.Fatalf("expected positional_dash_event, got %v", receivedEvents)
+	}
+}
+
+func TestCLI_Push_ManualEmptyEventError(t *testing.T) {
+	_, stderr, code := runCLI(t, "push", "--url", "http://127.0.0.1:7890", "--key", "test-key", "-e", "", "-e", "   ")
+	if code == 0 {
+		t.Fatalf("expected push with empty -e flags to fail, got code %d", code)
+	}
+	if !strings.Contains(stderr, "no non-empty event strings provided") {
+		t.Errorf("expected empty events error message, got: %s", stderr)
+	}
+}
+
+func TestCLI_Push_EmptyStdin(t *testing.T) {
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer ts.Close()
+
+	stdout, stderr, code := runCLIWithStdin(t, "", "push", "--url", ts.URL, "--key", "test-key", "--stdin")
+	if code != 0 {
+		t.Fatalf("push --stdin with empty input failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 0 event(s) from STDIN") {
+		t.Errorf("expected 0 events pushed message, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Push_StdinBatched(t *testing.T) {
+	var batchCount int
+	var totalReceived int
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			batchCount++
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			totalReceived += len(body.Events)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdinData := "line1\nline2\nline3\nline4\nline5\n"
+	stdout, stderr, code := runCLIWithStdin(t, stdinData, "push", "--url", ts.URL, "--key", "test-key", "--stdin", "--batch-size", "2")
+	if code != 0 {
+		t.Fatalf("push --stdin batched failed with code %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 5 event(s) from STDIN") {
+		t.Errorf("expected 5 events confirmation from STDIN, got:\n%s", stdout)
+	}
+	if totalReceived != 5 {
+		t.Errorf("expected 5 total events, got %d", totalReceived)
+	}
+	if batchCount != 3 {
+		t.Errorf("expected 3 batches (2+2+1), got %d", batchCount)
 	}
 }
 

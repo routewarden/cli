@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -180,3 +181,114 @@ func TestEndToEnd_RegistrationAndEncryptedPush(t *testing.T) {
 		t.Errorf("event mismatch.\nExpected: %s\nGot:      %s", sampleEvents[0], ingestedEvents[0])
 	}
 }
+
+func TestSendBatchWithRetry_ManualDirectEvents(t *testing.T) {
+	var receivedPayload pushPayload
+	var receivedAuth string
+	var receivedContentType string
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		receivedContentType = r.Header.Get("Content-Type")
+
+		if err := json.NewDecoder(r.Body).Decode(&receivedPayload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	client := &http.Client{
+		Transport: &mockTransport{handler: handler},
+	}
+
+	manualEvents := []string{
+		`{"client_ip":"198.51.100.1","path":"/.env","verdict":"BLOCK","rule":"sensitive_files"}`,
+		`{"client_ip":"198.51.100.2","path":"/login.php","verdict":"BLOCK","rule":"admin_paths"}`,
+	}
+
+	err := sendBatchWithRetry(
+		context.Background(),
+		client,
+		"http://routewarden.internal:7890/api/v1/events",
+		"rw_sec_manualtoken123",
+		"manual-agent-01",
+		"edge-worker-node",
+		nil,
+		manualEvents,
+	)
+	if err != nil {
+		t.Fatalf("sendBatchWithRetry failed: %v", err)
+	}
+
+	if receivedAuth != "Bearer rw_sec_manualtoken123" {
+		t.Errorf("expected Bearer rw_sec_manualtoken123, got: %s", receivedAuth)
+	}
+	if receivedContentType != "application/json" {
+		t.Errorf("expected application/json, got: %s", receivedContentType)
+	}
+	if receivedPayload.AgentID != "manual-agent-01" {
+		t.Errorf("expected agent ID manual-agent-01, got: %s", receivedPayload.AgentID)
+	}
+	if receivedPayload.Hostname != "edge-worker-node" {
+		t.Errorf("expected hostname edge-worker-node, got: %s", receivedPayload.Hostname)
+	}
+	if len(receivedPayload.Events) != 2 || receivedPayload.Events[0] != manualEvents[0] {
+		t.Errorf("expected payload events to match manual events, got: %+v", receivedPayload.Events)
+	}
+}
+
+func TestSendBatchWithRetry_ManualEventsEncrypted(t *testing.T) {
+	serverPriv, serverPub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decryptedEvents []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var encPayload crypto.EncryptedPayload
+		if err := json.NewDecoder(r.Body).Decode(&encPayload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		plaintext, err := crypto.Decrypt(serverPriv, &encPayload)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var payload pushPayload
+		if err := json.Unmarshal(plaintext, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		decryptedEvents = payload.Events
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	client := &http.Client{
+		Transport: &mockTransport{handler: handler},
+	}
+
+	manualEvents := []string{
+		`{"client_ip":"203.0.113.50","path":"/backup.sql","verdict":"BLOCK"}`,
+	}
+
+	err = sendBatchWithRetry(
+		context.Background(),
+		client,
+		"http://routewarden.internal:7890/api/v1/events",
+		"rw_sec_encryptedtoken",
+		"agent-enc",
+		"secure-host",
+		serverPub,
+		manualEvents,
+	)
+	if err != nil {
+		t.Fatalf("sendBatchWithRetry failed: %v", err)
+	}
+
+	if len(decryptedEvents) != 1 || decryptedEvents[0] != manualEvents[0] {
+		t.Fatalf("expected decrypted event %s, got: %v", manualEvents[0], decryptedEvents)
+	}
+}
+

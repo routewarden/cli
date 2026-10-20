@@ -64,12 +64,20 @@ homebrew_casks:
     homepage: "https://routewarden.github.io"
     description: "Unified Edge & L4 Protocol Security Suite CLI"
     hooks:
+      pre:
+        uninstall: |
+          if File.exist?("#{HOMEBREW_PREFIX}/bin/rwarden")
+            system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["stop"], must_succeed: false
+            system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["cleanup"], must_succeed: false
+          end
       post:
         install: |
           if OS.mac?
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"]
           end
-
+    zap:
+      trash:
+        - "~/.routewarden"
 
 nfpms:
   - id: packages
@@ -90,3 +98,6 @@ nfpms:
         dst: /usr/share/doc/rwarden/copyright
       - src: README.md
         dst: /usr/share/doc/rwarden/README.md
+    scripts:
+      preremove: scripts/preremove.sh
+

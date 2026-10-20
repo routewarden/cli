@@ -55,6 +55,10 @@ func handlePush(args []string) {
 	var fileFlags stringSlice
 	fs.Var(&fileFlags, "file", "Log file(s) to monitor and push (repeatable, comma-separated, or glob pattern)")
 	fs.Var(&fileFlags, "f", "Alias for --file")
+	var eventFlags stringSlice
+	fs.Var(&eventFlags, "event", "Push one or more specific event strings directly (repeatable)")
+	fs.Var(&eventFlags, "e", "Alias for --event")
+	stdinMode := fs.Bool("stdin", false, "Read and push events line-by-line from STDIN")
 	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
 	fs.StringVar(customLabel, "l", "", "Alias for --label")
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
@@ -62,7 +66,23 @@ func handlePush(args []string) {
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
 	_ = parseFlagsLenient(fs, args)
 
-	if *detachMode && os.Getenv("_RW_DETACHED") != "1" {
+	filesToMonitor := resolveFileList(fileFlags, fs.Args())
+	containersToTail := resolveContainerList(containerFlags)
+
+	hasStdin := *stdinMode
+	var diskFiles []string
+	for _, f := range filesToMonitor {
+		if f == "-" {
+			hasStdin = true
+		} else {
+			diskFiles = append(diskFiles, f)
+		}
+	}
+	filesToMonitor = diskFiles
+
+	isManualPush := len(eventFlags) > 0 || hasStdin
+
+	if *detachMode && !isManualPush && os.Getenv("_RW_DETACHED") != "1" {
 		_ = spawnDetached("push", "RouteWarden Remote Shipper", append([]string{"push"}, args...), 0, "")
 		return
 	}
@@ -71,9 +91,7 @@ func handlePush(args []string) {
 		defer removePID("push")
 	}
 
-	filesToMonitor := resolveFileList(fileFlags, fs.Args())
-	containersToTail := resolveContainerList(containerFlags)
-	runDockerDiscovery := *dockerMode || (len(filesToMonitor) == 0 && len(containersToTail) == 0)
+	runDockerDiscovery := !isManualPush && (*dockerMode || (len(filesToMonitor) == 0 && len(containersToTail) == 0))
 
 	if *urlFlag == "" {
 		if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
@@ -151,6 +169,80 @@ func handlePush(args []string) {
 		<-sigChan
 		cancel()
 	}()
+
+	// ─── 1. Manual Direct Push via --event / -e ───────────────────────────────
+	if len(eventFlags) > 0 {
+		var eventsToPush []string
+		for _, ev := range eventFlags {
+			ev = strings.TrimSpace(ev)
+			if ev != "" {
+				eventsToPush = append(eventsToPush, ev)
+			}
+		}
+		if len(eventsToPush) == 0 {
+			fmt.Fprintln(os.Stderr, "❌ Error: --event specified but no non-empty event strings provided.")
+			os.Exit(1)
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		eventsURL := dashboardURL + "/api/v1/events"
+		if err := sendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, eventsToPush); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to push event(s): %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ Successfully pushed %d event(s) to RouteWarden dashboard\n", len(eventsToPush))
+		return
+	}
+
+	// ─── 2. Manual Piped Push via STDIN (--stdin or -f -) ─────────────────────
+	if hasStdin {
+		client := &http.Client{Timeout: 10 * time.Second}
+		eventsURL := dashboardURL + "/api/v1/events"
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+
+		var buffer []string
+		totalPushed := 0
+
+		flush := func() error {
+			if len(buffer) == 0 {
+				return nil
+			}
+			batch := buffer
+			buffer = nil
+			if err := sendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+				return err
+			}
+			totalPushed += len(batch)
+			return nil
+		}
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				buffer = append(buffer, line)
+				if len(buffer) >= *batchSize {
+					if err := flush(); err != nil {
+						fmt.Fprintf(os.Stderr, "❌ Failed to push event batch: %v\n", err)
+						os.Exit(1)
+					}
+				}
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error reading from STDIN: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to push final event batch: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✅ Successfully pushed %d event(s) from STDIN to RouteWarden dashboard\n", totalPushed)
+		return
+	}
 
 	fmt.Println("🚀 RouteWarden Remote Shipper Starting...")
 	fmt.Println("─────────────────────────────────────────────────────────────")
@@ -465,6 +557,13 @@ func resolveFileList(flags []string, positionalArgs []string) []string {
 	addPath := func(p string) {
 		p = strings.TrimSpace(p)
 		if p == "" {
+			return
+		}
+		if p == "-" {
+			if !seen[p] {
+				seen[p] = true
+				results = append(results, p)
+			}
 			return
 		}
 		// Check if it's a glob pattern
