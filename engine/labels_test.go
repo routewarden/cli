@@ -379,3 +379,20 @@ traefik.http.middlewares.cfg-shield.plugin.routewarden.config_file=/etc/routewar
 		t.Errorf("expected configFile in YAML for snake_case label, got:\n%s", yamlOut2)
 	}
 }
+
+func TestLabels_GzipBombMB_FloatingValues(t *testing.T) {
+	content := `
+traefik.http.middlewares.bomb-shield.plugin.routewarden.response.mode=gzipBomb
+traefik.http.middlewares.bomb-shield.plugin.routewarden.response.gzip_bomb_mb=0.5
+`
+	labels := engine.ParseTraefikLabels(content)
+	yamlOut, err := engine.ConvertLabelsToTraefikDynamicYAML(labels)
+	if err != nil {
+		t.Fatalf("failed to convert labels: %v", err)
+	}
+
+	if !strings.Contains(yamlOut, "gzipBombMB: 0.5") {
+		t.Errorf("expected 'gzipBombMB: 0.5' in YAML, got:\n%s", yamlOut)
+	}
+}
+

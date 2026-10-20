@@ -9,7 +9,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.0.3"
+var version = "5.1.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Shipper (` + version + `) — Lightweight Remote Security Log Shipper
@@ -24,6 +24,8 @@ Commands:
                 e.g. rwarden --docker
                 e.g. rwarden -c edge-proxy -d
                 e.g. rwarden -f /var/log/nginx/access.log
+                e.g. rwarden push -e '{"client_ip":"198.51.100.1","path":"/.env","verdict":"BLOCK"}'
+                e.g. cat events.log | rwarden push --stdin
   register    Enroll this node with a central RouteWarden dashboard
                 e.g. rwarden register --url http://198.51.100.10:7890 --key <token>
   status      Check running status of background shipper
@@ -35,7 +37,9 @@ Commands:
 Flags for push:
   -docker              Auto-discover Docker containers with 'routewarden=true'
   -c, --container      Tail specific Docker container(s)
-  -f, --file           Log file(s) to monitor and push
+  -f, --file           Log file(s) to monitor and push (use '-' for STDIN)
+  -e, --event          Push one or more specific event strings directly (repeatable)
+  --stdin              Read and push events line-by-line from STDIN
   -d, --detach         Run in detached background mode
   -u, --url            RouteWarden dashboard URL
   -k, --key            Remote agent authentication key

@@ -1384,7 +1384,7 @@ func TestConfig_SnakeCaseUnmarshal(t *testing.T) {
 		t.Errorf("expected proxy_url, got: %s", cfg.Response.ProxyURL)
 	}
 	if cfg.Response.GzipBombMB != 20 {
-		t.Errorf("expected gzip_bomb_mb 20, got: %d", cfg.Response.GzipBombMB)
+		t.Errorf("expected gzip_bomb_mb 20, got: %v", cfg.Response.GzipBombMB)
 	}
 	if cfg.Response.RetryAfterSeconds != 600 {
 		t.Errorf("expected retry_after_seconds 600, got: %d", cfg.Response.RetryAfterSeconds)
@@ -1466,3 +1466,75 @@ func TestEngine_ConfigFile_Generators(t *testing.T) {
 		t.Errorf("expected config_file in Nginx Lua, got:\n%s", nginxOut)
 	}
 }
+
+func TestGzipBombMB_FloatingValues(t *testing.T) {
+	// 1. JSON unmarshaling with float number
+	rawJSON := []byte(`{
+		"response": {
+			"mode": "gzipBomb",
+			"gzipBombMB": 0.5
+		}
+	}`)
+	var cfg engine.Config
+	if err := json.Unmarshal(rawJSON, &cfg); err != nil {
+		t.Fatalf("failed to unmarshal JSON with float gzipBombMB: %v", err)
+	}
+	if cfg.Response == nil || cfg.Response.GzipBombMB != 0.5 {
+		t.Fatalf("expected gzipBombMB 0.5, got: %v", cfg.Response.GzipBombMB)
+	}
+
+	// 2. JSON unmarshaling with snake_case and string float
+	rawJSONSnake := []byte(`{
+		"response": {
+			"mode": "gzipBomb",
+			"gzip_bomb_mb": "1.75"
+		}
+	}`)
+	var cfgSnake engine.Config
+	if err := json.Unmarshal(rawJSONSnake, &cfgSnake); err != nil {
+		t.Fatalf("failed to unmarshal JSON with string float gzip_bomb_mb: %v", err)
+	}
+	if cfgSnake.Response == nil || cfgSnake.Response.GzipBombMB != 1.75 {
+		t.Fatalf("expected gzip_bomb_mb 1.75, got: %v", cfgSnake.Response.GzipBombMB)
+	}
+
+	// 3. Export config to all formats with float 0.5
+	cfgFloat := &engine.Config{
+		Enabled: true,
+		Response: &engine.ResponseConfig{
+			Mode:       "gzipBomb",
+			GzipBombMB: 0.5,
+		},
+	}
+
+	// Traefik Dynamic YAML
+	traefikYAML := cfgFloat.GenerateTraefikYAML()
+	if !strings.Contains(traefikYAML, "gzipBombMB: 0.5") {
+		t.Errorf("expected 'gzipBombMB: 0.5' in Traefik YAML, got:\n%s", traefikYAML)
+	}
+
+	// Traefik TOML
+	traefikTOML := cfgFloat.GenerateTraefikTOML()
+	if !strings.Contains(traefikTOML, "gzipBombMB = 0.5") {
+		t.Errorf("expected 'gzipBombMB = 0.5' in Traefik TOML, got:\n%s", traefikTOML)
+	}
+
+	// Traefik Labels
+	traefikLabels := cfgFloat.GenerateTraefikLabels()
+	if !strings.Contains(traefikLabels, "response.gzipBombMB=0.5") {
+		t.Errorf("expected 'response.gzipBombMB=0.5' in Traefik Labels, got:\n%s", traefikLabels)
+	}
+
+	// Caddyfile
+	caddyfile := cfgFloat.GenerateCaddyfile()
+	if !strings.Contains(caddyfile, "gzip_bomb_mb 0.5") {
+		t.Errorf("expected 'gzip_bomb_mb 0.5' in Caddyfile, got:\n%s", caddyfile)
+	}
+
+	// Nginx Lua
+	nginxLua := cfgFloat.GenerateNginxLua()
+	if !strings.Contains(nginxLua, "gzip_bomb_mb = 0.5,") {
+		t.Errorf("expected 'gzip_bomb_mb = 0.5,' in Nginx Lua, got:\n%s", nginxLua)
+	}
+}
+

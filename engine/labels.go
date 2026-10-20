@@ -395,8 +395,8 @@ func ConvertLabelsToTraefikDynamicYAML(labels []TraefikLabel) (string, error) {
 				fmt.Fprintf(&b, "            proxyUrl: %q\n", pu)
 			}
 			if gz := props["response.gzipBombMB"]; gz != "" {
-				if n, err := strconv.Atoi(gz); err == nil {
-					fmt.Fprintf(&b, "            gzipBombMB: %d\n", n)
+				if n, err := strconv.ParseFloat(gz, 64); err == nil && n > 0 {
+					fmt.Fprintf(&b, "            gzipBombMB: %s\n", formatFloat(n))
 				}
 			}
 			if ra := props["response.retryAfterSeconds"]; ra != "" {

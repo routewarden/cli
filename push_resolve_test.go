@@ -55,6 +55,17 @@ func TestResolveFileList(t *testing.T) {
 			t.Errorf("expected 0 files for empty inputs, got %d: %v", len(res), res)
 		}
 	})
+
+	t.Run("stdin dash indicator", func(t *testing.T) {
+		res := resolveFileList([]string{"-"}, nil)
+		if len(res) != 1 || res[0] != "-" {
+			t.Errorf("expected ['-'], got %v", res)
+		}
+		res2 := resolveFileList(nil, []string{"-"})
+		if len(res2) != 1 || res2[0] != "-" {
+			t.Errorf("expected ['-'], got %v", res2)
+		}
+	})
 }
 
 func TestResolveContainerList(t *testing.T) {
