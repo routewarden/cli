@@ -34,7 +34,7 @@ Perform deep static analysis and security linting on a policy file. Detects univ
 Compare two RouteWarden policy files and evaluate the security posture delta (e.g. relaxed, hardened, or neutral).
 .TP
 \fBmonitor\fR [\fIoptions\fR]
-Tail and colorize live security events and blocked requests from reverse proxy logs or standard input.
+Tail, follow, and colorize live security events and blocked requests from reverse proxy logs, Docker containers, or standard input (supports \fB--follow\fR / \fB-F\fR, \fB--container\fR, \fB--wait\fR, and \fB--out\fR).
 .TP
 \fBtui\fR
 Launch an interactive terminal UI REPL for real-time path testing and rule simulation.
