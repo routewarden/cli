@@ -13,7 +13,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.1.0"
+var version = "5.2.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Dashboard (` + version + `) — Standalone Real-Time SOC Security Dashboard
@@ -47,6 +47,7 @@ Flags for up:
   --file, -f           Log file to monitor
   --container, -c      Tail a specific Docker container
   --dir                Directory to store configs (default: ~/.routewarden/dashboard)
+  --verbose, -v        Enable verbose event-level logging
 `)
 }
 
@@ -111,6 +112,8 @@ func handleDashboardUp(args []string) {
 	user := fs.String("user", "", "Optional HTTP Basic Auth username")
 	pass := fs.String("password", "", "Optional HTTP Basic Auth password")
 	host := fs.String("host", "", "Host IP interface to bind")
+	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
+	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
 	_ = shipper.ParseFlagsLenient(fs, args)
 
 	if *host == "" {
@@ -161,8 +164,13 @@ func handleDashboardUp(args []string) {
 		authStr = *user + ":" + *pass
 	}
 
+	verboseStr := "false"
+	if *verbose {
+		verboseStr = "true"
+	}
+
 	ctx := context.Background()
-	if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host); err != nil {
+	if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr); err != nil {
 		fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 		os.Exit(1)
 	}

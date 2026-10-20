@@ -156,4 +156,3 @@ func TestAuditAndDiff_IntegrationCLI(t *testing.T) {
 		}
 	})
 }
-

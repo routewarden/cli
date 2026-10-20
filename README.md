@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.1.0
+# rwarden version 5.2.0
 ```
 
 ---
@@ -672,16 +672,22 @@ rwarden monitor
 # Tail a specific container by name or ID
 rwarden monitor --container traefik
 
+# Continuously follow a log file in real time (handles rotation and truncation)
+rwarden monitor --file /var/log/nginx/access.log --follow
+
 # Filter by custom Docker label
 rwarden monitor --label "env=production"
-
-# Tail an NGINX or Apache access log file
-rwarden monitor --file /var/log/nginx/access.log
 
 # Filter exclusively for blocked threats or specific IP / path
 rwarden monitor --verdict BLOCK
 rwarden monitor --path "/.env" --ip "192.168.1."
 ```
+
+#### Real-Time Lifecycle Observers
+
+- **Containers:** `rwarden monitor` actively observes Docker container events every 2 seconds, dynamically attaching to newly started or restarted containers (`🐳 [Docker] Attached to container`) and gracefully detaching on container stop (`🛑 [Docker] Container stopped`) without exiting.
+- **Log Files:** When `--follow` (`-F`) is used, `rwarden monitor` continuously observes file changes, automatically detecting log rotation (re-attaching to new inodes without dropping writes) and in-place truncations.
+- **macOS Docker Desktop:** If mounting the Docker socket inside a container on macOS, mount `~/.docker/run/docker.sock:/var/run/docker.sock` (or enable *"Allow default Docker socket to be used"* in Docker Desktop Settings > Advanced).
 
 #### Piping Raw Logs to External Analyzers
 

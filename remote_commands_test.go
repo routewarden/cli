@@ -399,3 +399,72 @@ func TestCLI_DashboardCommand_SubcommandValidation(t *testing.T) {
 		t.Errorf("expected dashboard status output, got:\n%s", stdout)
 	}
 }
+
+func TestCLI_Push_Logging_DirectBatchAndVerbose(t *testing.T) {
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdout, stderr, code := runCLI(t, "push", "--url", ts.URL, "--key", "rw_sec_logkey", "-e", `{"client_ip":"198.51.100.5","path":"/login"}`, "--verbose")
+	if code != 0 {
+		t.Fatalf("expected push with --verbose to succeed, got %d, stderr: %s", code, stderr)
+	}
+
+	if !strings.Contains(stdout, "📦 Pushed batch of 1 event(s) to dashboard (total: 1)") {
+		t.Errorf("expected batch push log in stdout, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "↳ {\"client_ip\":\"198.51.100.5\",\"path\":\"/login\"}") {
+		t.Errorf("expected verbose event preview in stdout, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 1 event(s)") {
+		t.Errorf("expected success message in stdout, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Push_Logging_StdinBatchedLogs(t *testing.T) {
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/events" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	stdinData := "event1\nevent2\nevent3\n"
+	stdout, stderr, code := runCLIWithStdin(t, stdinData, "push", "--url", ts.URL, "--key", "test-key", "--stdin", "--batch-size", "2")
+	if code != 0 {
+		t.Fatalf("expected push --stdin to succeed, got %d, stderr: %s", code, stderr)
+	}
+
+	if !strings.Contains(stdout, "📦 Pushed batch of 2 event(s) to dashboard (total: 2)") {
+		t.Errorf("expected first batch log in stdout, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "📦 Pushed batch of 1 event(s) to dashboard (total: 3)") {
+		t.Errorf("expected second batch log in stdout, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Successfully pushed 3 event(s) from STDIN") {
+		t.Errorf("expected STDIN push completion message, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Push_Logging_FailureLoggedToStderr(t *testing.T) {
+	ts := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	_, stderr, code := runCLI(t, "push", "--url", ts.URL, "--key", "test-key", "-e", `{"test":"event"}`)
+	if code == 0 {
+		t.Fatal("expected push to fail when server returns 500")
+	}
+
+	if !strings.Contains(stderr, "❌ Failed to push event(s)") || !strings.Contains(stderr, "500") {
+		t.Errorf("expected descriptive failure log on stderr, got:\n%s", stderr)
+	}
+}

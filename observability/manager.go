@@ -28,7 +28,26 @@ import (
 )
 
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
-var Version = "5.1.0"
+var Version = "5.2.0"
+
+var (
+	verboseLogging   bool
+	verboseLoggingMu sync.RWMutex
+)
+
+// SetVerboseLogging enables or disables verbose event-level console logging.
+func SetVerboseLogging(v bool) {
+	verboseLoggingMu.Lock()
+	defer verboseLoggingMu.Unlock()
+	verboseLogging = v
+}
+
+// IsVerboseLogging returns whether verbose event-level console logging is enabled.
+func IsVerboseLogging() bool {
+	verboseLoggingMu.RLock()
+	defer verboseLoggingMu.RUnlock()
+	return verboseLogging || os.Getenv("RW_VERBOSE") == "1" || os.Getenv("RW_DEBUG") == "1"
+}
 
 // DefaultDir returns the default directory where dashboard files are stored.
 func DefaultDir() string {
@@ -135,17 +154,19 @@ func getActiveAgents() []*RemoteAgentInfo {
 	var list []*RemoteAgentInfo
 	now := time.Now().UTC()
 	for _, a := range agents {
-		if parsed, err := time.Parse(time.RFC3339Nano, a.LastSeen); err == nil {
+		// Copy the struct to avoid mutating shared pointer fields under only a read lock.
+		copy := *a
+		if parsed, err := time.Parse(time.RFC3339Nano, copy.LastSeen); err == nil {
 			diff := now.Sub(parsed)
 			if diff > 5*time.Minute {
-				a.Status = "offline"
+				copy.Status = "offline"
 			} else if diff > 60*time.Second {
-				a.Status = "idle"
+				copy.Status = "idle"
 			} else {
-				a.Status = "online"
+				copy.Status = "online"
 			}
 		}
-		list = append(list, a)
+		list = append(list, &copy)
 	}
 	return list
 }
@@ -162,8 +183,12 @@ func updateSourceInfo(mode, file string, targets []containerTarget) {
 
 func getSourceInfo() SourceInfo {
 	sourceMu.RLock()
-	defer sourceMu.RUnlock()
 	s := currSource
+	if len(currSource.Targets) > 0 {
+		s.Targets = append([]containerTarget(nil), currSource.Targets...)
+	}
+	sourceMu.RUnlock()
+
 	s.Agents = getActiveAgents()
 	s.TotalEvents = atomic.LoadInt64(&totalEvents)
 	s.BlockedCount = atomic.LoadInt64(&blockedCount)
@@ -318,7 +343,7 @@ func getFreePort() (int, error) {
 }
 
 // Up starts the live SOC security dashboard and multiplexes logs from Docker containers or file.
-// Optional auth ("user:pass") and host interface ("127.0.0.1" or "0.0.0.0") can be provided in options.
+// Optional auth ("user:pass"), host interface ("127.0.0.1" or "0.0.0.0"), and verbose mode ("true") can be provided in options.
 func Up(ctx context.Context, dir string, port int, noOpen bool, file string, container string, label string, options ...string) error {
 	var authStr string
 	var hostStr string
@@ -327,6 +352,12 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	}
 	if len(options) > 1 {
 		hostStr = strings.TrimSpace(options[1])
+	}
+	if len(options) > 2 {
+		vOpt := strings.ToLower(strings.TrimSpace(options[2]))
+		if vOpt == "true" || vOpt == "1" || vOpt == "verbose" {
+			SetVerboseLogging(true)
+		}
 	}
 	if authStr == "" {
 		authStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_AUTH"))
@@ -378,7 +409,8 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	var targets []containerTarget
 	if file != "" {
 		updateSourceInfo("file", file, nil)
-		tailFileToLog(dashboardCtx, file, logFile)
+		// Run the initial scan in the background so the HTTP server starts immediately.
+		go tailFileToLog(dashboardCtx, file, logFile)
 	} else if container != "" {
 		if found, err := findSpecificContainer(container); err == nil && len(found) > 0 {
 			targets = found
@@ -493,6 +525,11 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		fmt.Printf("🌍 Country Detection:  Auto (Built-in CIDR & RIR DB + MaxMind discovery)\n")
 	}
 	fmt.Printf("⚡ Memory Footprint:   ~8MB (Zero external dependencies)\n")
+	if IsVerboseLogging() {
+		fmt.Println("📢 Ingest Logging:     Verbose enabled (event-level previews)")
+	} else {
+		fmt.Println("📢 Ingest Logging:     Active (real-time ingest confirmation)")
+	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
 
@@ -618,12 +655,21 @@ func watchAndStreamContainers(ctx context.Context, label string, specificContain
 					}
 				}
 				if err := scanner.Err(); err != nil {
-					_ = err
+					fmt.Fprintf(os.Stderr, "⚠️  [Docker] Scanner error for container %s: %v\n", target.Name, err)
 				}
 			}
 
-			go readPipe(stdout)
-			readPipe(stderr)
+			var streamWg sync.WaitGroup
+			streamWg.Add(2)
+			go func() {
+				defer streamWg.Done()
+				readPipe(stdout)
+			}()
+			go func() {
+				defer streamWg.Done()
+				readPipe(stderr)
+			}()
+			streamWg.Wait()
 			_ = cmd.Wait()
 		}()
 	}
@@ -692,7 +738,7 @@ func tailFileToLog(ctx context.Context, filePath string, out *os.File) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = err
+		fmt.Fprintf(os.Stderr, "⚠️  [File] Scanner error reading %s: %v\n", filePath, err)
 	}
 	dashboardLogMu.Lock()
 	if out != nil {
@@ -702,11 +748,24 @@ func tailFileToLog(ctx context.Context, filePath string, out *os.File) {
 }
 
 func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return
+	var f *os.File
+	var err error
+	for {
+		f, err = os.Open(filePath)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	defer f.Close()
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
 
 	// Seek to end of file to stream only new incoming events
 	offset, err := f.Seek(0, io.SeekEnd)
@@ -718,6 +777,8 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
+	var pendingLine string
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -727,6 +788,11 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 
 		line, err := reader.ReadString('\n')
 		if err == nil {
+			offset += int64(len(line))
+			if pendingLine != "" {
+				line = pendingLine + line
+				pendingLine = ""
+			}
 			line = strings.TrimRight(line, "\r\n")
 			if line != "" {
 				combined := toCombinedLog(line)
@@ -740,14 +806,15 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 					globalStore.ParseAndIngest(line, "file")
 				}
 			}
-			newOffset, _ := f.Seek(0, io.SeekCurrent)
-			if newOffset > 0 {
-				offset = newOffset
-			}
 			continue
 		}
 
 		if err == io.EOF {
+			if len(line) > 0 {
+				offset += int64(len(line))
+				pendingLine += line
+			}
+
 			select {
 			case <-ctx.Done():
 				return
@@ -763,6 +830,7 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 			if fi.Size() < offset {
 				_, _ = f.Seek(0, io.SeekStart)
 				offset = 0
+				pendingLine = ""
 				reader.Reset(f)
 				continue
 			}
@@ -770,11 +838,37 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 			// Handle file rotation (different inode/identity)
 			curFi, _ := f.Stat()
 			if curFi != nil && !os.SameFile(fi, curFi) {
+				// Drain any remaining lines from the old file before closing
+				for {
+					extraLine, rErr := reader.ReadString('\n')
+					if extraLine != "" {
+						combinedStr := pendingLine + extraLine
+						pendingLine = ""
+						trimmed := strings.TrimRight(combinedStr, "\r\n")
+						if trimmed != "" {
+							combined := toCombinedLog(trimmed)
+							if combined != "" {
+								dashboardLogMu.Lock()
+								if out != nil {
+									_, _ = out.WriteString(combined + "\n")
+									_ = out.Sync()
+								}
+								dashboardLogMu.Unlock()
+								globalStore.ParseAndIngest(trimmed, "file")
+							}
+						}
+					}
+					if rErr != nil {
+						break
+					}
+				}
+
 				newFile, openErr := os.Open(filePath)
 				if openErr == nil {
 					_ = f.Close()
 					f = newFile
 					offset = 0
+					pendingLine = ""
 					reader.Reset(f)
 				}
 			}
@@ -789,6 +883,15 @@ func watchAndStreamFile(ctx context.Context, filePath string, out *os.File) {
 }
 
 func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
+	if sockPath := os.Getenv("DOCKER_HOST"); sockPath == "" {
+		if fi, err := os.Stat("/var/run/docker.sock"); err == nil && fi.IsDir() {
+			fmt.Fprintln(os.Stderr, "⚠️  [Docker] /var/run/docker.sock is a directory, not a Unix domain socket.")
+			fmt.Fprintln(os.Stderr, "   On macOS (Docker Desktop), the host socket is located at ~/.docker/run/docker.sock.")
+			fmt.Fprintln(os.Stderr, "   Fix: mount -v ~/.docker/run/docker.sock:/var/run/docker.sock")
+			fmt.Fprintln(os.Stderr, "   Or enable 'Allow default Docker socket to be used' in Docker Desktop > Settings > Advanced.")
+		}
+	}
+
 	labels := []string{"routewarden=true", "routewarden.logs=true"}
 	if customLabel != "" {
 		labels = []string{customLabel}
@@ -797,11 +900,18 @@ func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
 	seen := make(map[string]bool)
 	var containers []containerTarget
 
+	var lastErr error
 	for _, l := range labels {
 		cmd := exec.Command("docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
-		out, err := cmd.Output()
+		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return nil, err
+			errStr := strings.TrimSpace(string(out))
+			if errStr == "" {
+				errStr = err.Error()
+			}
+			fmt.Fprintf(os.Stderr, "⚠️  [Docker] Failed to query containers with label %q: %s\n", l, errStr)
+			lastErr = err
+			continue
 		}
 		lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
 		for line := range lines {
@@ -820,6 +930,10 @@ func discoverDockerContainers(customLabel string) ([]containerTarget, error) {
 				containers = append(containers, containerTarget{ID: id, Name: name})
 			}
 		}
+	}
+	// Only propagate an error if every label query failed and we found nothing.
+	if len(containers) == 0 && lastErr != nil {
+		return nil, lastErr
 	}
 	return containers, nil
 }
@@ -1112,9 +1226,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Register] Unauthorized registration attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1122,8 +1239,10 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		}
 
 		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
 		registerOrTouchAgent(key.ID, key.Name, "", clientIP, 0)
+
+		ts := time.Now().Format("15:04:05")
+		fmt.Printf("[%s] 🤝 [Register] Registered agent '%s' (id: %s, ip: %s)\n", ts, key.Name, key.ID, clientIP)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1139,9 +1258,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Heartbeat] Unauthorized heartbeat attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -1154,8 +1276,12 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		_ = json.NewDecoder(r.Body).Decode(&hb)
 
 		UpdateAgentLastSeen(key.ID, dir)
-		clientIP := extractClientIP(r)
 		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
+
+		if IsVerboseLogging() {
+			ts := time.Now().Format("15:04:05")
+			fmt.Printf("[%s] 💓 [Heartbeat] Agent '%s' (host: %s, ip: %s)\n", ts, key.Name, hb.Hostname, clientIP)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -1167,33 +1293,42 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			return
 		}
 
+		clientIP := extractClientIP(r)
 		token := extractAuthToken(r)
 		key, err := ValidateAgentToken(token, dir)
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Unauthorized event push attempt from %s: %v\n", ts, clientIP, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 
-		bodyBytes, err := io.ReadAll(r.Body)
+		bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024))
 		if err != nil {
+			ts := time.Now().Format("15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Failed to read body from %s (%s): %v\n", ts, key.Name, clientIP, err)
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}
 
 		// Try decrypting if payload is EncryptedPayload
+		isEncrypted := false
 		var plaintext = bodyBytes
 		var encPayload crypto.EncryptedPayload
 		if err := json.Unmarshal(bodyBytes, &encPayload); err == nil && encPayload.Ciphertext != "" && encPayload.EphemeralPub != "" {
 			dec, err := crypto.Decrypt(serverPriv, &encPayload)
 			if err != nil {
+				ts := time.Now().Format("15:04:05")
+				fmt.Fprintf(os.Stderr, "[%s] ❌ [Ingest] Decryption failed for payload from %s (%s): %v\n", ts, key.Name, clientIP, err)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
 				return
 			}
 			plaintext = dec
+			isEncrypted = true
 		}
 
 		type EventPayload struct {
@@ -1210,6 +1345,8 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 					payload.Events = append(payload.Events, json.RawMessage([]byte(strconv.Quote(s))))
 				}
 			} else {
+				ts := time.Now().Format("15:04:05")
+				fmt.Fprintf(os.Stderr, "[%s] ⚠️ [Ingest] Invalid payload format from %s (%s)\n", ts, key.Name, clientIP)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid payload format"})
@@ -1219,7 +1356,10 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 		// Convert and write events
 		count := 0
-		dashboardLogMu.Lock()
+		var eventPreviews []string
+		var validEvents []string
+		var combinedLogs []string
+
 		for _, rawEv := range payload.Events {
 			evStr := string(rawEv)
 			if strings.HasPrefix(evStr, `"`) && strings.HasSuffix(evStr, `"`) {
@@ -1230,21 +1370,46 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			}
 			combined := toCombinedLog(evStr)
 			if combined != "" {
-				if logFile != nil {
-					_, _ = logFile.WriteString(combined + "\n")
-				}
-				globalStore.ParseAndIngest(evStr, key.Name)
+				validEvents = append(validEvents, evStr)
+				combinedLogs = append(combinedLogs, combined)
 				count++
+				if IsVerboseLogging() {
+					eventPreviews = append(eventPreviews, evStr)
+				}
 			}
 		}
-		if logFile != nil {
-			_ = logFile.Sync()
-		}
-		dashboardLogMu.Unlock()
 
-		clientIP := extractClientIP(r)
+		if logFile != nil && len(combinedLogs) > 0 {
+			dashboardLogMu.Lock()
+			for _, line := range combinedLogs {
+				_, _ = logFile.WriteString(line + "\n")
+			}
+			_ = logFile.Sync()
+			dashboardLogMu.Unlock()
+		}
+
+		for _, evStr := range validEvents {
+			globalStore.ParseAndIngest(evStr, key.Name)
+		}
+
 		UpdateAgentLastSeen(key.ID, dir)
 		registerOrTouchAgent(key.ID, key.Name, payload.Hostname, clientIP, count)
+
+		ts := time.Now().Format("15:04:05")
+		hostInfo := payload.Hostname
+		if hostInfo == "" {
+			hostInfo = key.Name
+		}
+		if isEncrypted {
+			fmt.Printf("[%s] 🔒 Ingested batch of %d event(s) (encrypted) from agent '%s' (host: %s, ip: %s)\n", ts, count, key.Name, hostInfo, clientIP)
+		} else {
+			fmt.Printf("[%s] 📥 Ingested batch of %d event(s) from agent '%s' (host: %s, ip: %s)\n", ts, count, key.Name, hostInfo, clientIP)
+		}
+		if IsVerboseLogging() {
+			for _, ev := range eventPreviews {
+				fmt.Printf("[%s]    ↳ [%s] %s\n", ts, key.Name, ev)
+			}
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
