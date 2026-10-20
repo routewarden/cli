@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ func handlePush(args []string) {
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
 	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
 	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
+	allLogs := fs.Bool("all-logs", false, "Ship all container lines without filtering for RouteWarden logs")
 	_ = parseFlagsLenient(fs, args)
 
 	filesToMonitor := resolveFileList(fileFlags, fs.Args())
@@ -311,6 +313,11 @@ func handlePush(args []string) {
 		fmt.Println("  Encryption:      Standard HTTPS/HTTP")
 	}
 	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
+	if *allLogs {
+		fmt.Println("  Filter:          Disabled (--all-logs: shipping all raw lines)")
+	} else {
+		fmt.Println("  Filter:          RouteWarden logs only (security events & access logs)")
+	}
 	if *verbose {
 		fmt.Println("  Logging:         Verbose enabled (event-level previews)")
 	} else {
@@ -331,7 +338,7 @@ func handlePush(args []string) {
 	if len(containersToTail) > 0 {
 		for _, c := range containersToTail {
 			fmt.Printf("  Container:       %s\n", c)
-			go tailContainerToChan(ctx, c, *tailLines, eventChan)
+			go tailContainerToChan(ctx, c, *tailLines, *allLogs, eventChan)
 		}
 	}
 	if runDockerDiscovery {
@@ -340,7 +347,7 @@ func handlePush(args []string) {
 			labelDesc = fmt.Sprintf("'%s'", *customLabel)
 		}
 		fmt.Printf("  Auto-Discovery:  Watching Docker containers with label %s\n", labelDesc)
-		go watchDockerContainersToChan(ctx, *customLabel, *tailLines, eventChan)
+		go watchDockerContainersToChan(ctx, *customLabel, *tailLines, *allLogs, eventChan)
 	}
 
 	// Dynamic observer: continuously watch for new log files matching glob patterns or directories
@@ -659,7 +666,95 @@ func streamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 	}
 }
 
-func tailContainerToChan(ctx context.Context, containerName, tailLines string, out chan<- string) {
+// dockerTimestampPrefixRegex matches Docker's optional leading RFC3339 timestamp:
+// e.g. "2026-10-20T14:00:01.123456789Z "
+var dockerTimestampPrefixRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z\s+`)
+
+type routeWardenCheck struct {
+	ClientIP       string `json:"client_ip"`
+	ClientIPAlt    string `json:"ip"`
+	ClientHost     string `json:"ClientHost"`
+	Verdict        string `json:"verdict"`
+	Action         string `json:"action"`
+	Method         string `json:"method"`
+	RequestMethod  string `json:"RequestMethod"`
+	Path           string `json:"path"`
+	PathAlt        string `json:"request_uri"`
+	RequestPath    string `json:"RequestPath"`
+	MatchedPattern string `json:"matched_pattern"`
+	Rule           string `json:"rule"`
+	StatusCode     int    `json:"status"`
+	StatusCodeAlt  int    `json:"status_code"`
+	DownstreamStat int    `json:"DownstreamStatus"`
+	Plugin         string `json:"plugin"`
+	Gateway        string `json:"gateway"`
+}
+
+// isRouteWardenLog returns true if line is a valid RouteWarden security event or proxy access log.
+func isRouteWardenLog(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+
+	// 1. Check for standard Combined / Common Access Log format
+	if combinedLogRegex.MatchString(line) {
+		return true
+	}
+
+	// 2. Check for RouteWarden structured JSON log event
+	if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+		var ev routeWardenCheck
+		if err := json.Unmarshal([]byte(line), &ev); err == nil {
+			// Security enforcement events (e.g. BLOCK, ALLOW, TARPIT)
+			if ev.Verdict != "" || ev.Action != "" {
+				return true
+			}
+			// Threat rule or pattern detection
+			if ev.Rule != "" || ev.MatchedPattern != "" {
+				return true
+			}
+			// RouteWarden / TCP Warden plugin tags
+			if ev.Plugin != "" || ev.Gateway != "" {
+				return true
+			}
+			// Access events: must have client IP and (request path or HTTP method or status code)
+			hasIP := ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != ""
+			hasPath := ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != ""
+			hasMethod := ev.Method != "" || ev.RequestMethod != ""
+			hasStatus := ev.StatusCode > 0 || ev.StatusCodeAlt > 0 || ev.DownstreamStat > 0
+
+			if hasIP && (hasPath || hasMethod || hasStatus) {
+				return true
+			}
+			if hasPath && hasMethod {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func filterRouteWardenLog(line string, allLogs bool) (string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", false
+	}
+	if allLogs {
+		return line, true
+	}
+	cleanLine := line
+	if loc := dockerTimestampPrefixRegex.FindStringIndex(line); loc != nil && loc[0] == 0 {
+		cleanLine = strings.TrimSpace(line[loc[1]:])
+	}
+	if isRouteWardenLog(cleanLine) {
+		return cleanLine, true
+	}
+	return "", false
+}
+
+func tailContainerToChan(ctx context.Context, containerName, tailLines string, allLogs bool, out chan<- string) {
 	cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", tailLines, containerName)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -680,10 +775,15 @@ func tailContainerToChan(ctx context.Context, containerName, tailLines string, o
 		scanner := bufio.NewScanner(r)
 		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
+			rawText := scanner.Text()
+			cleanText, ok := filterRouteWardenLog(rawText, allLogs)
+			if !ok {
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case out <- scanner.Text():
+			case out <- cleanText:
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -707,7 +807,7 @@ func tailContainerToChan(ctx context.Context, containerName, tailLines string, o
 	_ = cmd.Wait()
 }
 
-func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines string, out chan<- string) {
+func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines string, allLogs bool, out chan<- string) {
 	var mu sync.Mutex
 	active := make(map[string]context.CancelFunc)
 
@@ -733,7 +833,7 @@ func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 				}
 			}()
 
-			tailContainerToChan(cCtx, id, tailLines, out)
+			tailContainerToChan(cCtx, id, tailLines, allLogs, out)
 		}()
 	}
 
