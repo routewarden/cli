@@ -337,4 +337,3 @@ func TestShipper_ParseFlagsLenient_Verbose(t *testing.T) {
 		t.Error("expected verbose2 to be true with --verbose")
 	}
 }
-

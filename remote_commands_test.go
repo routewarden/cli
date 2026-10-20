@@ -468,4 +468,3 @@ func TestCLI_Push_Logging_FailureLoggedToStderr(t *testing.T) {
 		t.Errorf("expected descriptive failure log on stderr, got:\n%s", stderr)
 	}
 }
-

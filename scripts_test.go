@@ -353,4 +353,3 @@ func TestUniversalUninstallScript(t *testing.T) {
 		}
 	})
 }
-

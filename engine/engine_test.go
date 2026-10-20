@@ -1537,4 +1537,3 @@ func TestGzipBombMB_FloatingValues(t *testing.T) {
 		t.Errorf("expected 'gzip_bomb_mb = 0.5,' in Nginx Lua, got:\n%s", nginxLua)
 	}
 }
-

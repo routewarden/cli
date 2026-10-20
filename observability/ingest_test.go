@@ -504,4 +504,3 @@ func TestIngest_Logging_VerbosePreviews(t *testing.T) {
 		t.Errorf("expected verbose event preview in stdout, got:\n%s", stdout)
 	}
 }
-

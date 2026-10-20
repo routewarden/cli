@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -341,6 +342,50 @@ func handlePush(args []string) {
 		fmt.Printf("  Auto-Discovery:  Watching Docker containers with label %s\n", labelDesc)
 		go watchDockerContainersToChan(ctx, *customLabel, *tailLines, eventChan)
 	}
+
+	// Dynamic observer: continuously watch for new log files matching glob patterns or directories
+	var hasGlobOrDir bool
+	for _, flagVal := range append(append([]string{}, fileFlags...), fs.Args()...) {
+		for part := range strings.SplitSeq(flagVal, ",") {
+			part = strings.TrimSpace(part)
+			if strings.ContainsAny(part, "*?[]") {
+				hasGlobOrDir = true
+				break
+			}
+			if fi, err := os.Stat(part); err == nil && fi.IsDir() {
+				hasGlobOrDir = true
+				break
+			}
+		}
+	}
+	if hasGlobOrDir {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			monitored := make(map[string]bool)
+			for _, f := range filesToMonitor {
+				monitored[f] = true
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					current := resolveFileList(fileFlags, fs.Args())
+					for _, f := range current {
+						if f == "-" {
+							continue
+						}
+						if !monitored[f] {
+							monitored[f] = true
+							fmt.Printf("📄 [File] Attached to new log file: %s\n", f)
+							go tailFileToChan(ctx, f, *tailLines, eventChan)
+						}
+					}
+				}
+			}
+		}()
+	}
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
 
@@ -425,11 +470,13 @@ func tailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	cmd := exec.CommandContext(ctx, "tail", "-F", "-n", tailLines, path)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to open pipe: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to open pipe: %v; falling back to native file watcher\n", path, err)
+		streamFileToChan(ctx, path, tailLines, out)
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to start tail command: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to start tail command: %v; falling back to native file watcher\n", path, err)
+		streamFileToChan(ctx, path, tailLines, out)
 		return
 	}
 	defer func() {
@@ -446,7 +493,168 @@ func tailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	}
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v; switching to native file watcher\n", path, err)
+			streamFileToChan(ctx, path, "0", out)
+		}
+	}
+}
+
+func streamFileToChan(ctx context.Context, path, tailLines string, out chan<- string) {
+	var f *os.File
+	for {
+		var err error
+		f, err = os.Open(path)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
+
+	nTail := 50
+	if tailLines != "" {
+		if n, err := strconv.Atoi(tailLines); err == nil && n >= 0 {
+			nTail = n
+		}
+	}
+
+	if nTail > 0 {
+		fi, err := f.Stat()
+		if err == nil {
+			var seekPos int64
+			if fi.Size() > 256*1024 {
+				seekPos = fi.Size() - 256*1024
+			}
+			_, _ = f.Seek(seekPos, io.SeekStart)
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+			var initialLines []string
+			for scanner.Scan() {
+				initialLines = append(initialLines, scanner.Text())
+			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error during initial tail: %v\n", path, scanErr)
+			}
+			if len(initialLines) > nTail {
+				initialLines = initialLines[len(initialLines)-nTail:]
+			}
+			for _, l := range initialLines {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- l:
+				}
+			}
+		}
+	}
+
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		offset = 0
+	}
+
+	reader := bufio.NewReaderSize(f, 64*1024)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	var pendingLine string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			offset += int64(len(line))
+			if pendingLine != "" {
+				line = pendingLine + line
+				pendingLine = ""
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line != "" {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- line:
+				}
+			}
+			continue
+		}
+
+		if err == io.EOF {
+			if len(line) > 0 {
+				offset += int64(len(line))
+				pendingLine += line
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			fi, statErr := os.Stat(path)
+			if statErr != nil {
+				continue
+			}
+
+			// Handle in-place truncation
+			if fi.Size() < offset {
+				_, _ = f.Seek(0, io.SeekStart)
+				offset = 0
+				pendingLine = ""
+				reader.Reset(f)
+				continue
+			}
+
+			// Handle rotation
+			curFi, _ := f.Stat()
+			if curFi != nil && !os.SameFile(fi, curFi) {
+				for {
+					extraLine, rErr := reader.ReadString('\n')
+					if extraLine != "" {
+						combinedStr := pendingLine + extraLine
+						pendingLine = ""
+						trimmed := strings.TrimRight(combinedStr, "\r\n")
+						if trimmed != "" {
+							select {
+							case <-ctx.Done():
+								return
+							case out <- trimmed:
+							}
+						}
+					}
+					if rErr != nil {
+						break
+					}
+				}
+
+				newFile, openErr := os.Open(path)
+				if openErr == nil {
+					_ = f.Close()
+					f = newFile
+					offset = 0
+					pendingLine = ""
+					reader.Reset(f)
+				}
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 		}
 	}
 }
@@ -534,6 +742,59 @@ func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 		labels = []string{customLabel}
 	}
 
+	if sockPath := os.Getenv("DOCKER_HOST"); sockPath == "" {
+		if fi, err := os.Stat("/var/run/docker.sock"); err == nil && fi.IsDir() {
+			fmt.Fprintln(os.Stderr, "⚠️  [Docker] /var/run/docker.sock is a directory, not a Unix domain socket.")
+			fmt.Fprintln(os.Stderr, "   On macOS (Docker Desktop), the host socket is located at ~/.docker/run/docker.sock.")
+			fmt.Fprintln(os.Stderr, "   Fix: mount -v ~/.docker/run/docker.sock:/var/run/docker.sock")
+			fmt.Fprintln(os.Stderr, "   Or enable 'Allow default Docker socket to be used' in Docker Desktop > Settings > Advanced.")
+		}
+	}
+
+	var lastErrStr string
+	scan := func() {
+		for _, l := range labels {
+			cmd := exec.CommandContext(ctx, "docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
+			outBytes, err := cmd.CombinedOutput()
+			if err != nil {
+				if ctx.Err() == nil {
+					errStr := strings.TrimSpace(string(outBytes))
+					if errStr == "" {
+						errStr = err.Error()
+					}
+					if errStr != lastErrStr {
+						lastErrStr = errStr
+						fmt.Fprintf(os.Stderr, "⚠️  [Docker] Discovery error with label %q: %s\n", l, errStr)
+					}
+				}
+				continue
+			}
+			lastErrStr = ""
+			for _, line := range strings.Split(strings.TrimSpace(string(outBytes)), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				parts := strings.Split(line, "\t")
+				if len(parts) >= 1 && parts[0] != "" {
+					name := parts[0]
+					if len(parts) >= 2 {
+						name = parts[1]
+					}
+					mu.Lock()
+					_, isStreaming := active[parts[0]]
+					mu.Unlock()
+					if !isStreaming {
+						startStream(parts[0], name)
+					}
+				}
+			}
+		}
+	}
+
+	// Scan immediately on startup
+	scan()
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -547,28 +808,7 @@ func watchDockerContainersToChan(ctx context.Context, customLabel, tailLines str
 			mu.Unlock()
 			return
 		case <-ticker.C:
-			for _, l := range labels {
-				cmd := exec.Command("docker", "ps", "--filter", "status=running", "--filter", "label="+l, "--format", "{{.ID}}\t{{.Names}}")
-				outBytes, err := cmd.Output()
-				if err != nil {
-					continue
-				}
-				for _, line := range strings.Split(strings.TrimSpace(string(outBytes)), "\n") {
-					parts := strings.Split(strings.TrimSpace(line), "\t")
-					if len(parts) >= 1 && parts[0] != "" {
-						name := parts[0]
-						if len(parts) >= 2 {
-							name = parts[1]
-						}
-						mu.Lock()
-						_, isStreaming := active[parts[0]]
-						mu.Unlock()
-						if !isStreaming {
-							startStream(parts[0], name)
-						}
-					}
-				}
-			}
+			scan()
 		}
 	}
 }
@@ -649,6 +889,22 @@ func resolveFileList(flags []string, positionalArgs []string) []string {
 			}
 			return
 		}
+		// Check if it's a directory
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			entries, readErr := os.ReadDir(p)
+			if readErr == nil {
+				for _, entry := range entries {
+					if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".log") || strings.HasSuffix(entry.Name(), ".json") || strings.HasSuffix(entry.Name(), ".txt")) {
+						full := filepath.Join(p, entry.Name())
+						if !seen[full] {
+							seen[full] = true
+							results = append(results, full)
+						}
+					}
+				}
+			}
+			return
+		}
 		// Check if it's a glob pattern
 		if strings.ContainsAny(p, "*?[]") {
 			matches, err := filepath.Glob(p)
@@ -704,13 +960,13 @@ func resolveContainerList(flags []string) []string {
 func fetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(strings.TrimRight(dashboardURL, "/") + "/api/v1/pubkey")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+	if err != nil {
 		return nil
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
 	var body struct {
 		PublicKey string `json:"public_key"`
 	}
