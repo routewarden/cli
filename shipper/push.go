@@ -339,7 +339,18 @@ func HandlePush(args []string, version string) {
 	if len(containersToTail) > 0 {
 		for _, c := range containersToTail {
 			fmt.Printf("  Container:       %s\n", c)
-			go TailContainerFilteredToChan(ctx, c, *tailLines, *allLogs, eventChan)
+			go func(containerName string) {
+				currentTail := *tailLines
+				for {
+					TailContainerFilteredToChan(ctx, containerName, currentTail, *allLogs, eventChan)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(2 * time.Second):
+						currentTail = "0"
+					}
+				}
+			}(c)
 		}
 	}
 	if runDockerDiscovery {
@@ -428,6 +439,7 @@ func HandlePush(args []string, version string) {
 	eventsURL := dashboardURL + "/api/v1/events"
 
 	var buffer []string
+	var lastFlushErrTime time.Time
 	totalShipped := 0
 	ticker := time.NewTicker(*flushInterval)
 	defer ticker.Stop()
@@ -440,7 +452,21 @@ func HandlePush(args []string, version string) {
 		buffer = nil
 		ts := time.Now().Format("15:04:05")
 		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
+			lastFlushErrTime = time.Now()
 			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push batch of %d event(s): %v\n", ts, len(batch), err)
+			errStr := err.Error()
+			isAuthErr := strings.Contains(errStr, "401") || strings.Contains(errStr, "403") || strings.Contains(errStr, "400")
+			if !isAuthErr {
+				if len(buffer)+len(batch) > 5000 {
+					keep := 5000 - len(batch)
+					if keep > 0 {
+						buffer = buffer[len(buffer)-keep:]
+					} else {
+						buffer = nil
+					}
+				}
+				buffer = append(batch, buffer...)
+			}
 			return
 		}
 		totalShipped += len(batch)
@@ -462,7 +488,11 @@ func HandlePush(args []string, version string) {
 		case line := <-eventChan:
 			buffer = append(buffer, line)
 			if len(buffer) >= *batchSize {
-				flush()
+				if time.Since(lastFlushErrTime) >= 1*time.Second {
+					flush()
+				} else if len(buffer) > 5000 {
+					buffer = buffer[len(buffer)-5000:]
+				}
 			}
 
 		case <-ticker.C:
@@ -487,23 +517,24 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 		StreamFileToChan(ctx, path, tailLines, out)
 		return
 	}
-	defer func() {
-		_ = cmd.Wait()
-	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
+			_ = cmd.Wait()
 			return
 		case out <- scanner.Text():
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v; switching to native file watcher\n", path, err)
-			StreamFileToChan(ctx, path, "0", out)
+	waitErr := cmd.Wait()
+	if ctx.Err() == nil {
+		if scanErr := scanner.Err(); scanErr != nil {
+			fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error: %v; switching to native file watcher\n", path, scanErr)
+		} else if waitErr != nil {
+			fmt.Fprintf(os.Stderr, "⚠️ [File %s] tail command stopped (%v); switching to native file watcher\n", path, waitErr)
 		}
+		StreamFileToChan(ctx, path, "0", out)
 	}
 }
 
@@ -671,14 +702,16 @@ func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 // e.g. 198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /api HTTP/1.1" 200 123 "-" "..."
 var CombinedLogRegex = regexp.MustCompile(`^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s+[^"]+"\s+(\d{3})\s+\S+`)
 
-// DockerTimestampPrefixRegex matches Docker's optional leading RFC3339 timestamp:
-// e.g. "2026-10-20T14:00:01.123456789Z "
-var DockerTimestampPrefixRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z\s+`)
+// DockerTimestampPrefixRegex matches Docker's optional leading timestamp (UTC or timezone offset):
+// e.g. "2026-10-20T14:00:01.123456789Z " or "2026-10-20T14:00:01.123456789+00:00 "
+var DockerTimestampPrefixRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+`)
 
 type RouteWardenCheck struct {
 	ClientIP       string `json:"client_ip"`
 	ClientIPAlt    string `json:"ip"`
 	ClientHost     string `json:"ClientHost"`
+	RemoteAddr     string `json:"remote_addr"`
+	RemoteIP       string `json:"remote_ip"`
 	Verdict        string `json:"verdict"`
 	Action         string `json:"action"`
 	Method         string `json:"method"`
@@ -686,6 +719,7 @@ type RouteWardenCheck struct {
 	Path           string `json:"path"`
 	PathAlt        string `json:"request_uri"`
 	RequestPath    string `json:"RequestPath"`
+	URI            string `json:"uri"`
 	MatchedPattern string `json:"matched_pattern"`
 	Rule           string `json:"rule"`
 	StatusCode     int    `json:"status"`
@@ -693,6 +727,15 @@ type RouteWardenCheck struct {
 	DownstreamStat int    `json:"DownstreamStatus"`
 	Plugin         string `json:"plugin"`
 	Gateway        string `json:"gateway"`
+	Logger         string `json:"logger"`
+	Request        *struct {
+		ClientIP   string `json:"client_ip"`
+		RemoteIP   string `json:"remote_ip"`
+		RemoteAddr string `json:"remote_addr"`
+		URI        string `json:"uri"`
+		Method     string `json:"method"`
+		Host       string `json:"host"`
+	} `json:"request"`
 }
 
 // IsRouteWardenLog returns true if line is a valid RouteWarden security event or proxy access log.
@@ -723,6 +766,39 @@ func IsRouteWardenLog(line string) bool {
 			if ev.Plugin != "" || ev.Gateway != "" {
 				return true
 			}
+			// Standard Caddy access logger tag
+			if ev.Logger == "http.log.access" {
+				return true
+			}
+
+			// Unpack nested request if present (e.g. Caddy JSON access log)
+			if ev.Request != nil {
+				if ev.ClientIP == "" {
+					ev.ClientIP = ev.Request.ClientIP
+				}
+				if ev.ClientIP == "" {
+					ev.ClientIP = ev.Request.RemoteIP
+				}
+				if ev.ClientIP == "" {
+					ev.ClientIP = ev.Request.RemoteAddr
+				}
+				if ev.Path == "" {
+					ev.Path = ev.Request.URI
+				}
+				if ev.Method == "" {
+					ev.Method = ev.Request.Method
+				}
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.RemoteAddr
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.RemoteIP
+			}
+			if ev.Path == "" {
+				ev.Path = ev.URI
+			}
+
 			// Access events: must have client IP and (request path or HTTP method or status code)
 			hasIP := ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != ""
 			hasPath := ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != ""

@@ -38,6 +38,11 @@ func handleDiff(args []string) {
 	baseFile := files[0]
 	candidateFile := files[1]
 
+	if baseFile == "-" && candidateFile == "-" {
+		fmt.Fprintln(os.Stderr, "Error: only one file can be read from stdin (-)")
+		os.Exit(1)
+	}
+
 	readFile := func(path string) ([]byte, error) {
 		if path == "-" {
 			return io.ReadAll(os.Stdin)

@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -155,10 +157,29 @@ func (s *EventStore) AttachSQLite(sq *SQLiteStore) {
 	s.mu.Unlock()
 
 	if sq != nil {
+		statsLoaded := false
+		if total, blocked, tarpit, err := sq.StatsSummary(); err == nil {
+			statsLoaded = true
+			atomic.StoreInt64(&s.totalEvents, total)
+			atomic.StoreInt64(&s.blockedCount, blocked)
+			atomic.StoreInt64(&s.tarpitCount, tarpit)
+			if s == globalStore {
+				atomic.StoreInt64(&totalEvents, total)
+				atomic.StoreInt64(&blockedCount, blocked)
+				atomic.StoreInt64(&tarpitCount, tarpit)
+			}
+		}
+
 		if recent, err := sq.GetRecent(500); err == nil && len(recent) > 0 {
 			// Populate from oldest to newest so s.events ends up in chronological order
-			for i := len(recent) - 1; i >= 0; i-- {
-				s.ingestInternal(recent[i], false)
+			for _, r := range slices.Backward(recent) {
+				s.ingestInternal(r, false)
+			}
+			if !statsLoaded {
+				atomic.StoreInt64(&s.totalEvents, int64(len(recent)))
+				if s == globalStore {
+					atomic.StoreInt64(&totalEvents, int64(len(recent)))
+				}
 			}
 		}
 	}
@@ -202,7 +223,62 @@ func parseFlexibleTimestamp(ts string) (time.Time, bool) {
 	if t, err := time.Parse("02/Jan/2006:15:04:05", ts); err == nil {
 		return t, true
 	}
+	if sec, err := strconv.ParseFloat(ts, 64); err == nil && sec > 0 {
+		if sec > 1e12 {
+			return time.UnixMilli(int64(sec)), true
+		}
+		secInt := int64(sec)
+		nsec := int64((sec - float64(secInt)) * 1e9)
+		return time.Unix(secInt, nsec), true
+	}
 	return time.Time{}, false
+}
+
+// cleanIPAddress normalizes an IP string by trimming whitespace and stripping port numbers if present.
+func cleanIPAddress(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		return host
+	}
+	if idx := strings.LastIndex(ip, ":"); idx != -1 && strings.Count(ip, ":") == 1 {
+		candidate := ip[:idx]
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	return ip
+}
+
+func resolveEventTimestamp(timeStr, timeAltStr string, tsRaw json.RawMessage) (time.Time, string) {
+	ts := strings.TrimSpace(timeStr)
+	if ts == "" {
+		ts = strings.TrimSpace(timeAltStr)
+	}
+	if ts == "" && len(tsRaw) > 0 {
+		raw := strings.TrimSpace(string(tsRaw))
+		if strings.HasPrefix(raw, `"`) && strings.HasSuffix(raw, `"`) {
+			ts = strings.Trim(raw, `"`)
+		} else if sec, err := strconv.ParseFloat(raw, 64); err == nil && sec > 0 {
+			if sec > 1e12 {
+				t := time.UnixMilli(int64(sec)).UTC()
+				return t, t.Format(time.RFC3339Nano)
+			}
+			secInt := int64(sec)
+			nsec := int64((sec - float64(secInt)) * 1e9)
+			t := time.Unix(secInt, nsec).UTC()
+			return t, t.Format(time.RFC3339Nano)
+		}
+	}
+	if ts != "" {
+		if t, ok := parseFlexibleTimestamp(ts); ok {
+			return t, ts
+		}
+	}
+	now := time.Now().UTC()
+	return now, now.Format(time.RFC3339Nano)
 }
 
 // Add adds a structured security event to the store and broadcasts it.
@@ -257,22 +333,25 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 		s.events = s.events[len(s.events)-s.maxEvents:]
 	}
 
-	// Update atomic counters
-	atomic.AddInt64(&s.totalEvents, 1)
 	isBlocked := ev.Verdict == "BLOCK" || ev.Status == 403
 	isTarpit := ev.Verdict == "TARPIT" || ev.Status == 429
-	if isBlocked {
-		atomic.AddInt64(&s.blockedCount, 1)
-	} else if isTarpit {
-		atomic.AddInt64(&s.tarpitCount, 1)
-	}
 
-	if s == globalStore {
-		atomic.AddInt64(&totalEvents, 1)
+	// Update atomic counters only for newly ingested events (not during historical DB preloading)
+	if persist {
+		atomic.AddInt64(&s.totalEvents, 1)
 		if isBlocked {
-			atomic.AddInt64(&blockedCount, 1)
+			atomic.AddInt64(&s.blockedCount, 1)
 		} else if isTarpit {
-			atomic.AddInt64(&tarpitCount, 1)
+			atomic.AddInt64(&s.tarpitCount, 1)
+		}
+
+		if s == globalStore {
+			atomic.AddInt64(&totalEvents, 1)
+			if isBlocked {
+				atomic.AddInt64(&blockedCount, 1)
+			} else if isTarpit {
+				atomic.AddInt64(&tarpitCount, 1)
+			}
 		}
 	}
 
@@ -455,109 +534,138 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 	}
 
 	ev := &SecurityEvent{
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		TimeStr:   time.Now().Format("15:04:05"),
 		Source:    source,
 	}
 
 	// Try JSON format
 	var le logEvent
-	if err := json.Unmarshal([]byte(line), &le); err == nil && (le.Path != "" || le.PathAlt != "" || le.RequestPath != "" || le.ClientIP != "" || le.ClientIPAlt != "" || le.ClientHost != "" || le.Verdict != "") {
-		ev.ClientIP = le.ClientIP
-		if ev.ClientIP == "" {
-			ev.ClientIP = le.ClientIPAlt
-		}
-		if ev.ClientIP == "" {
-			ev.ClientIP = le.ClientHost
-		}
-		if ev.ClientIP == "" {
-			ev.ClientIP = "127.0.0.1"
-		}
-
-		ev.Path = le.Path
-		if ev.Path == "" {
-			ev.Path = le.PathAlt
-		}
-		if ev.Path == "" {
-			ev.Path = le.RequestPath
-		}
-		if ev.Path == "" {
-			ev.Path = "/"
-		}
-
-		ev.Method = le.Method
-		if ev.Method == "" {
-			ev.Method = le.RequestMethod
-		}
-		if ev.Method == "" {
-			ev.Method = "GET"
-		}
-
-		ev.Status = le.StatusCode
-		if ev.Status == 0 {
-			ev.Status = le.StatusCodeAlt
-		}
-		if ev.Status == 0 {
-			ev.Status = le.DownstreamStat
-		}
-
-		ev.Verdict = strings.ToUpper(le.Verdict)
-		if ev.Verdict == "" {
-			switch ev.Status {
-			case 403:
-				ev.Verdict = "BLOCK"
-			case 429:
-				ev.Verdict = "TARPIT"
-			default:
-				ev.Verdict = "ALLOW"
+	if err := json.Unmarshal([]byte(line), &le); err == nil {
+		if le.Request != nil {
+			if le.ClientIP == "" {
+				le.ClientIP = le.Request.ClientIP
+			}
+			if le.ClientIP == "" {
+				le.ClientIP = le.Request.RemoteIP
+			}
+			if le.ClientIP == "" {
+				le.ClientIP = le.Request.RemoteAddr
+			}
+			if le.Path == "" {
+				le.Path = le.Request.URI
+			}
+			if le.Method == "" {
+				le.Method = le.Request.Method
 			}
 		}
-		if ev.Status == 0 {
-			switch ev.Verdict {
-			case "BLOCK":
-				ev.Status = 403
-			case "TARPIT":
-				ev.Status = 429
-			default:
-				ev.Status = 200
+		if le.ClientIP == "" {
+			le.ClientIP = le.RemoteAddr
+		}
+		if le.ClientIP == "" {
+			le.ClientIP = le.RemoteIP
+		}
+		if le.Path == "" {
+			le.Path = le.URI
+		}
+		if le.Verdict == "" && le.Action != "" {
+			le.Verdict = le.Action
+		}
+
+		if le.Path != "" || le.PathAlt != "" || le.RequestPath != "" || le.ClientIP != "" || le.ClientIPAlt != "" || le.ClientHost != "" || le.Verdict != "" {
+			ev.ClientIP = le.ClientIP
+			if ev.ClientIP == "" {
+				ev.ClientIP = le.ClientIPAlt
 			}
-		}
-
-		ev.Rule = le.MatchedPattern
-		if ev.Rule == "" {
-			ev.Rule = le.MatchedRuleAlt
-		}
-
-		ev.LatencyMs = le.LatencyMs
-		if ev.LatencyMs == 0 {
-			ev.LatencyMs = le.DurationMsAlt
-		}
-		if ev.LatencyMs == 0 {
-			if ev.Verdict == "TARPIT" {
-				ev.LatencyMs = 5000.0
-			} else {
-				ev.LatencyMs = 1.4
+			if ev.ClientIP == "" {
+				ev.ClientIP = le.ClientHost
 			}
-		}
+			ev.ClientIP = cleanIPAddress(ev.ClientIP)
+			if ev.ClientIP == "" {
+				ev.ClientIP = "127.0.0.1"
+			}
 
-		if le.Timestamp != "" {
-			ev.Timestamp = le.Timestamp
-		} else if le.TimestampAlt != "" {
-			ev.Timestamp = le.TimestampAlt
-		}
-		if t, err := time.Parse(time.RFC3339Nano, ev.Timestamp); err == nil {
+			ev.Path = le.Path
+			if ev.Path == "" {
+				ev.Path = le.PathAlt
+			}
+			if ev.Path == "" {
+				ev.Path = le.RequestPath
+			}
+			if ev.Path == "" {
+				ev.Path = "/"
+			}
+
+			ev.Method = le.Method
+			if ev.Method == "" {
+				ev.Method = le.RequestMethod
+			}
+			if ev.Method == "" {
+				ev.Method = "GET"
+			}
+
+			ev.Status = le.StatusCode
+			if ev.Status == 0 {
+				ev.Status = le.StatusCodeAlt
+			}
+			if ev.Status == 0 {
+				ev.Status = le.DownstreamStat
+			}
+
+			ev.Verdict = strings.ToUpper(le.Verdict)
+			if ev.Verdict == "" {
+				switch ev.Status {
+				case 403:
+					ev.Verdict = "BLOCK"
+				case 429:
+					ev.Verdict = "TARPIT"
+				default:
+					ev.Verdict = "ALLOW"
+				}
+			}
+			if ev.Status == 0 {
+				switch ev.Verdict {
+				case "BLOCK":
+					ev.Status = 403
+				case "TARPIT":
+					ev.Status = 429
+				default:
+					ev.Status = 200
+				}
+			}
+
+			ev.Rule = le.MatchedPattern
+			if ev.Rule == "" {
+				ev.Rule = le.MatchedRuleAlt
+			}
+
+			ev.LatencyMs = le.LatencyMs
+			if ev.LatencyMs == 0 {
+				ev.LatencyMs = le.DurationMsAlt
+			}
+			if ev.LatencyMs == 0 && le.DurationSec > 0 {
+				ev.LatencyMs = le.DurationSec * 1000.0
+			}
+			if ev.LatencyMs == 0 {
+				if ev.Verdict == "TARPIT" {
+					ev.LatencyMs = 5000.0
+				} else {
+					ev.LatencyMs = 1.4
+				}
+			}
+
+			t, tsFormatted := resolveEventTimestamp(le.Timestamp, le.TimestampAlt, le.TSRaw)
+			ev.Timestamp = tsFormatted
 			ev.TimeStr = t.Local().Format("15:04:05")
-		} else if t, err := time.Parse("2006-01-02 15:04:05", ev.Timestamp); err == nil {
-			ev.TimeStr = t.Local().Format("15:04:05")
-		}
 
-		s.Add(ev)
-		return ev
+			s.Add(ev)
+			return ev
+		}
 	}
 
 	// Try Combined Apache/Nginx format
 	if match := combinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
-		ev.ClientIP = match[1]
+		ev.ClientIP = cleanIPAddress(match[1])
 		if len(match) > 2 && match[2] != "" {
 			if t, err := time.Parse("02/Jan/2006:15:04:05 -0700", match[2]); err == nil {
 				ev.Timestamp = t.Format(time.RFC3339)
@@ -644,6 +752,31 @@ func (s *EventStore) GetStats() DashboardStats {
 			total = gTotal
 			blocked = atomic.LoadInt64(&blockedCount)
 			tarpit = atomic.LoadInt64(&tarpitCount)
+		}
+	}
+
+	// Reconcile with SQLite persistent store if in-memory total is behind SQLite
+	if s.sqlite != nil {
+		if dbTotal := s.sqlite.Count(); dbTotal > total {
+			if tot, blk, trp, err := s.sqlite.StatsSummary(); err == nil {
+				total = tot
+				blocked = blk
+				tarpit = trp
+				atomic.StoreInt64(&s.totalEvents, tot)
+				atomic.StoreInt64(&s.blockedCount, blk)
+				atomic.StoreInt64(&s.tarpitCount, trp)
+				if s == globalStore {
+					atomic.StoreInt64(&totalEvents, tot)
+					atomic.StoreInt64(&blockedCount, blk)
+					atomic.StoreInt64(&tarpitCount, trp)
+				}
+			} else {
+				total = dbTotal
+				atomic.StoreInt64(&s.totalEvents, dbTotal)
+				if s == globalStore {
+					atomic.StoreInt64(&totalEvents, dbTotal)
+				}
+			}
 		}
 	}
 	clean := total - blocked - tarpit
@@ -1187,7 +1320,7 @@ func lookupBuiltinIPDB(ip net.IP) (string, string) {
 // It checks in-memory cache first, then the MaxMind database if loaded, followed by the
 // built-in zero-dependency IP database, and triggers asynchronous background enrichment via ip-api.com.
 func AutoDetectCountry(ipStr string) (string, string) {
-	ipStr = strings.TrimSpace(ipStr)
+	ipStr = cleanIPAddress(ipStr)
 	if ipStr == "" {
 		return "Unknown", ""
 	}
@@ -1239,7 +1372,7 @@ func AutoDetectCountry(ipStr string) (string, string) {
 
 // LookupIP queries IP intelligence using ip-api.com with local caching, MaxMind GeoIP, and private IP handling.
 func LookupIP(ipStr string) *IPDetails {
-	ipStr = strings.TrimSpace(ipStr)
+	ipStr = cleanIPAddress(ipStr)
 	if ipStr == "" {
 		return &IPDetails{IP: ipStr, Status: "fail", Message: "empty IP address"}
 	}
@@ -3650,7 +3783,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div style="display:flex; align-items:center; gap:8px;">
       <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
       <span>ROUTEWARDEN</span>
-      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.2.1</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.2.2</span>
     </div>
     <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
     <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
@@ -3710,8 +3843,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.2.1 // Traffic & Security Engine</span>
-            <span class="spec-pill spec-pill-green">CORE v5.2.1</span>
+            <span class="spec-val">RouteWarden Core v5.2.2 // Traffic & Security Engine</span>
+            <span class="spec-pill spec-pill-green">CORE v5.2.2</span>
           </div>
         </div>
         <div class="spec-row">

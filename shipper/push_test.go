@@ -400,6 +400,31 @@ func TestShipper_IsRouteWardenLog_FilterValidation(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "Caddy structured JSON access log with nested request object",
+			line:     `{"level":"info","ts":1710000000.123,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/admin","method":"GET"},"status":403}`,
+			expected: true,
+		},
+		{
+			name:     "NGINX JSON access log with remote_addr and request_uri",
+			line:     `{"remote_addr":"198.51.100.44","status":403,"request_uri":"/.env","method":"GET"}`,
+			expected: true,
+		},
+		{
+			name:     "Docker log with UTC+05:30 timezone offset prefix",
+			line:     `2026-10-21T13:18:12.123456789+05:30 198.51.100.1 - - [21/Oct/2026:07:48:12 +0000] "GET / HTTP/1.1" 200 123`,
+			expected: true,
+		},
+		{
+			name:     "Caddy startup non-access info message (should be filtered out)",
+			line:     `{"level":"info","ts":1792517942.4564745,"msg":"maxprocs: Leaving GOMAXPROCS=2: CPU quota undefined"}`,
+			expected: false,
+		},
+		{
+			name:     "Caddy config load non-access info message (should be filtered out)",
+			line:     `{"level":"info","ts":1792517942.456751,"msg":"using config from file","file":"/etc/caddy/Caddyfile"}`,
+			expected: false,
+		},
+		{
 			name:     "Application error trace (should be filtered out)",
 			line:     `panic: runtime error: invalid memory address or nil pointer dereference`,
 			expected: false,
