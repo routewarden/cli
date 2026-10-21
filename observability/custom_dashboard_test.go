@@ -110,11 +110,9 @@ func TestEventStore_Subscription(t *testing.T) {
 
 	go store.Add(testEv)
 
-	select {
-	case received := <-ch:
-		if received.ClientIP != "1.2.3.4" || received.Path != "/test" {
-			t.Errorf("unexpected received event: %+v", received)
-		}
+	received := <-ch
+	if received.ClientIP != "1.2.3.4" || received.Path != "/test" {
+		t.Errorf("unexpected received event: %+v", received)
 	}
 }
 

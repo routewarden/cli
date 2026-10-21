@@ -221,17 +221,19 @@ func (s *SQLiteStore) Insert(ev *SecurityEvent) {
 	if h != "" && s.HasHash(h) {
 		return // Duplicate event hash detected; skip adding to DB
 	}
-	if h != "" {
-		s.MarkHash(h)
-	}
-
 	select {
 	case s.insertChan <- ev:
+		if h != "" {
+			s.MarkHash(h)
+		}
 	case <-s.done:
 		return
 	default:
-		// If queue is completely backed up, perform non-blocking drop or inline insert
-		// to prevent memory growth under extreme load
+		// Queue full: flush directly so events are never dropped under high load
+		if h != "" {
+			s.MarkHash(h)
+		}
+		s.flushBatch([]*SecurityEvent{ev})
 	}
 }
 
@@ -353,6 +355,19 @@ func (s *SQLiteStore) Count() int64 {
 	return count
 }
 
+// StatsSummary returns total event count, blocked count, and tarpit count across all persisted events.
+func (s *SQLiteStore) StatsSummary() (total int64, blocked int64, tarpit int64, err error) {
+	row := s.db.QueryRow(`
+		SELECT 
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN verdict = 'BLOCK' OR status = 403 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN verdict = 'TARPIT' OR status = 429 THEN 1 ELSE 0 END), 0)
+		FROM security_events
+	`)
+	err = row.Scan(&total, &blocked, &tarpit)
+	return
+}
+
 // GetRecent loads the latest N events in descending chronological order.
 func (s *SQLiteStore) GetRecent(limit int) ([]*SecurityEvent, error) {
 	if limit <= 0 {
@@ -363,7 +378,7 @@ func (s *SQLiteStore) GetRecent(limit int) ([]*SecurityEvent, error) {
 
 func buildWhereClause(f LogQueryFilter) ([]string, []interface{}) {
 	var where []string
-	var args []interface{}
+	var args []any
 
 	if f.StartTime != "" {
 		where = append(where, "timestamp >= ?")
@@ -379,7 +394,7 @@ func buildWhereClause(f LogQueryFilter) ([]string, []interface{}) {
 	}
 	if f.ClientIP != "" {
 		where = append(where, "client_ip = ?")
-		args = append(args, f.ClientIP)
+		args = append(args, cleanIPAddress(f.ClientIP))
 	}
 	if f.Country != "" && f.Country != "ALL" {
 		where = append(where, "(country = ? OR country_code = ?)")

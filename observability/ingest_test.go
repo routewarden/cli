@@ -504,3 +504,101 @@ func TestIngest_Logging_VerbosePreviews(t *testing.T) {
 		t.Errorf("expected verbose event preview in stdout, got:\n%s", stdout)
 	}
 }
+
+func TestIngest_CaddyAndNginxJSONAccessLogs(t *testing.T) {
+	_, rawToken, _, logFile, handler, cleanup := setupTestDashboard(t)
+	defer cleanup()
+
+	caddyJSON := `{"level":"info","ts":1710000000.123,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.222","uri":"/caddy-test","method":"GET"},"status":403}`
+	nginxJSON := `{"remote_addr":"198.51.100.111","status":429,"request_uri":"/nginx-test","method":"POST","action":"TARPIT"}`
+
+	payloadObj := map[string]interface{}{
+		"hostname": "gateway-proxy",
+		"events":   []string{caddyJSON, nginxJSON},
+	}
+	payloadBytes, _ := json.Marshal(payloadObj)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/events", bytes.NewReader(payloadBytes))
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Ingested int `json:"ingested"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Ingested != 2 {
+		t.Fatalf("expected 2 ingested events, got %d", resp.Ingested)
+	}
+
+	// Verify logged to access.log in combined format with correct extracted client IPs and paths
+	logBytes, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		t.Fatalf("failed to read access log: %v", err)
+	}
+	logContent := string(logBytes)
+	if !strings.Contains(logContent, "198.51.100.222") || !strings.Contains(logContent, "/caddy-test") {
+		t.Errorf("expected Caddy event in access log, got:\n%s", logContent)
+	}
+	if !strings.Contains(logContent, "198.51.100.111") || !strings.Contains(logContent, "/nginx-test") {
+		t.Errorf("expected Nginx event in access log, got:\n%s", logContent)
+	}
+}
+
+func TestIngest_CaddyFloatTimestampAndDuration(t *testing.T) {
+	store := NewEventStore()
+	caddyJSON := `{"level":"info","ts":1710000000.5,"logger":"http.log.access","duration":0.0035,"request":{"remote_ip":"198.51.100.22:54321","uri":"/api/checkout","method":"POST"},"status":200}`
+	ev := store.ParseAndIngest(caddyJSON, "caddy-node")
+	if ev == nil {
+		t.Fatal("expected event to parse")
+	}
+
+	// Verify IP had port stripped
+	if ev.ClientIP != "198.51.100.22" {
+		t.Errorf("expected ClientIP '198.51.100.22', got %q", ev.ClientIP)
+	}
+
+	// Verify duration converted from seconds to milliseconds (0.0035s -> 3.5ms)
+	if ev.LatencyMs < 3.4 || ev.LatencyMs > 3.6 {
+		t.Errorf("expected LatencyMs ~3.5ms, got %f", ev.LatencyMs)
+	}
+
+	// Verify timestamp reflects 1710000000 (2024-03-09T16:00:00.5Z)
+	expectedTime := time.Unix(1710000000, 500000000).UTC().Format(time.RFC3339Nano)
+	if ev.Timestamp != expectedTime {
+		t.Errorf("expected Timestamp %q, got %q", expectedTime, ev.Timestamp)
+	}
+}
+
+func TestIngest_IPWithPortNormalization(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected string
+		country  string
+	}{
+		{"198.51.100.55:12345", "198.51.100.55", "TEST-NET-2 (RFC 5737)"},
+		{"9.9.9.9:53", "9.9.9.9", "United States"},
+		{"[::1]:8080", "::1", "Localhost / Loopback"},
+		{"127.0.0.1:9000", "127.0.0.1", "Localhost / Loopback"},
+		{"10.0.1.5:443", "10.0.1.5", "Private Network (RFC 1918)"},
+	}
+
+	for _, tc := range testCases {
+		country, _ := AutoDetectCountry(tc.input)
+		if country != tc.country {
+			t.Errorf("AutoDetectCountry(%q) expected %q, got %q", tc.input, tc.country, country)
+		}
+
+		details := LookupIP(tc.input)
+		if details.Status != "success" && details.Country == "" {
+			t.Errorf("LookupIP(%q) failed: %+v", tc.input, details)
+		}
+	}
+}
+
+

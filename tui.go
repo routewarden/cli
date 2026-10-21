@@ -24,6 +24,8 @@ func handleTUI(args []string) {
 	if data, err := os.ReadFile(configPath); err == nil {
 		if err := json.Unmarshal(data, cfg); err == nil {
 			loadedConfigName = configPath
+		} else {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: failed to parse config %s: %v — using built-in defaults\n", configPath, err)
 		}
 	}
 

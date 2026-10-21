@@ -56,6 +56,10 @@ func (e *logEvent) getPath() string {
 	return "/"
 }
 
+// getVerdict returns the security enforcement action. If Verdict is empty,
+// a status code heuristic is applied (403 -> BLOCK, 429 -> TARPIT).
+// Note: application-level 403s/429s without explicit RouteWarden headers
+// will also be categorized under these verdicts.
 func (e *logEvent) getVerdict() string {
 	if e.Verdict != "" {
 		return strings.ToUpper(e.Verdict)
@@ -835,6 +839,7 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 		outWriter = f
 	}
 
+	var statsMu sync.Mutex
 	totalEvents := 0
 	blockedEvents := 0
 	allowedEvents := 0
@@ -852,6 +857,8 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 		if rawOutput {
 			os.Exit(0)
 		}
+		statsMu.Lock()
+		defer statsMu.Unlock()
 		fmt.Println("\n" + strings.Repeat("─", 80))
 		fmt.Println("📊 Stream Monitoring Summary:")
 		fmt.Printf("   Total Events Processed: %d\n", totalEvents)
@@ -944,6 +951,7 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 		}
 
 		// Update metrics
+		statsMu.Lock()
 		totalEvents++
 		uniqueIPs[ip] = true
 		topPaths[path]++
@@ -965,6 +973,7 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 		default:
 			allowedEvents++
 		}
+		statsMu.Unlock()
 
 		method := ev.Method
 		if method == "" {
@@ -1001,16 +1010,17 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 }
 
 func parseLogLine(line string) *logEvent {
+	trimmed := strings.TrimRight(line, " \r\t")
 	// Try parsing as JSON first
-	if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		var ev logEvent
-		if err := json.Unmarshal([]byte(line), &ev); err == nil {
+		if err := json.Unmarshal([]byte(trimmed), &ev); err == nil {
 			return &ev
 		}
 	}
 
 	// Try parsing as Common / Combined Access Log
-	matches := combinedLogRegex.FindStringSubmatch(line)
+	matches := combinedLogRegex.FindStringSubmatch(trimmed)
 	if len(matches) == 6 {
 		statusCode := 200
 		fmt.Sscanf(matches[5], "%d", &statusCode)
