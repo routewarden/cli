@@ -387,3 +387,251 @@ func TestAPI_LogsEndpoint(t *testing.T) {
 		t.Errorf("expected in-memory filtered_total 3 for node-a, got %d", respMem.FilteredTotal)
 	}
 }
+
+func TestSQLiteStore_StatsSummary(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "stats_summary_test.db")
+
+	store, err := observability.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create SQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Initially empty
+	tot, blk, trp, err := store.StatsSummary()
+	if err != nil {
+		t.Fatalf("StatsSummary failed on empty db: %v", err)
+	}
+	if tot != 0 || blk != 0 || trp != 0 {
+		t.Errorf("expected (0, 0, 0), got (%d, %d, %d)", tot, blk, trp)
+	}
+
+	// 2. Insert mixed events
+	now := time.Now().UTC()
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: now.Format(time.RFC3339),
+		ClientIP:  "198.51.100.1",
+		Status:    200,
+		Verdict:   "ALLOW",
+	})
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: now.Add(time.Second).Format(time.RFC3339),
+		ClientIP:  "198.51.100.2",
+		Status:    403,
+		Verdict:   "BLOCK",
+	})
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: now.Add(2 * time.Second).Format(time.RFC3339),
+		ClientIP:  "198.51.100.3",
+		Status:    429,
+		Verdict:   "TARPIT",
+	})
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: now.Add(3 * time.Second).Format(time.RFC3339),
+		ClientIP:  "198.51.100.4",
+		Status:    403,
+		Verdict:   "", // status 403 should be counted as blocked
+	})
+	store.Flush()
+
+	tot, blk, trp, err = store.StatsSummary()
+	if err != nil {
+		t.Fatalf("StatsSummary failed: %v", err)
+	}
+	if tot != 4 || blk != 2 || trp != 1 {
+		t.Errorf("expected (4, 2, 1), got (%d, %d, %d)", tot, blk, trp)
+	}
+}
+
+func TestStatsAndLogsConsistency_Over500Events(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "consistency_test.db")
+
+	sqStore, err := observability.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create SQLiteStore: %v", err)
+	}
+	defer sqStore.Close()
+
+	// Seed 650 events: 500 ALLOW, 100 BLOCK, 50 TARPIT
+	now := time.Now().UTC()
+	for i := range 500 {
+		sqStore.Insert(&observability.SecurityEvent{
+			Timestamp: now.Add(time.Duration(i) * time.Millisecond).Format(time.RFC3339),
+			ClientIP:  fmt.Sprintf("192.168.1.%d", (i%250)+1),
+			Method:    "GET",
+			Path:      fmt.Sprintf("/page/%d", i),
+			Status:    200,
+			Verdict:   "ALLOW",
+			Source:    "node-primary",
+		})
+	}
+	for i := range 100 {
+		sqStore.Insert(&observability.SecurityEvent{
+			Timestamp: now.Add(time.Duration(500+i) * time.Millisecond).Format(time.RFC3339),
+			ClientIP:  fmt.Sprintf("10.0.0.%d", (i%250)+1),
+			Method:    "POST",
+			Path:      fmt.Sprintf("/admin/%d", i),
+			Status:    403,
+			Verdict:   "BLOCK",
+			Source:    "node-primary",
+		})
+	}
+	for i := range 50 {
+		sqStore.Insert(&observability.SecurityEvent{
+			Timestamp: now.Add(time.Duration(600+i) * time.Millisecond).Format(time.RFC3339),
+			ClientIP:  fmt.Sprintf("172.16.0.%d", (i%250)+1),
+			Method:    "GET",
+			Path:      fmt.Sprintf("/wp-login-%d", i),
+			Status:    429,
+			Verdict:   "TARPIT",
+			Source:    "node-primary",
+		})
+	}
+	sqStore.Flush()
+
+	if totalInDB := sqStore.Count(); totalInDB != 650 {
+		t.Fatalf("expected 650 events in DB, got %d", totalInDB)
+	}
+
+	// 1. Verify isolated EventStore
+	eventStore := observability.NewEventStore()
+	eventStore.AttachSQLite(sqStore)
+
+	// Check in-memory GetStats(): must not be capped at 500 preloaded events!
+	stats := eventStore.GetStats()
+	if stats.TotalEvents != 650 {
+		t.Fatalf("expected TotalEvents 650, got %d", stats.TotalEvents)
+	}
+	if stats.BlockedCount != 100 {
+		t.Fatalf("expected BlockedCount 100, got %d", stats.BlockedCount)
+	}
+	if stats.TarpitCount != 50 {
+		t.Fatalf("expected TarpitCount 50, got %d", stats.TarpitCount)
+	}
+	if stats.CleanCount != 500 {
+		t.Fatalf("expected CleanCount 500, got %d", stats.CleanCount)
+	}
+
+	// 2. Attach to globalStore and verify consistency via HTTP endpoints
+	gStore := observability.GlobalStore()
+	gStore.AttachSQLite(sqStore)
+
+	handler := observability.NewDashboardHandler(tmpDir, nil, "", nil, nil, "")
+
+	// 1. Call /api/stats
+	reqStats := httptest.NewRequest("GET", "/api/stats", nil)
+	rrStats := httptest.NewRecorder()
+	handler.ServeHTTP(rrStats, reqStats)
+
+	var statsResp struct {
+		TotalEvents  int64 `json:"total_events"`
+		BlockedCount int64 `json:"blocked_count"`
+		TarpitCount  int64 `json:"tarpit_count"`
+	}
+	if err := json.Unmarshal(rrStats.Body.Bytes(), &statsResp); err != nil {
+		t.Fatalf("failed to decode /api/stats: %v", err)
+	}
+
+	// 2. Call /api/logs
+	reqLogs := httptest.NewRequest("GET", "/api/logs?limit=10", nil)
+	rrLogs := httptest.NewRecorder()
+	handler.ServeHTTP(rrLogs, reqLogs)
+
+	var logsResp struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.Unmarshal(rrLogs.Body.Bytes(), &logsResp); err != nil {
+		t.Fatalf("failed to decode /api/logs: %v", err)
+	}
+
+	// /api/stats and /api/logs MUST MATCH!
+	if statsResp.TotalEvents != logsResp.Total {
+		t.Fatalf("mismatch: /api/stats total_events (%d) != /api/logs total (%d)", statsResp.TotalEvents, logsResp.Total)
+	}
+	if statsResp.TotalEvents != 650 {
+		t.Fatalf("expected both to report 650, got %d", statsResp.TotalEvents)
+	}
+
+	// 3. Ingest a new live event
+	gStore.Add(&observability.SecurityEvent{
+		Timestamp: now.Add(time.Hour).Format(time.RFC3339),
+		ClientIP:  "198.51.100.200",
+		Method:    "GET",
+		Path:      "/new-event",
+		Status:    200,
+		Verdict:   "ALLOW",
+	})
+	sqStore.Flush()
+
+	// Re-check both endpoints
+	rrStats2 := httptest.NewRecorder()
+	handler.ServeHTTP(rrStats2, reqStats)
+	_ = json.Unmarshal(rrStats2.Body.Bytes(), &statsResp)
+
+	rrLogs2 := httptest.NewRecorder()
+	handler.ServeHTTP(rrLogs2, reqLogs)
+	_ = json.Unmarshal(rrLogs2.Body.Bytes(), &logsResp)
+
+	if statsResp.TotalEvents != 651 || logsResp.Total != 651 {
+		t.Fatalf("expected both to report 651 after live event, got stats=%d logs=%d", statsResp.TotalEvents, logsResp.Total)
+	}
+}
+
+func TestStatsReconciliation_DynamicSync(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "dynamic_sync.db")
+
+	sqStore, err := observability.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create SQLiteStore: %v", err)
+	}
+	defer sqStore.Close()
+
+	eventStore := observability.NewEventStore()
+	eventStore.AttachSQLite(sqStore)
+
+	// Initially 0
+	stats := eventStore.GetStats()
+	if stats.TotalEvents != 0 {
+		t.Fatalf("expected initial TotalEvents 0, got %d", stats.TotalEvents)
+	}
+
+	// Insert events directly to SQLite out-of-band
+	now := time.Now().UTC()
+	for i := 0; i < 20; i++ {
+		status := 200
+		verdict := "ALLOW"
+		if i < 5 {
+			status = 403
+			verdict = "BLOCK"
+		} else if i < 8 {
+			status = 429
+			verdict = "TARPIT"
+		}
+		sqStore.Insert(&observability.SecurityEvent{
+			Timestamp: now.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+			ClientIP:  fmt.Sprintf("10.10.10.%d", i),
+			Status:    status,
+			Verdict:   verdict,
+		})
+	}
+	sqStore.Flush()
+
+	// Calling GetStats() should detect that SQLite has 20 events while memory has 0,
+	// and automatically reconcile total, blocked, and tarpit counts!
+	reconciled := eventStore.GetStats()
+	if reconciled.TotalEvents != 20 {
+		t.Fatalf("expected reconciled TotalEvents 20, got %d", reconciled.TotalEvents)
+	}
+	if reconciled.BlockedCount != 5 {
+		t.Fatalf("expected reconciled BlockedCount 5, got %d", reconciled.BlockedCount)
+	}
+	if reconciled.TarpitCount != 3 {
+		t.Fatalf("expected reconciled TarpitCount 3, got %d", reconciled.TarpitCount)
+	}
+	if reconciled.CleanCount != 12 {
+		t.Fatalf("expected reconciled CleanCount 12, got %d", reconciled.CleanCount)
+	}
+}

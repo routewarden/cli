@@ -54,10 +54,14 @@ func removePID(name string) {
 
 func spawnDetached(name, displayName string, rawArgs []string, port int, url string) error {
 	// 1. Check if already running
-	if pid, err := readPID(name); err == nil && checkProcessAlive(pid) {
-		fmt.Fprintf(os.Stderr, "⚠️  %s is already running in background (PID: %d).\n", displayName, pid)
-		fmt.Fprintf(os.Stderr, "   Run 'rwarden %s stop' to terminate it before starting a new instance.\n", name)
-		os.Exit(1)
+	if pid, err := readPID(name); err == nil {
+		if checkProcessAlive(pid) {
+			fmt.Fprintf(os.Stderr, "⚠️  %s is already running in background (PID: %d).\n", displayName, pid)
+			fmt.Fprintf(os.Stderr, "   Run 'rwarden %s stop' to terminate it before starting a new instance.\n", name)
+			os.Exit(1)
+		}
+		// Clean up stale PID file left from dead process
+		removePID(name)
 	}
 
 	execPath, err := os.Executable()
@@ -140,6 +144,7 @@ func spawnDetached(name, displayName string, rawArgs []string, port int, url str
 	fmt.Printf("  Status:      rwarden %s status\n", name)
 	fmt.Printf("  Stop:        rwarden %s stop\n", name)
 
+	// Detached parent process terminates cleanly after launching child process; return nil satisfies compiler
 	os.Exit(0)
 	return nil
 }

@@ -202,24 +202,38 @@ type streamMsg struct {
 }
 
 type logEvent struct {
-	Timestamp      string  `json:"time"`
-	TimestampAlt   string  `json:"timestamp"`
-	ClientIP       string  `json:"client_ip"`
-	ClientIPAlt    string  `json:"ip"`
-	ClientHost     string  `json:"ClientHost"`
-	Verdict        string  `json:"verdict"`
-	Method         string  `json:"method"`
-	RequestMethod  string  `json:"RequestMethod"`
-	Path           string  `json:"path"`
-	PathAlt        string  `json:"request_uri"`
-	RequestPath    string  `json:"RequestPath"`
-	MatchedPattern string  `json:"matched_pattern"`
-	MatchedRuleAlt string  `json:"rule"`
-	StatusCode     int     `json:"status"`
-	StatusCodeAlt  int     `json:"status_code"`
-	DownstreamStat int     `json:"DownstreamStatus"`
-	LatencyMs      float64 `json:"latency_ms"`
-	DurationMsAlt  float64 `json:"duration_ms"`
+	Timestamp      string          `json:"time"`
+	TimestampAlt   string          `json:"timestamp"`
+	TSRaw          json.RawMessage `json:"ts"`
+	ClientIP       string          `json:"client_ip"`
+	ClientIPAlt    string          `json:"ip"`
+	ClientHost     string          `json:"ClientHost"`
+	RemoteAddr     string          `json:"remote_addr"`
+	RemoteIP       string          `json:"remote_ip"`
+	Verdict        string          `json:"verdict"`
+	Action         string          `json:"action"`
+	Method         string          `json:"method"`
+	RequestMethod  string          `json:"RequestMethod"`
+	Path           string          `json:"path"`
+	PathAlt        string          `json:"request_uri"`
+	RequestPath    string          `json:"RequestPath"`
+	URI            string          `json:"uri"`
+	MatchedPattern string          `json:"matched_pattern"`
+	MatchedRuleAlt string          `json:"rule"`
+	StatusCode     int             `json:"status"`
+	StatusCodeAlt  int             `json:"status_code"`
+	DownstreamStat int             `json:"DownstreamStatus"`
+	LatencyMs      float64         `json:"latency_ms"`
+	DurationMsAlt  float64         `json:"duration_ms"`
+	DurationSec    float64         `json:"duration"`
+	Request        *struct {
+		ClientIP   string `json:"client_ip"`
+		RemoteIP   string `json:"remote_ip"`
+		RemoteAddr string `json:"remote_addr"`
+		URI        string `json:"uri"`
+		Method     string `json:"method"`
+		Host       string `json:"host"`
+	} `json:"request"`
 }
 
 var combinedLogRegex = regexp.MustCompile(`^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s+[^"]+"\s+(\d{3})\s+\S+`)
@@ -236,93 +250,115 @@ func toCombinedLog(line string) string {
 
 	// Try JSON format
 	var ev logEvent
-	if err := json.Unmarshal([]byte(line), &ev); err == nil && (ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != "" || ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != "" || ev.Verdict != "") {
-		ip := ev.ClientIP
-		if ip == "" {
-			ip = ev.ClientIPAlt
-		}
-		if ip == "" {
-			ip = ev.ClientHost
-		}
-		if ip == "" {
-			ip = "127.0.0.1"
-		}
-
-		path := ev.Path
-		if path == "" {
-			path = ev.PathAlt
-		}
-		if path == "" {
-			path = ev.RequestPath
-		}
-		if path == "" {
-			path = "/"
-		}
-		path = strings.ReplaceAll(path, `"`, "%22")
-
-		method := ev.Method
-		if method == "" {
-			method = ev.RequestMethod
-		}
-		if method == "" {
-			method = "GET"
-		}
-		method = strings.ReplaceAll(method, `"`, "")
-
-		status := ev.StatusCode
-		if status == 0 {
-			status = ev.StatusCodeAlt
-		}
-		if status == 0 {
-			status = ev.DownstreamStat
-		}
-		if status == 0 {
-			switch strings.ToUpper(ev.Verdict) {
-			case "BLOCK":
-				status = 403
-			case "TARPIT":
-				status = 429
-			default:
-				status = 200
+	if err := json.Unmarshal([]byte(line), &ev); err == nil {
+		if ev.Request != nil {
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.ClientIP
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.RemoteIP
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.RemoteAddr
+			}
+			if ev.Path == "" {
+				ev.Path = ev.Request.URI
+			}
+			if ev.Method == "" {
+				ev.Method = ev.Request.Method
 			}
 		}
-
-		t := time.Now().UTC()
-		tsRaw := ev.Timestamp
-		if tsRaw == "" {
-			tsRaw = ev.TimestampAlt
+		if ev.ClientIP == "" {
+			ev.ClientIP = ev.RemoteAddr
 		}
-		if tsRaw != "" {
-			if parsed, err := time.Parse(time.RFC3339Nano, tsRaw); err == nil {
-				t = parsed
-			} else if parsed, err := time.Parse("2006-01-02 15:04:05", tsRaw); err == nil {
-				t = parsed
+		if ev.ClientIP == "" {
+			ev.ClientIP = ev.RemoteIP
+		}
+		if ev.Path == "" {
+			ev.Path = ev.URI
+		}
+		if ev.Verdict == "" && ev.Action != "" {
+			ev.Verdict = ev.Action
+		}
+
+		if ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != "" || ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != "" || ev.Verdict != "" {
+			ip := ev.ClientIP
+			if ip == "" {
+				ip = ev.ClientIPAlt
 			}
-		}
-		timeStr := t.Format("02/Jan/2006:15:04:05 -0700")
-
-		rule := ev.MatchedPattern
-		if rule == "" {
-			rule = ev.MatchedRuleAlt
-		}
-		rule = strings.ReplaceAll(rule, `"`, `'`)
-		verdict := strings.ToUpper(ev.Verdict)
-
-		userAgent := "RouteWarden"
-		if rule != "" {
-			if verdict != "" && verdict != "ALLOW" {
-				userAgent = fmt.Sprintf("[%s: %s]", verdict, rule)
-			} else {
-				userAgent = fmt.Sprintf("[RULE: %s]", rule)
+			if ip == "" {
+				ip = ev.ClientHost
 			}
-		} else if verdict != "" && verdict != "ALLOW" {
-			userAgent = fmt.Sprintf("[%s]", verdict)
-		} else if verdict == "ALLOW" {
-			userAgent = "RouteWarden/1.5 (Clean)"
-		}
-		userAgent = strings.ReplaceAll(userAgent, `"`, `'`)
+			ip = cleanIPAddress(ip)
+			if ip == "" {
+				ip = "127.0.0.1"
+			}
 
-		return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, userAgent)
+			path := ev.Path
+			if path == "" {
+				path = ev.PathAlt
+			}
+			if path == "" {
+				path = ev.RequestPath
+			}
+			if path == "" {
+				path = "/"
+			}
+			path = strings.ReplaceAll(path, `"`, "%22")
+
+			method := ev.Method
+			if method == "" {
+				method = ev.RequestMethod
+			}
+			if method == "" {
+				method = "GET"
+			}
+			method = strings.ReplaceAll(method, `"`, "")
+
+			status := ev.StatusCode
+			if status == 0 {
+				status = ev.StatusCodeAlt
+			}
+			if status == 0 {
+				status = ev.DownstreamStat
+			}
+			if status == 0 {
+				switch strings.ToUpper(ev.Verdict) {
+				case "BLOCK":
+					status = 403
+				case "TARPIT":
+					status = 429
+				default:
+					status = 200
+				}
+			}
+
+			t, _ := resolveEventTimestamp(ev.Timestamp, ev.TimestampAlt, ev.TSRaw)
+			timeStr := t.Format("02/Jan/2006:15:04:05 -0700")
+
+			rule := ev.MatchedPattern
+			if rule == "" {
+				rule = ev.MatchedRuleAlt
+			}
+			rule = strings.ReplaceAll(rule, `"`, `'`)
+			verdict := strings.ToUpper(ev.Verdict)
+
+			userAgent := "RouteWarden"
+			if rule != "" {
+				if verdict != "" && verdict != "ALLOW" {
+					userAgent = fmt.Sprintf("[%s: %s]", verdict, rule)
+				} else {
+					userAgent = fmt.Sprintf("[RULE: %s]", rule)
+				}
+			} else if verdict != "" && verdict != "ALLOW" {
+				userAgent = fmt.Sprintf("[%s]", verdict)
+			} else if verdict == "ALLOW" {
+				userAgent = "RouteWarden/1.5 (Clean)"
+			}
+			userAgent = strings.ReplaceAll(userAgent, `"`, `'`)
+
+			return fmt.Sprintf("%s - - [%s] \"%s %s HTTP/1.1\" %d 0 \"-\" \"%s\"", ip, timeStr, method, path, status, userAgent)
+		}
 	}
 
 	// Drop arbitrary non-HTTP and debug log lines

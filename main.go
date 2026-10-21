@@ -158,7 +158,7 @@ func main() {
 		handleDashboard(os.Args[2:])
 
 	case "up", "start":
-		handleDashboard(append([]string{"up"}, os.Args[2:]...))
+		handleDashboard(os.Args[2:])
 
 	case "keys":
 		handleKeys(os.Args[2:])
@@ -391,7 +391,8 @@ func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
 				}
 				continue
 			}
-			// Unknown flag: do not consume the next argument
+			// Unknown flag: cannot determine whether an unknown flag is boolean or takes
+			// an argument, so do not consume the next token. FlagSet.Parse will fail on unknown flags.
 			flags = append(flags, arg)
 		} else {
 			posArgs = append(posArgs, arg)
@@ -826,6 +827,7 @@ func handleValidate(args []string) {
 	if isTCPWardenYAML {
 		fmt.Printf("✓ Configuration %s is VALID (TCP Warden YAML format).\n", targetName)
 		fmt.Println("  - Target: RouteWarden TCP Warden (tcp-warden)")
+		fmt.Println("  - Note: Structural syntax check passed; full schema validation requires runtime engine.")
 		return
 	}
 

@@ -155,4 +155,14 @@ func TestAuditAndDiff_IntegrationCLI(t *testing.T) {
 			t.Errorf("expected diff from stdin to report differences: %s", stdout)
 		}
 	})
+
+	t.Run("diff with both files as stdin '-' fails with error", func(t *testing.T) {
+		_, stderr, code := runCLI(t, "diff", "-", "-")
+		if code != 1 {
+			t.Fatalf("expected exit code 1 for diff - -, got %d", code)
+		}
+		if !strings.Contains(stderr, "only one file can be read from stdin") {
+			t.Errorf("expected stdin error message, got: %s", stderr)
+		}
+	})
 }
