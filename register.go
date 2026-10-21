@@ -83,7 +83,7 @@ func RegisterAgent(dashboardURL, agentToken, configPath string, client *http.Cli
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
 			Error string `json:"error"`
