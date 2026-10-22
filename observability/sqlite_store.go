@@ -435,9 +435,9 @@ func buildWhereClause(f LogQueryFilter) ([]string, []interface{}) {
 		args = append(args, f.Rule)
 	}
 	if f.Search != "" {
-		where = append(where, "(client_ip LIKE ? OR path LIKE ? OR rule LIKE ? OR country LIKE ? OR source LIKE ?)")
+		where = append(where, "(client_ip LIKE ? OR path LIKE ? OR rule LIKE ? OR country LIKE ? OR source LIKE ? OR method LIKE ? OR CAST(status AS TEXT) LIKE ?)")
 		pattern := "%" + f.Search + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	return where, args
 }
@@ -537,16 +537,43 @@ func (s *SQLiteStore) Query(f LogQueryFilter) ([]*SecurityEvent, error) {
 	return events, nil
 }
 
+// StorageStats contains metadata about stored events and database footprint.
+type StorageStats struct {
+	EventCount        int64  `json:"event_count"`
+	DatabaseSizeBytes int64  `json:"database_size_bytes"`
+	DatabaseSizeHuman string `json:"database_size_human"`
+	OldestEvent       string `json:"oldest_event"`
+	NewestEvent       string `json:"newest_event"`
+}
+
+// PruneOlderThanDuration deletes events older than the specified duration.
+func (s *SQLiteStore) PruneOlderThanDuration(d time.Duration) (int64, error) {
+	if d <= 0 {
+		return 0, nil
+	}
+	s.Flush()
+	seconds := int64(d.Seconds())
+	cutoffRFC := time.Now().UTC().Add(-d).Format(time.RFC3339)
+	res, err := s.db.Exec("DELETE FROM security_events WHERE timestamp < datetime('now', '-' || ? || ' seconds') OR timestamp < ?", seconds, cutoffRFC)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if affected > 0 {
+		s.rebuildSeenHashes()
+	}
+	return affected, nil
+}
+
 // PruneOlderThan deletes events older than the specified retention in days.
 func (s *SQLiteStore) PruneOlderThan(days int) (int64, error) {
 	if days <= 0 {
 		return 0, nil
 	}
-	res, err := s.db.Exec("DELETE FROM security_events WHERE timestamp < datetime('now', '-' || ? || ' days')", days)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+	return s.PruneOlderThanDuration(time.Duration(days) * 24 * time.Hour)
 }
 
 // PruneMaxRows keeps only the latest maxRows events and deletes older ones.
@@ -554,11 +581,73 @@ func (s *SQLiteStore) PruneMaxRows(maxRows int) (int64, error) {
 	if maxRows <= 0 {
 		return 0, nil
 	}
+	s.Flush()
 	res, err := s.db.Exec("DELETE FROM security_events WHERE id NOT IN (SELECT id FROM security_events ORDER BY id DESC LIMIT ?)", maxRows)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if affected > 0 {
+		s.rebuildSeenHashes()
+	}
+	return affected, nil
+}
+
+func (s *SQLiteStore) rebuildSeenHashes() {
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
+	rows, err := s.db.Query("SELECT hash FROM security_events WHERE hash IS NOT NULL AND hash != '' ORDER BY id DESC LIMIT 25000")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	newMap := make(map[string]struct{})
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err == nil && h != "" {
+			newMap[h] = struct{}{}
+		}
+	}
+	s.seenHashes = newMap
+}
+
+// Vacuum executes SQLite VACUUM to reclaim free space from pruned rows and compact the database.
+func (s *SQLiteStore) Vacuum() error {
+	s.Flush()
+	_, err := s.db.Exec("VACUUM")
+	return err
+}
+
+// GetStorageStats queries live database statistics and on-disk size.
+func (s *SQLiteStore) GetStorageStats() (StorageStats, error) {
+	s.Flush()
+
+	var stats StorageStats
+
+	// 1. Event count and timestamp range
+	row := s.db.QueryRow("SELECT COUNT(*), COALESCE(MIN(timestamp), ''), COALESCE(MAX(timestamp), '') FROM security_events")
+	if err := row.Scan(&stats.EventCount, &stats.OldestEvent, &stats.NewestEvent); err != nil {
+		return stats, fmt.Errorf("query stats: %w", err)
+	}
+
+	// 2. Physical file size on disk (main .db + WAL file + SHM file)
+	var totalSize int64
+	if fi, err := os.Stat(s.dbPath); err == nil {
+		totalSize += fi.Size()
+	}
+	if fi, err := os.Stat(s.dbPath + "-wal"); err == nil {
+		totalSize += fi.Size()
+	}
+	if fi, err := os.Stat(s.dbPath + "-shm"); err == nil {
+		totalSize += fi.Size()
+	}
+	stats.DatabaseSizeBytes = totalSize
+	stats.DatabaseSizeHuman = FormatBytes(totalSize)
+
+	return stats, nil
 }
 
 // Flush forces immediate flush of any buffered insert queue.

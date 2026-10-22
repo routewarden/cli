@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ import (
 )
 
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
-var Version = "5.2.2"
+var Version = "5.3.0"
 
 var (
 	verboseLogging   bool
@@ -47,6 +48,25 @@ func IsVerboseLogging() bool {
 	verboseLoggingMu.RLock()
 	defer verboseLoggingMu.RUnlock()
 	return verboseLogging || os.Getenv("RW_VERBOSE") == "1" || os.Getenv("RW_DEBUG") == "1"
+}
+
+var (
+	retentionMgrMu     sync.RWMutex
+	activeRetentionMgr *RetentionManager
+)
+
+// SetActiveRetentionManager registers the active retention supervisor.
+func SetActiveRetentionManager(rm *RetentionManager) {
+	retentionMgrMu.Lock()
+	defer retentionMgrMu.Unlock()
+	activeRetentionMgr = rm
+}
+
+// GetActiveRetentionManager retrieves the active retention supervisor.
+func GetActiveRetentionManager() *RetentionManager {
+	retentionMgrMu.RLock()
+	defer retentionMgrMu.RUnlock()
+	return activeRetentionMgr
 }
 
 // DefaultDir returns the default directory where dashboard files are stored.
@@ -168,6 +188,12 @@ func getActiveAgents() []*RemoteAgentInfo {
 		}
 		list = append(list, &copy)
 	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Name != list[j].Name {
+			return list[i].Name < list[j].Name
+		}
+		return list[i].ID < list[j].ID
+	})
 	return list
 }
 
@@ -188,6 +214,15 @@ func getSourceInfo() SourceInfo {
 		s.Targets = append([]containerTarget(nil), currSource.Targets...)
 	}
 	sourceMu.RUnlock()
+
+	if len(s.Targets) > 1 {
+		sort.Slice(s.Targets, func(i, j int) bool {
+			if s.Targets[i].Name != s.Targets[j].Name {
+				return s.Targets[i].Name < s.Targets[j].Name
+			}
+			return s.Targets[i].ID < s.Targets[j].ID
+		})
+	}
 
 	s.Agents = getActiveAgents()
 	s.TotalEvents = atomic.LoadInt64(&totalEvents)
@@ -412,6 +447,72 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 		hostStr = strings.TrimSpace(os.Getenv("RW_DASHBOARD_HOST"))
 	}
 
+	var retentionStr string
+	var maxEventsStr string
+	var pruneIntervalStr string
+	var maxLogSizeStr string
+	if len(options) > 3 {
+		retentionStr = strings.TrimSpace(options[3])
+	}
+	if len(options) > 4 {
+		maxEventsStr = strings.TrimSpace(options[4])
+	}
+	if len(options) > 5 {
+		pruneIntervalStr = strings.TrimSpace(options[5])
+	}
+	if len(options) > 6 {
+		maxLogSizeStr = strings.TrimSpace(options[6])
+	}
+
+	if retentionStr == "" {
+		if env := os.Getenv("RW_RETENTION"); env != "" {
+			retentionStr = env
+		} else if env := os.Getenv("RW_DASHBOARD_RETENTION"); env != "" {
+			retentionStr = env
+		}
+	}
+	if maxEventsStr == "" {
+		if env := os.Getenv("RW_MAX_EVENTS"); env != "" {
+			maxEventsStr = env
+		} else if env := os.Getenv("RW_DASHBOARD_MAX_EVENTS"); env != "" {
+			maxEventsStr = env
+		}
+	}
+	if pruneIntervalStr == "" {
+		if env := os.Getenv("RW_PRUNE_INTERVAL"); env != "" {
+			pruneIntervalStr = env
+		}
+	}
+	if maxLogSizeStr == "" {
+		if env := os.Getenv("RW_MAX_LOG_SIZE"); env != "" {
+			maxLogSizeStr = env
+		}
+	}
+
+	policy := DefaultRetentionPolicy()
+	if retentionStr != "" {
+		if d, err := ParseRetention(retentionStr); err == nil {
+			policy.RetentionPeriod = d
+		}
+	}
+	if maxEventsStr != "" {
+		if n, err := strconv.Atoi(maxEventsStr); err == nil {
+			policy.MaxEvents = n
+		}
+	}
+	if pruneIntervalStr != "" {
+		if d, err := ParseRetention(pruneIntervalStr); err == nil {
+			policy.PruneInterval = d
+		} else if d, err := time.ParseDuration(pruneIntervalStr); err == nil {
+			policy.PruneInterval = d
+		}
+	}
+	if maxLogSizeStr != "" {
+		if b, err := ParseByteSize(maxLogSizeStr); err == nil {
+			policy.MaxLogSizeBytes = b
+		}
+	}
+
 	if dir == "" {
 		dir = DefaultDir()
 	}
@@ -466,7 +567,8 @@ func Up(ctx context.Context, dir string, port int, noOpen bool, file string, con
 	dbPath := filepath.Join(dir, "events.db")
 	if sqStore, err := NewSQLiteStore(dbPath); err == nil {
 		globalStore.AttachSQLite(sqStore)
-		_, _ = sqStore.PruneOlderThan(30) // 30-day retention
+		retentionMgr := StartAutomatedRetention(dashboardCtx, sqStore, dir, policy)
+		SetActiveRetentionManager(retentionMgr)
 		defer sqStore.Close()
 	} else {
 		fmt.Fprintf(os.Stderr, "⚠️  Warning: SQLite persistence failed to initialize: %v\n", err)
@@ -634,6 +736,12 @@ func watchAndStreamContainers(ctx context.Context, label string, specificContain
 			list = append(list, t)
 		}
 		mu.Unlock()
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Name != list[j].Name {
+				return list[i].Name < list[j].Name
+			}
+			return list[i].ID < list[j].ID
+		})
 		updateSourceInfo("docker", "", list)
 	}
 
@@ -1035,6 +1143,12 @@ func NewDashboardHandler(dir string, serverPriv *ecdh.PrivateKey, serverPubStr s
 
 // NewDashboardHandlerWithAuth constructs the HTTP handler for the dashboard and API endpoints with optional Basic Auth.
 func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, serverPubStr string, logFile *os.File, wsProxy http.Handler, reportPath string, authStr string) http.Handler {
+	parts := strings.SplitN(authStr, ":", 2)
+	expectedUser := parts[0]
+	expectedPass := ""
+	if len(parts) > 1 {
+		expectedPass = parts[1]
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sources", func(w http.ResponseWriter, r *http.Request) {
@@ -1174,7 +1288,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 				}
 				if filter.Search != "" {
 					searchLower := strings.ToLower(filter.Search)
-					haystack := strings.ToLower(ev.ClientIP + " " + ev.Path + " " + ev.Rule + " " + ev.Country + " " + ev.Source)
+					haystack := strings.ToLower(ev.ClientIP + " " + ev.Path + " " + ev.Rule + " " + ev.Country + " " + ev.Source + " " + ev.Method + " " + strconv.Itoa(ev.Status))
 					if !strings.Contains(haystack, searchLower) {
 						continue
 					}
@@ -1254,6 +1368,158 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"public_key": serverPubStr,
 			"version":    Version,
+		})
+	})
+
+	mux.HandleFunc("/api/v1/storage", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+		if authStr != "" && !validateDashboardAuth(r, expectedUser, expectedPass, authStr) {
+			token := extractAuthToken(r)
+			if _, err := ValidateAgentToken(token, dir); err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
+		}
+
+		resp := map[string]interface{}{}
+
+		var sq *SQLiteStore
+		if rm := GetActiveRetentionManager(); rm != nil && rm.sqStore != nil {
+			sq = rm.sqStore
+		} else {
+			sq = globalStore.GetSQLite()
+		}
+
+		if sq != nil {
+			if st, err := sq.GetStorageStats(); err == nil {
+				resp["storage"] = st
+			} else {
+				resp["storage_error"] = err.Error()
+			}
+		} else {
+			resp["storage"] = StorageStats{
+				EventCount:        0,
+				DatabaseSizeBytes: 0,
+				DatabaseSizeHuman: "0 B",
+			}
+		}
+
+		if rm := GetActiveRetentionManager(); rm != nil {
+			resp["retention"] = rm.GetStats()
+			resp["policy"] = map[string]interface{}{
+				"retention_period": rm.policy.RetentionPeriod.String(),
+				"retention_days":   int(rm.policy.RetentionPeriod / (24 * time.Hour)),
+				"max_events":       rm.policy.MaxEvents,
+				"prune_interval":   rm.policy.PruneInterval.String(),
+				"max_log_size":     FormatBytes(rm.policy.MaxLogSizeBytes),
+				"auto_vacuum":      rm.policy.AutoVacuum,
+			}
+		} else {
+			resp["policy"] = map[string]interface{}{
+				"retention_days": 30,
+				"max_events":     100000,
+			}
+		}
+
+		logPath := filepath.Join(dir, "access.log")
+		if fi, err := os.Stat(logPath); err == nil {
+			resp["access_log"] = map[string]interface{}{
+				"size_bytes": fi.Size(),
+				"size_human": FormatBytes(fi.Size()),
+			}
+		}
+
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/api/v1/prune", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if authStr != "" && !validateDashboardAuth(r, expectedUser, expectedPass, authStr) {
+			token := extractAuthToken(r)
+			if _, err := ValidateAgentToken(token, dir); err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
+		}
+
+		var pruned int64
+		var pruneErr error
+		rm := GetActiveRetentionManager()
+		if rm != nil {
+			pruned, pruneErr = rm.RunPrune()
+		} else if sq := globalStore.GetSQLite(); sq != nil {
+			p1, _ := sq.PruneOlderThan(30)
+			p2, _ := sq.PruneMaxRows(100000)
+			pruned = p1 + p2
+			_ = sq.Vacuum()
+		}
+
+		if pruneErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "error",
+				"error":  pruneErr.Error(),
+			})
+			return
+		}
+
+		resp := map[string]interface{}{
+			"status":        "ok",
+			"pruned_events": pruned,
+			"timestamp":     time.Now().UTC().Format(time.RFC3339),
+		}
+
+		var sq *SQLiteStore
+		if rm != nil && rm.sqStore != nil {
+			sq = rm.sqStore
+		} else {
+			sq = globalStore.GetSQLite()
+		}
+		if sq != nil {
+			if st, err := sq.GetStorageStats(); err == nil {
+				resp["storage"] = st
+			}
+		}
+
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		clientIP := extractClientIP(r)
+		token := extractAuthToken(r)
+
+		if token != "" {
+			key, err := ValidateAgentToken(token, dir)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			UpdateAgentLastSeen(key.ID, dir)
+			hostHeader := r.Header.Get("X-Agent-Hostname")
+			if hostHeader == "" {
+				hostHeader = r.URL.Query().Get("hostname")
+			}
+			registerOrTouchAgent(key.ID, key.Name, hostHeader, clientIP, 0)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "ok",
+			"public_key": serverPubStr,
+			"version":    Version,
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		})
 	})
 
@@ -1360,7 +1626,10 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 				fmt.Fprintf(os.Stderr, "[%s] ❌ [Ingest] Decryption failed for payload from %s (%s): %v\n", ts, key.Name, clientIP, err)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "decryption failed: " + err.Error()})
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error":      "decryption failed: " + err.Error(),
+					"public_key": serverPubStr,
+				})
 				return
 			}
 			plaintext = dec
@@ -1577,13 +1846,6 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 
 	if authStr == "" {
 		return mux
-	}
-
-	parts := strings.SplitN(authStr, ":", 2)
-	expectedUser := parts[0]
-	expectedPass := ""
-	if len(parts) > 1 {
-		expectedPass = parts[1]
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

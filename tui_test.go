@@ -73,7 +73,7 @@ func TestTUI_Helpers(t *testing.T) {
 			CandidatePaths: []string{"/.env", "%2e%2e/.env"},
 		}
 		out := captureStdout(func() {
-			renderEvaluationResult("/.env", "GET", "127.0.0.1", "", "", 403, res)
+			renderEvaluationResult("/.env", "GET", "127.0.0.1", "", "", 403, "text", res)
 		})
 		if !strings.Contains(out, "🛑 BLOCKED (HTTP Status 403)") {
 			t.Errorf("missing BLOCKED banner in: %s", out)
@@ -86,16 +86,57 @@ func TestTUI_Helpers(t *testing.T) {
 		}
 	})
 
+	t.Run("renderEvaluationResult blocked custom mode", func(t *testing.T) {
+		res := &engine.EvaluationResult{
+			Blocked:        true,
+			Reason:         "Matched sensitive file extension",
+			MatchedPattern: "*.env",
+			MatchedTarget:  "path",
+		}
+		out := captureStdout(func() {
+			renderEvaluationResult("/.env", "GET", "127.0.0.1", "", "", 302, "redirect", res)
+		})
+		if !strings.Contains(out, "🛑 BLOCKED (HTTP Status 302, Mode: redirect)") {
+			t.Errorf("missing BLOCKED with mode banner in: %s", out)
+		}
+	})
+
+	t.Run("renderEvaluationResult bypassed", func(t *testing.T) {
+		res := &engine.EvaluationResult{
+			Bypassed: true,
+			Reason:   "Method OPTIONS bypassed",
+		}
+		out := captureStdout(func() {
+			renderEvaluationResult("/api/health", "OPTIONS", "127.0.0.1", "", "", 403, "text", res)
+		})
+		if !strings.Contains(out, "⏭️ BYPASSED (Method OPTIONS bypassed)") {
+			t.Errorf("missing BYPASSED banner in: %s", out)
+		}
+	})
+
 	t.Run("renderEvaluationResult allowed", func(t *testing.T) {
 		res := &engine.EvaluationResult{
 			Blocked: false,
 			Reason:  "Path clean, no threat rules matched",
 		}
 		out := captureStdout(func() {
-			renderEvaluationResult("/api/health", "GET", "127.0.0.1", "", "", 403, res)
+			renderEvaluationResult("/api/health", "GET", "127.0.0.1", "", "", 403, "text", res)
 		})
 		if !strings.Contains(out, "✅ ALLOWED (Request permitted to backend)") {
 			t.Errorf("missing ALLOWED banner in: %s", out)
+		}
+	})
+
+	t.Run("renderEvaluationResult allowed with IP whitelist", func(t *testing.T) {
+		res := &engine.EvaluationResult{
+			Blocked: false,
+			Reason:  "ip_whitelisted",
+		}
+		out := captureStdout(func() {
+			renderEvaluationResult("/admin", "GET", "192.168.1.50", "", "", 403, "text", res)
+		})
+		if !strings.Contains(out, "Whitelisted client IP") {
+			t.Errorf("missing Whitelisted client IP in: %s", out)
 		}
 	})
 }

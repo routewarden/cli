@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -59,3 +60,9 @@ func TerminateProcess(pid int) error {
 func KillProcess(pid int) error {
 	return TerminateProcess(pid)
 }
+
+func SignalProcess(_ int, _ syscall.Signal) error {
+	return fmt.Errorf("signals are not supported on Windows")
+}
+
+

@@ -148,6 +148,26 @@ func CountryCodeToName(code string) string {
 	return code
 }
 
+// CountryNameToCode maps full English country names (case-insensitive) to ISO 3166-1 alpha-2 country codes.
+func CountryNameToCode(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if len(name) == 2 {
+		upper := strings.ToUpper(name)
+		if _, ok := isoCountryNames[upper]; ok {
+			return upper
+		}
+	}
+	for code, n := range isoCountryNames {
+		if strings.EqualFold(n, name) {
+			return code
+		}
+	}
+	return ""
+}
+
 // mmdbReader implements a high-performance, zero-dependency MaxMind MMDB binary parser.
 type mmdbReader struct {
 	buffer         []byte

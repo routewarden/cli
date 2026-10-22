@@ -40,6 +40,30 @@ func HandlePush(args []string, version string) {
 		case "stop", "down":
 			_, _ = daemon.Stop("push", "RouteWarden Remote Shipper")
 			return
+		case "help":
+			fmt.Println(`RouteWarden Push — Remote Security Log Shipper
+
+Usage:
+  rwarden push [command] [flags]
+
+Commands:
+  status, ps           Check running status of remote shipper
+  stop, down           Stop running remote shipper daemon
+
+Flags:
+  --url, -u            RouteWarden dashboard URL
+  --key, -k            Remote agent authentication key
+  --config             Custom path to agent configuration
+  --docker             Auto-discover Docker containers with 'routewarden=true'
+  --container, -c      Tail specific Docker container(s)
+  --file, -f           Log file(s) to monitor and push (or '-' for STDIN)
+  --event, -e          Push one or more specific event strings directly
+  --stdin              Read and push events line-by-line from STDIN
+  --detach, -d         Run remote shipper in background (detached) mode
+  --verbose, -v        Enable verbose event-level logging`)
+			return
+		case "up", "start", "run":
+			args = args[1:]
 		}
 	}
 
@@ -67,6 +91,9 @@ func HandlePush(args []string, version string) {
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
 	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
 	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
+	maxQueueSize := fs.Int("queue-size", 10000, "Maximum events to buffer in memory while disconnected or waiting to flush")
+	disconnectTimeout := fs.Duration("disconnect-timeout", 5*time.Minute, "Duration disconnected from dashboard before dropping stale events to protect memory")
+	pingInterval := fs.Duration("ping-interval", 10*time.Second, "Interval between connection health pings when connected")
 	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
 	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
 	allLogs := fs.Bool("all-logs", false, "Ship all container lines without filtering for RouteWarden logs")
@@ -116,13 +143,20 @@ func HandlePush(args []string, version string) {
 
 	// Load configuration
 	agentCfg, err := LoadAgentConfig(*configPath)
-	if err != nil && (*urlFlag == "" || *keyFlag == "") {
-		fmt.Fprintln(os.Stderr, "❌ RouteWarden is not registered on this node, and --url / --key were not provided.")
-		fmt.Fprintln(os.Stderr, "\nTo register this server, run:")
-		fmt.Fprintln(os.Stderr, "  rwarden register --url http://<dashboard-ip>:7890 --key <agent-token>")
-		fmt.Fprintln(os.Stderr, "\nOr push directly with flags (or RW_DASHBOARD_URL and RW_AGENT_KEY):")
-		fmt.Fprintln(os.Stderr, "  rwarden push --url http://<dashboard-ip>:7890 --key <agent-token> --docker")
-		os.Exit(1)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "❌ Failed to load agent configuration: %v\n", err)
+			if *urlFlag == "" || *keyFlag == "" {
+				os.Exit(1)
+			}
+		} else if *urlFlag == "" || *keyFlag == "" {
+			fmt.Fprintln(os.Stderr, "❌ RouteWarden is not registered on this node, and --url / --key were not provided.")
+			fmt.Fprintln(os.Stderr, "\nTo register this server, run:")
+			fmt.Fprintln(os.Stderr, "  rwarden register --url http://<dashboard-ip>:7890 --key <agent-token>")
+			fmt.Fprintln(os.Stderr, "\nOr push directly with flags (or RW_DASHBOARD_URL and RW_AGENT_KEY):")
+			fmt.Fprintln(os.Stderr, "  rwarden push --url http://<dashboard-ip>:7890 --key <agent-token> --docker")
+			os.Exit(1)
+		}
 	}
 
 	dashboardURL := ""
@@ -314,6 +348,7 @@ func HandlePush(args []string, version string) {
 		fmt.Println("  Encryption:      Standard HTTPS/HTTP")
 	}
 	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
+	fmt.Printf("  Offline Queue:   Max=%d, Timeout=%s\n", *maxQueueSize, *disconnectTimeout)
 	if *allLogs {
 		fmt.Println("  Filter:          Disabled (--all-logs: shipping all raw lines)")
 	} else {
@@ -408,72 +443,164 @@ func HandlePush(args []string, version string) {
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Println("Press Ctrl+C to stop.")
 
-	// Start Heartbeat routine
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		client := &http.Client{Timeout: 5 * time.Second}
-		hbURL := dashboardURL + "/api/v1/heartbeat"
+	// Connection & Key state
+	var (
+		connMu            sync.RWMutex
+		isConnected       bool
+		lastConnectedTime = time.Now()
+		currentPubKey     = serverPubKey
+		reconnectSignal   = make(chan struct{}, 1)
+	)
 
+	RegisterKeyUpdateCallback(func(pk *ecdh.PublicKey) {
+		connMu.Lock()
+		currentPubKey = pk
+		connMu.Unlock()
+	})
+
+	setConnected := func(conn bool, pk *ecdh.PublicKey) bool {
+		connMu.Lock()
+		defer connMu.Unlock()
+		prev := isConnected
+		isConnected = conn
+		if conn {
+			lastConnectedTime = time.Now()
+			if pk != nil {
+				currentPubKey = pk
+			}
+		}
+		return prev != conn
+	}
+
+	getConnState := func() (bool, time.Time, *ecdh.PublicKey) {
+		connMu.RLock()
+		defer connMu.RUnlock()
+		return isConnected, lastConnectedTime, currentPubKey
+	}
+
+	pingClient := &http.Client{Timeout: 5 * time.Second}
+
+	// Initial probe to establish connection state
+	initRes := PingDashboard(ctx, pingClient, dashboardURL, agentToken, hostname)
+	if initRes.Connected {
+		setConnected(true, initRes.ServerPubKey)
+		fmt.Printf("[%s] 🟢 Connected to RouteWarden dashboard (%s)\n", time.Now().Format("15:04:05"), dashboardURL)
+	} else {
+		setConnected(false, nil)
+		fmt.Fprintf(os.Stderr, "[%s] ⚠️ Dashboard currently unreachable (%v). Starting in offline queuing mode...\n", time.Now().Format("15:04:05"), initRes.Err)
+	}
+
+	// Start Connection Health & Ping supervisor
+	go func() {
 		for {
+			conn, _, _ := getConnState()
+			interval := *pingInterval
+			if !conn {
+				interval = 2 * time.Second
+			}
+
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				payload, _ := json.Marshal(map[string]string{"hostname": hostname})
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, hbURL, bytes.NewReader(payload))
-				if err == nil {
-					req.Header.Set("Authorization", "Bearer "+agentToken)
-					req.Header.Set("Content-Type", "application/json")
-					resp, err := client.Do(req)
-					if err == nil {
-						_ = resp.Body.Close()
+			case <-time.After(interval):
+				res := PingDashboard(ctx, pingClient, dashboardURL, agentToken, hostname)
+				if res.Connected {
+					wasChanged := setConnected(true, res.ServerPubKey)
+					if wasChanged {
+						fmt.Printf("[%s] 🟢 Connected / reconnected to RouteWarden dashboard (%s)\n", time.Now().Format("15:04:05"), dashboardURL)
+						select {
+						case reconnectSignal <- struct{}{}:
+						default:
+						}
+					}
+				} else {
+					wasChanged := setConnected(false, nil)
+					if wasChanged {
+						fmt.Fprintf(os.Stderr, "[%s] 🔴 Disconnected from dashboard (%v). Queuing events offline...\n", time.Now().Format("15:04:05"), res.Err)
 					}
 				}
 			}
 		}
 	}()
 
-	// Start Batch Flusher
+	// Start Batch Flusher with offline queueing
 	client := &http.Client{Timeout: 10 * time.Second}
 	eventsURL := dashboardURL + "/api/v1/events"
 
 	var buffer []string
-	var lastFlushErrTime time.Time
+	var lastStaleWarnTime time.Time
 	totalShipped := 0
 	ticker := time.NewTicker(*flushInterval)
 	defer ticker.Stop()
+
+	trimStaleEvents := func() {
+		conn, lastConn, _ := getConnState()
+		if !conn {
+			if time.Since(lastConn) > *disconnectTimeout {
+				if time.Since(lastStaleWarnTime) >= 30*time.Second {
+					lastStaleWarnTime = time.Now()
+					fmt.Fprintf(os.Stderr, "[%s] ⚠️ Disconnected for > %v. Dropping stale events to protect memory (queue size: %d)\n",
+						time.Now().Format("15:04:05"), *disconnectTimeout, len(buffer))
+				}
+				if len(buffer) > *batchSize {
+					buffer = buffer[len(buffer)-*batchSize:]
+				} else {
+					buffer = nil
+				}
+			}
+		}
+		if len(buffer) > *maxQueueSize {
+			drop := len(buffer) - *maxQueueSize
+			buffer = buffer[drop:]
+		}
+	}
 
 	flush := func() {
 		if len(buffer) == 0 {
 			return
 		}
-		batch := buffer
-		buffer = nil
-		ts := time.Now().Format("15:04:05")
-		if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, serverPubKey, batch); err != nil {
-			lastFlushErrTime = time.Now()
-			fmt.Fprintf(os.Stderr, "[%s] ❌ Failed to push batch of %d event(s): %v\n", ts, len(batch), err)
-			errStr := err.Error()
-			isAuthErr := strings.Contains(errStr, "401") || strings.Contains(errStr, "403") || strings.Contains(errStr, "400")
-			if !isAuthErr {
-				if len(buffer)+len(batch) > 5000 {
-					keep := 5000 - len(batch)
-					if keep > 0 {
-						buffer = buffer[len(buffer)-keep:]
-					} else {
-						buffer = nil
-					}
-				}
-				buffer = append(batch, buffer...)
-			}
+
+		conn, _, _ := getConnState()
+		if !conn {
+			trimStaleEvents()
 			return
 		}
-		totalShipped += len(batch)
-		fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, len(batch), totalShipped)
-		if *verbose {
-			for _, ev := range batch {
-				fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+
+		for len(buffer) > 0 {
+			_, _, pk := getConnState()
+			n := *batchSize
+			if len(buffer) < n {
+				n = len(buffer)
+			}
+			batch := buffer[:n]
+
+			ts := time.Now().Format("15:04:05")
+			if err := SendBatchWithRetry(ctx, client, eventsURL, agentToken, agentID, hostname, pk, batch); err != nil {
+				errStr := err.Error()
+				isAuthErr := strings.Contains(errStr, "401") || strings.Contains(errStr, "403")
+				if isAuthErr {
+					fmt.Fprintf(os.Stderr, "[%s] ❌ Authentication failed (%v). Dropping batch of %d event(s)\n", ts, err, len(batch))
+					buffer = buffer[n:]
+					return
+				}
+
+				// Connection or server error: mark disconnected, keep batch in buffer
+				wasChanged := setConnected(false, nil)
+				if wasChanged {
+					fmt.Fprintf(os.Stderr, "[%s] 🔴 Disconnected from dashboard (%v). Queuing events offline (current queue: %d)...\n", ts, err, len(buffer))
+				}
+				trimStaleEvents()
+				return
+			}
+
+			// Batch sent successfully
+			buffer = buffer[n:]
+			totalShipped += n
+			fmt.Printf("[%s] 📦 Pushed batch of %d event(s) to dashboard (total: %d)\n", ts, n, totalShipped)
+			if *verbose {
+				for _, ev := range batch {
+					fmt.Printf("[%s]    ↳ %s\n", ts, ev)
+				}
 			}
 		}
 	}
@@ -487,12 +614,18 @@ func HandlePush(args []string, version string) {
 
 		case line := <-eventChan:
 			buffer = append(buffer, line)
+			trimStaleEvents()
 			if len(buffer) >= *batchSize {
-				if time.Since(lastFlushErrTime) >= 1*time.Second {
+				conn, _, _ := getConnState()
+				if conn {
 					flush()
-				} else if len(buffer) > 5000 {
-					buffer = buffer[len(buffer)-5000:]
 				}
+			}
+
+		case <-reconnectSignal:
+			if len(buffer) > 0 {
+				fmt.Printf("[%s] 🚀 Dashboard reconnected! Flushing %d queued offline event(s)...\n", time.Now().Format("15:04:05"), len(buffer))
+				flush()
 			}
 
 		case <-ticker.C:
@@ -1007,6 +1140,113 @@ func WatchDockerContainersFilteredToChan(ctx context.Context, customLabel, tailL
 	}
 }
 
+type PingResult struct {
+	Connected       bool
+	ServerPubKey    *ecdh.PublicKey
+	ServerPubKeyStr string
+	StatusCode      int
+	Err             error
+}
+
+var (
+	pushKeyUpdateMu       sync.Mutex
+	pushOnKeyUpdatedFuncs []func(*ecdh.PublicKey)
+)
+
+func RegisterKeyUpdateCallback(cb func(*ecdh.PublicKey)) {
+	pushKeyUpdateMu.Lock()
+	defer pushKeyUpdateMu.Unlock()
+	pushOnKeyUpdatedFuncs = append(pushOnKeyUpdatedFuncs, cb)
+}
+
+func NotifyKeyUpdated(pk *ecdh.PublicKey) {
+	if pk == nil {
+		return
+	}
+	pushKeyUpdateMu.Lock()
+	defer pushKeyUpdateMu.Unlock()
+	for _, cb := range pushOnKeyUpdatedFuncs {
+		cb(pk)
+	}
+}
+
+func PingDashboard(ctx context.Context, client *http.Client, dashboardURL, agentToken, hostname string) PingResult {
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	url := strings.TrimRight(dashboardURL, "/") + "/api/v1/ping"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return PingResult{Connected: false, Err: err}
+	}
+	if agentToken != "" {
+		req.Header.Set("Authorization", "Bearer "+agentToken)
+	}
+	if hostname != "" {
+		req.Header.Set("X-Agent-Hostname", hostname)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return PingResult{Connected: false, Err: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Fallback to /api/v1/pubkey for older dashboards
+		pk := FetchServerPubKey(dashboardURL)
+		return PingResult{
+			Connected:    true,
+			ServerPubKey: pk,
+			StatusCode:   resp.StatusCode,
+		}
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return PingResult{
+			Connected:  false,
+			StatusCode: resp.StatusCode,
+			Err:        fmt.Errorf("authentication failed (HTTP %d)", resp.StatusCode),
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return PingResult{
+			Connected:  false,
+			StatusCode: resp.StatusCode,
+			Err:        fmt.Errorf("unexpected status code: %d", resp.StatusCode),
+		}
+	}
+
+	var res struct {
+		Status    string `json:"status"`
+		PublicKey string `json:"public_key"`
+		Version   string `json:"version"`
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return PingResult{Connected: false, Err: err}
+	}
+	if err := json.Unmarshal(bodyBytes, &res); err != nil {
+		return PingResult{Connected: false, Err: err}
+	}
+
+	var pk *ecdh.PublicKey
+	if res.PublicKey != "" {
+		if decoded, err := crypto.DecodePublicKey(res.PublicKey); err == nil {
+			pk = decoded
+			NotifyKeyUpdated(pk)
+		}
+	}
+
+	return PingResult{
+		Connected:       true,
+		ServerPubKey:    pk,
+		ServerPubKeyStr: res.PublicKey,
+		StatusCode:      resp.StatusCode,
+	}
+}
+
 func SendBatchWithRetry(ctx context.Context, client *http.Client, eventsURL, agentToken, agentID, hostname string, serverPubKey *ecdh.PublicKey, batch []string) error {
 	if len(batch) == 0 {
 		return nil
@@ -1022,19 +1262,24 @@ func SendBatchWithRetry(ctx context.Context, client *http.Client, eventsURL, age
 		return err
 	}
 
-	bodyToSend := payloadBytes
-	if serverPubKey != nil {
-		encrypted, err := crypto.Encrypt(serverPubKey, payloadBytes)
-		if err == nil {
-			if encBytes, err := json.Marshal(encrypted); err == nil {
-				bodyToSend = encBytes
-			}
-		}
-	}
-
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
+
+	currentKey := serverPubKey
+	buildBody := func(pk *ecdh.PublicKey) []byte {
+		if pk != nil {
+			encrypted, err := crypto.Encrypt(pk, payloadBytes)
+			if err == nil {
+				if encBytes, err := json.Marshal(encrypted); err == nil {
+					return encBytes
+				}
+			}
+		}
+		return payloadBytes
+	}
+
+	bodyToSend := buildBody(currentKey)
 
 	backoff := 50 * time.Millisecond
 	var lastErr error
@@ -1048,11 +1293,33 @@ func SendBatchWithRetry(ctx context.Context, client *http.Client, eventsURL, age
 
 		resp, err := client.Do(req)
 		if err == nil {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
 				return nil
 			}
+
+			// If server returned 400 Bad Request (e.g. decryption failed because server restarted with a new key)
+			if resp.StatusCode == http.StatusBadRequest {
+				var errResp struct {
+					Error     string `json:"error"`
+					PublicKey string `json:"public_key"`
+				}
+				if json.Unmarshal(respBody, &errResp) == nil && errResp.PublicKey != "" {
+					if newPk, decErr := crypto.DecodePublicKey(errResp.PublicKey); decErr == nil {
+						// Dashboard rotated/reloaded key on restart! Update currentKey and re-encrypt
+						currentKey = newPk
+						NotifyKeyUpdated(newPk)
+						bodyToSend = buildBody(currentKey)
+						continue
+					}
+				}
+			}
+
 			lastErr = fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				return lastErr
+			}
 		} else {
 			lastErr = err
 		}
@@ -1158,7 +1425,7 @@ func minLen(a, b int) int {
 	return b
 }
 
-func fetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
+func FetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(strings.TrimRight(dashboardURL, "/") + "/api/v1/pubkey")
 	if err != nil {
@@ -1180,3 +1447,5 @@ func fetchServerPubKey(dashboardURL string) *ecdh.PublicKey {
 	}
 	return pk
 }
+
+var fetchServerPubKey = FetchServerPubKey

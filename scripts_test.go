@@ -353,3 +353,55 @@ func TestUniversalUninstallScript(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateVersionScript(t *testing.T) {
+	scriptPath := filepath.Join(".", "scripts", "update-version.sh")
+	if _, err := os.Stat(scriptPath); err != nil {
+		t.Fatalf("update-version.sh not found: %v", err)
+	}
+
+	// 1. Check syntax
+	cmdSyntax := exec.Command("bash", "-n", scriptPath)
+	if out, err := cmdSyntax.CombinedOutput(); err != nil {
+		t.Fatalf("syntax error in update-version.sh: %v\nOutput: %s", err, string(out))
+	}
+
+	// 2. Test --help
+	cmdHelp := exec.Command("bash", scriptPath, "--help")
+	outHelp, err := cmdHelp.CombinedOutput()
+	if err != nil {
+		t.Fatalf("update-version.sh --help failed: %v", err)
+	}
+	if !strings.Contains(string(outHelp), "RouteWarden CLI Version Synchronization Tool") {
+		t.Errorf("expected header in --help output, got:\n%s", string(outHelp))
+	}
+
+	// 3. Test invalid semver rejection
+	cmdInvalid := exec.Command("bash", scriptPath, "invalid-semver-string")
+	outInvalid, err := cmdInvalid.CombinedOutput()
+	if err == nil {
+		t.Errorf("expected error for invalid semver, but succeeded:\n%s", string(outInvalid))
+	}
+	if !strings.Contains(string(outInvalid), "Invalid semantic version format") {
+		t.Errorf("expected invalid semver error message, got:\n%s", string(outInvalid))
+	}
+
+	// 4. Test reading from current version.json (idempotent run)
+	cmdCurrent := exec.Command("bash", scriptPath)
+	outCurrent, err := cmdCurrent.CombinedOutput()
+	if err != nil {
+		t.Fatalf("update-version.sh failed on current version.json: %v\nOutput: %s", err, string(outCurrent))
+	}
+	if !strings.Contains(string(outCurrent), "Successfully synchronized version") {
+		t.Errorf("expected success message in output, got:\n%s", string(outCurrent))
+	}
+	if !strings.Contains(string(outCurrent), "cmd/tcp-warden/main.go") {
+		t.Errorf("expected cmd/tcp-warden/main.go in sync output, got:\n%s", string(outCurrent))
+	}
+	if !strings.Contains(string(outCurrent), "proxy/plugins/sdk/sdk.go") {
+		t.Errorf("expected proxy/plugins/sdk/sdk.go in sync output, got:\n%s", string(outCurrent))
+	}
+	if !strings.Contains(string(outCurrent), "Dockerfile.tcp-warden") {
+		t.Errorf("expected Dockerfile.tcp-warden in sync output, got:\n%s", string(outCurrent))
+	}
+}
