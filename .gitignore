@@ -1,8 +1,12 @@
 # Binaries
 bin/
 /dist/
-rwarden
-cli
+/rwarden
+/rwarden-dashboard
+/rwarden-shipper
+/tcp-warden
+/dashboard
+/cli
 
 # Test coverage & tooling
 coverage.out

@@ -243,7 +243,7 @@ func TestGlobalStatusAndStopDispatch(t *testing.T) {
 	if !strings.Contains(output, "RouteWarden Background Services") {
 		t.Errorf("expected header in global status output, got: %s", output)
 	}
-	if !strings.Contains(output, "Dashboard") || !strings.Contains(output, "Remote Shipper") {
+	if !strings.Contains(output, "Dashboard") || !strings.Contains(output, "Remote Shipper") || !strings.Contains(output, "TCP Proxy") {
 		t.Errorf("expected services listed in global status, got: %s", output)
 	}
 
@@ -263,6 +263,12 @@ func TestGlobalStatusAndStopDispatch(t *testing.T) {
 	if !strings.Contains(stopOutput, "Stopping RouteWarden Background Services") {
 		t.Errorf("expected stopping header, got: %s", stopOutput)
 	}
+
+	// Test targeting specific daemon and help flag
+	handleGlobalStatus([]string{"tcp"})
+	handleGlobalStatus([]string{"--help"})
+	handleGlobalStop([]string{"--help"})
+	handleGlobalStop([]string{"all"})
 }
 
 func TestStalePIDCleanup(t *testing.T) {

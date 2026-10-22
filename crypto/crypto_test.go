@@ -239,5 +239,38 @@ func BenchmarkCrypto_EncryptDecrypt(b *testing.B) {
 	}
 }
 
+func TestCrypto_NilKeyEncodingAndWhitespace(t *testing.T) {
+	if got := crypto.EncodePrivateKey(nil); got != "" {
+		t.Errorf("expected empty string for nil private key, got %q", got)
+	}
+	if got := crypto.EncodePublicKey(nil); got != "" {
+		t.Errorf("expected empty string for nil public key, got %q", got)
+	}
+
+	priv, pub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privStr := "\n  " + crypto.EncodePrivateKey(priv) + " \t\r\n"
+	pubStr := "\r\n  " + crypto.EncodePublicKey(pub) + "   \n"
+
+	decPriv, err := crypto.DecodePrivateKey(privStr)
+	if err != nil {
+		t.Fatalf("expected whitespace-trimmed private key to decode successfully: %v", err)
+	}
+	decPub, err := crypto.DecodePublicKey(pubStr)
+	if err != nil {
+		t.Fatalf("expected whitespace-trimmed public key to decode successfully: %v", err)
+	}
+
+	if !bytes.Equal(decPriv.Bytes(), priv.Bytes()) {
+		t.Error("decoded private key mismatch")
+	}
+	if !bytes.Equal(decPub.Bytes(), pub.Bytes()) {
+		t.Error("decoded public key mismatch")
+	}
+}
+
 // Suppress unused import
 var _ = rand.Reader

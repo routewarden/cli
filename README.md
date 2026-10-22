@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.2.2
+# rwarden version 5.3.0
 ```
 
 ---
@@ -794,11 +794,55 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 **Example Output:**
 ```text
-rwarden version 4.0.0
+rwarden version 5.3.0
 ```
+
+---
+
+### 15. L4 TCP/UDP Reverse Proxy (`tcp`)
+
+Run a high-performance Layer 4 reverse proxy with protocol-aware inspection (HTTP, TLS SNI, SSH, Redis, PostgreSQL, MySQL), CIDR geo-fencing, rate limiting, and CrowdSec remediation:
+
+**CLI:**
+```bash
+# Start proxy in foreground (auto-loads tcp-warden.yaml)
+rwarden tcp
+rwarden tcp up
+
+# Start proxy in background (detached daemon mode)
+rwarden tcp up -d
+rwarden tcp up -c /etc/routewarden/tcp-warden.yaml --detach
+
+# Inspect running status and PID
+rwarden tcp status
+
+# Stop background proxy daemon
+rwarden tcp stop
+
+# Validate proxy YAML configuration
+rwarden tcp validate -c tcp-warden.yaml
+
+# Manage protocol inspection plugins
+rwarden tcp plugins list
+rwarden tcp plugins test
+```
+
+**Standalone Container (<15MB):**
+```bash
+docker run -d --name tcp-warden \
+  -p 5432:5432 -p 6379:6379 \
+  -v $(pwd)/tcp-warden.yaml:/etc/tcp-warden/tcp-warden.yaml:ro \
+  ghcr.io/routewarden/tcp-warden:latest
+```
+
+| Flag | Type | Default | Description |
+|:---|:---|:---|:---|
+| `-c`, `--config` | string | `"tcp-warden.yaml"` | Path to YAML configuration file |
+| `-d`, `--detach` | bool | `false` | Run in background (detached) daemon mode |
 
 ---
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+

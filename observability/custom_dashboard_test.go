@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -495,3 +496,143 @@ func TestDashboard_Authentication(t *testing.T) {
 		t.Errorf("expected 200 OK for open handler without auth, got %d", rrOpen.Code)
 	}
 }
+
+func TestEventStore_AllCountriesRendered(t *testing.T) {
+	store := observability.NewEventStore()
+
+	testCountries := []struct {
+		name string
+		code string
+	}{
+		{"United States", "US"},
+		{"Canada", "CA"},
+		{"Germany", "DE"},
+		{"France", "FR"},
+		{"Japan", "JP"},
+		{"United Kingdom", "GB"},
+		{"Brazil", "BR"},
+		{"Australia", "AU"},
+		{"India", "IN"},
+		{"South Korea", "KR"},
+		{"Iceland", "IS"},
+		{"Argentina", "AR"},
+		{"Poland", "PL"},
+		{"Sweden", "SE"},
+		{"Norway", "NO"},
+		{"Italy", "IT"},
+		{"Spain", "ES"},
+		{"Netherlands", "NL"},
+		{"Singapore", "SG"},
+		{"Switzerland", "CH"},
+	}
+
+	for i, tc := range testCountries {
+		store.Add(&observability.SecurityEvent{
+			ClientIP:    fmt.Sprintf("198.51.100.%d", i+1),
+			Country:     tc.name,
+			CountryCode: tc.code,
+			Method:      "GET",
+			Path:        fmt.Sprintf("/test-%d", i),
+			Verdict:     "BLOCK",
+			Status:      403,
+		})
+	}
+
+	stats := store.GetStats()
+	if len(stats.TopCountries) != len(testCountries) {
+		t.Fatalf("expected all %d countries to be preserved in TopCountries, got %d", len(testCountries), len(stats.TopCountries))
+	}
+
+	// Also verify that CountryNameToCode works
+	if code := observability.CountryNameToCode("Iceland"); code != "IS" {
+		t.Errorf("expected 'IS', got %q", code)
+	}
+	if code := observability.CountryNameToCode("DE"); code != "DE" {
+		t.Errorf("expected 'DE', got %q", code)
+	}
+}
+
+func TestCustomDashboard_SingleEntryVisibility(t *testing.T) {
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	pubStr := "test-pub-key"
+	handler := observability.NewDashboardHandler("", priv, pubStr, nil, nil, "")
+
+	// 1. Verify dashboard HTML has no negative margin that collapses container height
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for dashboard HTML, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+
+	if strings.Contains(body, "margin-top:-36px") || strings.Contains(body, "margin-top: -36px") {
+		t.Errorf("dashboard HTML still contains negative margin on scroll-top wrapper which hides single rows")
+	}
+
+	if !strings.Contains(body, "min-height: 120px;") {
+		t.Errorf("expected .table-container to have min-height: 120px; for single entry visibility")
+	}
+
+	if !strings.Contains(body, "fetchFilteredLogs(1, false)") {
+		t.Errorf("expected dashboard initialization to call fetchFilteredLogs on startup")
+	}
+
+	if !strings.Contains(body, "function escapeHTML") {
+		t.Errorf("expected escapeHTML helper to be defined in dashboard script")
+	}
+
+	// 2. Add exactly 1 event to GlobalStore and verify /api/logs returns it properly
+	store := observability.GlobalStore()
+	store.Add(&observability.SecurityEvent{
+		ClientIP:  "198.51.100.99",
+		Method:    "POST",
+		Path:      "/api/login",
+		Status:    200,
+		Verdict:   "ALLOW",
+		Rule:      "auth-pass",
+		LatencyMs: 2.3,
+	})
+
+	recLogs := httptest.NewRecorder()
+	reqLogs := httptest.NewRequest("GET", "/api/logs?limit=50&offset=0", nil)
+	handler.ServeHTTP(recLogs, reqLogs)
+
+	if recLogs.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /api/logs, got %d", recLogs.Code)
+	}
+
+	var logsResp struct {
+		Events        []*observability.SecurityEvent `json:"events"`
+		Total         int64                          `json:"total"`
+		FilteredTotal int64                          `json:"filtered_total"`
+		Count         int                            `json:"count"`
+	}
+	if err := json.Unmarshal(recLogs.Body.Bytes(), &logsResp); err != nil {
+		t.Fatalf("failed to decode /api/logs JSON: %v", err)
+	}
+
+	if logsResp.Total < 1 || logsResp.FilteredTotal < 1 || logsResp.Count < 1 {
+		t.Errorf("expected at least 1 event in /api/logs response, got total=%d, filtered=%d, count=%d",
+			logsResp.Total, logsResp.FilteredTotal, logsResp.Count)
+	}
+
+	foundSingle := false
+	for _, ev := range logsResp.Events {
+		if ev.ClientIP == "198.51.100.99" && ev.Path == "/api/login" {
+			foundSingle = true
+			if ev.LatencyMs != 2.3 {
+				t.Errorf("expected latency_ms 2.3, got %f", ev.LatencyMs)
+			}
+			break
+		}
+	}
+	if !foundSingle {
+		t.Errorf("expected to find single event 198.51.100.99 in logs response")
+	}
+}
+

@@ -10,7 +10,7 @@ The canonical release version of `rwarden` is stored in [`version.json`](version
 
 ```json
 {
-  "version": "v5.2.2"
+  "version": "v5.3.0"
 }
 ```
 
@@ -23,18 +23,20 @@ Whenever you prepare a release, update this file or use the automated synchroniz
 When publishing a new release, version numbers must stay in sync across:
 
 1. **`version.json`**: Canonical version tracking.
-2. **`main.go`**: Runtime CLI version string (`var version = "5.0.1"`).
+2. **`main.go`**: Runtime CLI version string (`var version = "5.3.0"`).
 3. **`cmd/shipper/main.go`**: Standalone shipper micro-binary version string.
 4. **`cmd/dashboard/main.go`**: Standalone dashboard micro-binary version string.
-5. **`observability/manager.go`**: Dashboard API response & engine version (`var Version = "5.0.1"`).
-6. **`observability/custom_dashboard.go`**: SOC Dashboard HTML badges & core runtime tags.
-7. **`observability/auth_screen.go`**: Terminal auth login screen banner.
-8. **`engine/audit.go`**: SARIF security linter report metadata.
-9. **`README.md`**: CLI output examples (`# rwarden version 5.0.1`).
-10. **`VERSIONING.md`**: Canonical version tracking documentation.
-11. **`Dockerfile*`**: Multi-stage build documentation headers (`Dockerfile`, `Dockerfile.dashboard`, `Dockerfile.shipper`).
-12. **`observability/ingest_test.go` & `integration_test.go`**: Automated test suite assertions.
-13. **Documentation Registry**: `docs/docs/version.json` and installer fallback when in RouteWarden monorepo.
+5. **`cmd/tcp-warden/main.go`**: Standalone Layer 4 proxy daemon version string.
+6. **`proxy/plugins/sdk/sdk.go`**: RouteWarden Plugin SDK version (`const Version = "5.3.0"`).
+7. **`observability/manager.go`**: Dashboard API response & engine version (`var Version = "5.3.0"`).
+8. **`observability/custom_dashboard.go`**: SOC Dashboard HTML badges & core runtime tags.
+9. **`observability/auth_screen.go`**: Terminal auth login screen banner.
+10. **`engine/audit.go`**: SARIF security linter report metadata.
+11. **`README.md`**: CLI output examples (`# rwarden version 5.3.0`).
+12. **`VERSIONING.md`**: Canonical version tracking documentation.
+13. **`Dockerfile*`**: Multi-stage build documentation headers (`Dockerfile`, `Dockerfile.dashboard`, `Dockerfile.shipper`, `Dockerfile.tcp-warden`).
+14. **`observability/ingest_test.go` & `integration_test.go`**: Automated test suite assertions.
+15. **Documentation Registry**: `docs/docs/version.json` and installer fallback when in RouteWarden monorepo.
 
 > **Note**: The universal installer is maintained centrally and served directly at `https://routewarden.github.io/install.sh`.
 

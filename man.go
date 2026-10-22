@@ -63,11 +63,14 @@ Enroll a remote edge server with a central RouteWarden dashboard.
 \fBpush\fR [\fIoptions\fR]
 Stream encrypted reverse proxy logs to the central dashboard (supports \fB--docker\fR, \fB--detach\fR / \fB-d\fR, \fBstatus\fR, \fBstop\fR).
 .TP
-\fBstatus\fR [\fIdashboard\fR|\fIpush\fR]
-Display running status, PID, and log path of background dashboard and shipper daemons.
+\fBtcp\fR [\fIup\fR|\fIdown\fR|\fIstatus\fR|\fIstop\fR|\fIreload\fR|\fIplugins\fR]
+Launch and manage the Layer 4 TCP/UDP Reverse Proxy and Guard Engine (supports \fB--config\fR / \fB-c\fR, \fB--detach\fR / \fB-d\fR, and \fB--verbose\fR / \fB-v\fR).
 .TP
-\fBstop\fR [\fIdashboard\fR|\fIpush\fR|\fIall\fR]
-Stop running background dashboard and/or shipper daemons.
+\fBstatus\fR [\fIdashboard\fR|\fIpush\fR|\fItcp\fR]
+Display running status, PID, and log path of background dashboard, shipper, and TCP proxy daemons.
+.TP
+\fBstop\fR [\fIdashboard\fR|\fIpush\fR|\fItcp\fR|\fIall\fR]
+Stop running background dashboard, shipper, and/or TCP proxy daemons.
 .TP
 \fBcleanup\fR
 Stop and remove all running RouteWarden ephemeral sandbox containers.

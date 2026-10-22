@@ -19,6 +19,7 @@ import (
 
 	"github.com/routewarden/cli/engine"
 	"github.com/routewarden/cli/observability"
+	proxyconfig "github.com/routewarden/cli/proxy/config"
 )
 
 //go:embed config.schema.json
@@ -27,7 +28,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.2.2"
+var version = "5.3.0"
 
 type stringSlice []string
 
@@ -50,8 +51,9 @@ Commands:
   test        Simulate request path and query inspection against patterns
                 e.g. rwarden test /.env
                 e.g. rwarden test -X POST -H "User-Agent: badbot" /.env
-  validate    Validate a RouteWarden configuration file (JSON)
+  validate    Validate a RouteWarden configuration file (JSON or YAML)
                 e.g. rwarden validate [routewarden.json]
+                e.g. rwarden validate [tcp-warden.yaml]
   audit       Perform static analysis and linting on a policy file (alias: lint)
                 e.g. rwarden audit [routewarden.json]
                 e.g. rwarden audit --format sarif > results.sarif
@@ -94,14 +96,22 @@ Commands:
                 e.g. rwarden push --docker -f /var/log/nginx/*.log -c custom-gateway
                 e.g. rwarden push status
                 e.g. rwarden push stop
-  status      Show running status of background dashboard and shipper daemons
+  tcp         Launch or manage Layer 4 protocol-aware security proxy (alias: proxy)
+                e.g. rwarden tcp [tcp-warden.yaml]
+                e.g. rwarden tcp -d
+                e.g. rwarden tcp status
+                e.g. rwarden tcp reload
+                e.g. rwarden tcp plugins list
+  status      Show running status of background daemons (dashboard, shipper, tcp proxy)
                 e.g. rwarden status
                 e.g. rwarden status dashboard
                 e.g. rwarden status push
-  stop        Stop running background dashboard and/or shipper daemons
+                e.g. rwarden status tcp
+  stop        Stop running background daemons (dashboard, shipper, tcp proxy)
                 e.g. rwarden stop
                 e.g. rwarden stop dashboard
                 e.g. rwarden stop push
+                e.g. rwarden stop tcp
   cleanup     Stop and remove any running RouteWarden sandbox containers
   completion  Generate shell autocompletion script (bash, zsh, fish, powershell)
                 e.g. source <(rwarden completion bash)
@@ -175,6 +185,9 @@ func main() {
 	case "stop", "down":
 		handleGlobalStop(os.Args[2:])
 
+	case "tcp", "proxy", "tcp-warden":
+		handleTCP(os.Args[2:])
+
 	case "cleanup":
 		handleCleanup(os.Args[2:])
 
@@ -224,6 +237,34 @@ func handleDashboard(args []string) {
 		fmt.Println("   Includes: docker-compose.yml and README.md")
 		fmt.Printf("   Run: cd %s && docker compose up -d\n", targetDir)
 
+	case "help":
+		fmt.Println(`RouteWarden Dashboard — Real-time SOC Security Dashboard
+
+Usage:
+  rwarden dashboard [command] [flags]
+
+Commands:
+  up, start        Launch dashboard web server (default)
+  down, stop       Stop running dashboard daemon
+  status, ps       Check status of running dashboard
+  export           Export standalone Docker Compose stack
+
+Flags for up:
+  --port           Port for SOC dashboard UI (default: 7890)
+  --host           Host IP interface to bind
+  --auth, -a       HTTP Basic Auth credentials ('user:password')
+  --no-open        Do not automatically open browser
+  --detach, -d     Run dashboard in background (detached) mode
+  --file, -f       Log file to monitor
+  --container, -c  Tail a specific Docker container
+  --dir            Directory to store configs (default: ~/.routewarden/dashboard)
+  --verbose, -v    Enable verbose event-level logging
+  --retention      Data retention window (default: 30d)
+  --max-events     Maximum event row count capacity (default: 100000)
+  --prune-interval Automated background pruning frequency (default: 1h)
+  --max-log-size   Maximum access.log size before rotation (default: 50MB)`)
+		return
+
 	case "down", "stop":
 		_, _ = stopDaemon("dashboard", "RouteWarden Dashboard")
 
@@ -259,6 +300,10 @@ func handleDashboard(args []string) {
 		host := fs.String("host", "", "Host IP interface to bind (e.g. 127.0.0.1 or 0.0.0.0, or set RW_DASHBOARD_HOST)")
 		verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
 		fs.BoolVar(verbose, "v", false, "Alias for --verbose")
+		retention := fs.String("retention", "30d", "Data retention window (e.g. '30d', '7d', '48h', or '0' for unlimited)")
+		maxEvents := fs.Int("max-events", 100000, "Maximum event row count capacity before pruning (default: 100000, 0 = unlimited)")
+		pruneInterval := fs.String("prune-interval", "1h", "Automated background pruning frequency (e.g. '1h', '30m')")
+		maxLogSize := fs.String("max-log-size", "50MB", "Maximum size of access.log before rotation (e.g. '50MB', '100MB')")
 		_ = parseFlagsLenient(fs, remainingArgs)
 
 		if *host == "" {
@@ -314,7 +359,7 @@ func handleDashboard(args []string) {
 			verboseStr = "true"
 		}
 
-		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr); err != nil {
+		if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr, *retention, strconv.Itoa(*maxEvents), *pruneInterval, *maxLogSize); err != nil {
 			fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 			fmt.Fprintln(os.Stderr, "\nTip: To export and run manually, run: rwarden dashboard export ./dashboard")
 			os.Exit(1)
@@ -793,6 +838,10 @@ func handleValidate(args []string) {
 			*configPath = "-"
 		} else if _, err := os.Stat("routewarden.json"); err == nil {
 			*configPath = "routewarden.json"
+		} else if _, err := os.Stat("tcp-warden.yaml"); err == nil {
+			*configPath = "tcp-warden.yaml"
+		} else if _, err := os.Stat("tcp-warden.yml"); err == nil {
+			*configPath = "tcp-warden.yml"
 		}
 	}
 
@@ -818,16 +867,24 @@ func handleValidate(args []string) {
 		os.Exit(1)
 	}
 
-	// Detect TCP Warden YAML format: must have both `services:` and a yaml/yml extension.
-	// We deliberately avoid the broad `version:` heuristic which can falsely match any JSON
-	// config that happens to contain a version field in nested data.
+	// Detect TCP Warden YAML format: must contain `services:` and have a YAML extension,
+	// be streamed from stdin, or not be a JSON object starting with '{'.
+	trimmedData := strings.TrimSpace(string(data))
 	isTCPWardenYAML := strings.Contains(string(data), "services:") &&
 		(strings.HasSuffix(targetName, ".yaml") || strings.HasSuffix(targetName, ".yml") ||
-			strings.HasPrefix(strings.TrimSpace(string(data)), "version:"))
+			targetName == "stdin" ||
+			!strings.HasPrefix(trimmedData, "{"))
 	if isTCPWardenYAML {
+		cfg, err := proxyconfig.Parse(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Validation FAILED (TCP Warden YAML): %v\n", err)
+			os.Exit(1)
+		}
+		for _, w := range cfg.Warnings {
+			fmt.Printf("⚠️  [CONFIG WARN] %s\n", w)
+		}
 		fmt.Printf("✓ Configuration %s is VALID (TCP Warden YAML format).\n", targetName)
-		fmt.Println("  - Target: RouteWarden TCP Warden (tcp-warden)")
-		fmt.Println("  - Note: Structural syntax check passed; full schema validation requires runtime engine.")
+		fmt.Printf("  - Active services: %d\n", len(cfg.Services))
 		return
 	}
 

@@ -37,26 +37,28 @@ type PolicyDiff struct {
 	AllowPatterns  SliceDiff             `json:"allowPatterns"`
 	AllowedIPs     SliceDiff             `json:"allowedIps"`
 	TrustedProxies SliceDiff             `json:"trustedProxies"`
-	Methods        SliceDiff             `json:"methods"`
-	CheckHeaders   SliceDiff             `json:"checkHeaders"`
-	Properties     map[string]ScalarDiff `json:"properties"`
-	HasDifferences bool                  `json:"hasDifferences"`
+	Methods           SliceDiff             `json:"methods"`
+	CheckHeaders      SliceDiff             `json:"checkHeaders"`
+	CheckBodyPatterns SliceDiff             `json:"checkBodyPatterns"`
+	Properties        map[string]ScalarDiff `json:"properties"`
+	HasDifferences    bool                  `json:"hasDifferences"`
 }
 
 // DiffConfigs compares two RouteWarden configurations and evaluates the security impact.
 func DiffConfigs(base, candidate *Config, baseName, candidateName string) *PolicyDiff {
 	diff := &PolicyDiff{
-		BaseFile:       baseName,
-		CandidateFile:  candidateName,
-		Impact:         DiffImpactNeutral,
-		ImpactReasons:  make([]string, 0),
-		Properties:     make(map[string]ScalarDiff),
-		BlockPatterns:  diffStringSlices(base.BlockPatterns, candidate.BlockPatterns),
-		AllowPatterns:  diffStringSlices(base.AllowPatterns, candidate.AllowPatterns),
-		AllowedIPs:     diffStringSlices(base.AllowedIPs, candidate.AllowedIPs),
-		TrustedProxies: diffStringSlices(base.TrustedProxies, candidate.TrustedProxies),
-		Methods:        diffStringSlices(base.Methods, candidate.Methods),
-		CheckHeaders:   diffStringSlices(base.CheckHeaders, candidate.CheckHeaders),
+		BaseFile:          baseName,
+		CandidateFile:     candidateName,
+		Impact:            DiffImpactNeutral,
+		ImpactReasons:     make([]string, 0),
+		Properties:        make(map[string]ScalarDiff),
+		BlockPatterns:     diffStringSlices(base.BlockPatterns, candidate.BlockPatterns),
+		AllowPatterns:     diffStringSlices(base.AllowPatterns, candidate.AllowPatterns),
+		AllowedIPs:        diffStringSlices(base.AllowedIPs, candidate.AllowedIPs),
+		TrustedProxies:    diffStringSlices(base.TrustedProxies, candidate.TrustedProxies),
+		Methods:           diffStringSlices(base.Methods, candidate.Methods),
+		CheckHeaders:      diffStringSlices(base.CheckHeaders, candidate.CheckHeaders),
+		CheckBodyPatterns: diffStringSlices(base.CheckBodyPatterns, candidate.CheckBodyPatterns),
 	}
 
 	// ── Compare Scalar Properties ───────────────────────────────────────────
@@ -101,6 +103,31 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 
 	if base.CheckBody != candidate.CheckBody {
 		diff.Properties["checkBody"] = ScalarDiff{Old: base.CheckBody, New: candidate.CheckBody}
+		if !candidate.CheckBody {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: Request body inspection was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "Request body inspection was enabled.")
+		}
+	}
+
+	if base.CheckBodyMaxBytes != candidate.CheckBodyMaxBytes {
+		diff.Properties["checkBodyMaxBytes"] = ScalarDiff{Old: base.CheckBodyMaxBytes, New: candidate.CheckBodyMaxBytes}
+	}
+
+	if base.CustomResponseText != candidate.CustomResponseText {
+		diff.Properties["customResponseText"] = ScalarDiff{Old: base.CustomResponseText, New: candidate.CustomResponseText}
+	}
+
+	baseMode, baseStatus, baseBody := base.ResolveResponse()
+	candMode, candStatus, candBody := candidate.ResolveResponse()
+	if baseMode != candMode {
+		diff.Properties["response.mode"] = ScalarDiff{Old: baseMode, New: candMode}
+	}
+	if baseStatus != candStatus {
+		diff.Properties["response.statusCode"] = ScalarDiff{Old: baseStatus, New: candStatus}
+	}
+	if baseBody != candBody {
+		diff.Properties["response.body"] = ScalarDiff{Old: baseBody, New: candBody}
 	}
 
 	// ── Evaluate List Changes on Security Posture ───────────────────────────
@@ -109,6 +136,13 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	}
 	if len(diff.BlockPatterns.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d new block pattern(s) were added: %s", len(diff.BlockPatterns.Added), strings.Join(diff.BlockPatterns.Added, ", ")))
+	}
+
+	if len(diff.CheckBodyPatterns.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HIGH: %d custom body inspection pattern(s) were removed: %s", len(diff.CheckBodyPatterns.Removed), strings.Join(diff.CheckBodyPatterns.Removed, ", ")))
+	}
+	if len(diff.CheckBodyPatterns.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d new body inspection pattern(s) were added: %s", len(diff.CheckBodyPatterns.Added), strings.Join(diff.CheckBodyPatterns.Added, ", ")))
 	}
 
 	if len(diff.AllowPatterns.Added) > 0 {
@@ -135,6 +169,8 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		len(diff.Methods.Removed) > 0 ||
 		len(diff.CheckHeaders.Added) > 0 ||
 		len(diff.CheckHeaders.Removed) > 0 ||
+		len(diff.CheckBodyPatterns.Added) > 0 ||
+		len(diff.CheckBodyPatterns.Removed) > 0 ||
 		len(diff.Properties) > 0
 
 	hasRelaxing := false
@@ -143,7 +179,9 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	if (base.Enabled && !candidate.Enabled) ||
 		(base.EnableDefaultPatterns && !candidate.EnableDefaultPatterns) ||
 		(base.CheckQuery && !candidate.CheckQuery) ||
+		(base.CheckBody && !candidate.CheckBody) ||
 		len(diff.BlockPatterns.Removed) > 0 ||
+		len(diff.CheckBodyPatterns.Removed) > 0 ||
 		len(diff.AllowPatterns.Added) > 0 {
 		hasRelaxing = true
 	}
@@ -151,7 +189,9 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	if (!base.Enabled && candidate.Enabled) ||
 		(!base.EnableDefaultPatterns && candidate.EnableDefaultPatterns) ||
 		(!base.CheckQuery && candidate.CheckQuery) ||
+		(!base.CheckBody && candidate.CheckBody) ||
 		len(diff.BlockPatterns.Added) > 0 ||
+		len(diff.CheckBodyPatterns.Added) > 0 ||
 		len(diff.AllowedIPs.Removed) > 0 {
 		hasHardening = true
 	}

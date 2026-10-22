@@ -165,6 +165,17 @@ func printDiffTextReport(diff *engine.PolicyDiff) {
 		}
 	}
 
+	// Body Inspection Patterns
+	if len(diff.CheckBodyPatterns.Added) > 0 || len(diff.CheckBodyPatterns.Removed) > 0 {
+		fmt.Println("\nBody Inspection Patterns:")
+		for _, p := range diff.CheckBodyPatterns.Removed {
+			fmt.Printf("  - %s (removed)\n", p)
+		}
+		for _, p := range diff.CheckBodyPatterns.Added {
+			fmt.Printf("  + %s (added)\n", p)
+		}
+	}
+
 	// Properties
 	if len(diff.Properties) > 0 {
 		fmt.Println("\nConfiguration Properties:")

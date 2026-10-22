@@ -1,0 +1,13 @@
+# Detect SMTP auth brute-force / spam via TCP Warden
+type: leaky
+name: routewarden/tcp-smtp-bf
+description: "Detect multiple SMTP authentication or sender rejections via TCP Warden"
+filter: "evt.Meta.log_type == 'tcp_warden_event' && evt.Meta.protocol == 'smtp' && (evt.Meta.action == 'blocked' || evt.Meta.reason == 'smtp_auth_failure' || evt.Meta.reason contains 'blocked sender domain')"
+groupby: "evt.Meta.source_ip"
+capacity: 5
+leakspeed: "1m"
+blackhole: 2m
+labels:
+  remediation: true
+  type: bruteforce
+  service: smtp

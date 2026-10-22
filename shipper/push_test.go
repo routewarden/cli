@@ -2,6 +2,7 @@ package shipper
 
 import (
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -463,3 +464,121 @@ func TestShipper_FilterRouteWardenLog_AllLogsBypass(t *testing.T) {
 		t.Errorf("expected line to be filtered when allLogs=false, got ok=%v clean=%q", okDefault, cleanDefault)
 	}
 }
+
+func TestShipper_PingDashboard_Success(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubStr := crypto.EncodePublicKey(pub)
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/api/v1/ping" {
+				t.Errorf("unexpected path: %s", req.URL.Path)
+			}
+			if req.Header.Get("Authorization") != "Bearer test-tok" {
+				t.Errorf("unexpected auth header: %s", req.Header.Get("Authorization"))
+			}
+			rec := httptest.NewRecorder()
+			rec.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rec).Encode(map[string]interface{}{
+				"status":     "ok",
+				"public_key": pubStr,
+				"version":    "5.2.2",
+				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			})
+			return rec.Result(), nil
+		}),
+	}
+
+	res := PingDashboard(context.Background(), client, "http://localhost:7890", "test-tok", "agent-node")
+	if !res.Connected {
+		t.Fatalf("expected Connected=true, got false: %v", res.Err)
+	}
+	if res.ServerPubKey == nil {
+		t.Fatal("expected non-nil ServerPubKey")
+	}
+	if res.ServerPubKeyStr != pubStr {
+		t.Errorf("expected ServerPubKeyStr=%s, got %s", pubStr, res.ServerPubKeyStr)
+	}
+}
+
+func TestShipper_PingDashboard_AuthFailure(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(rec).Encode(map[string]string{"error": "unauthorized"})
+			return rec.Result(), nil
+		}),
+	}
+
+	res := PingDashboard(context.Background(), client, "http://localhost:7890", "bad-tok", "agent-node")
+	if res.Connected {
+		t.Fatal("expected Connected=false for 401")
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected StatusCode=401, got %d", res.StatusCode)
+	}
+}
+
+func TestShipper_SendBatchWithRetry_KeyRotationRecovery(t *testing.T) {
+	_, oldPub, _ := crypto.GenerateKeyPair()
+	newPriv, newPub, _ := crypto.GenerateKeyPair()
+	newPubStr := crypto.EncodePublicKey(newPub)
+
+	var attempts int32
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&attempts, 1)
+			var enc crypto.EncryptedPayload
+			_ = json.NewDecoder(req.Body).Decode(&enc)
+
+			rec := httptest.NewRecorder()
+			dec, decErr := crypto.Decrypt(newPriv, &enc)
+			if decErr != nil {
+				rec.Header().Set("Content-Type", "application/json")
+				rec.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(rec).Encode(map[string]string{
+					"error":      "decryption failed: " + decErr.Error(),
+					"public_key": newPubStr,
+				})
+				return rec.Result(), nil
+			}
+
+			var p pushPayload
+			if err := json.Unmarshal(dec, &p); err != nil {
+				t.Errorf("failed to decode decrypted payload: %v", err)
+				rec.WriteHeader(http.StatusBadRequest)
+				return rec.Result(), nil
+			}
+			rec.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(rec).Encode(map[string]string{"status": "ok"})
+			return rec.Result(), nil
+		}),
+	}
+
+	var keyUpdated bool
+	RegisterKeyUpdateCallback(func(pk *ecdh.PublicKey) {
+		keyUpdated = true
+	})
+
+	batch := []string{"event-1", "event-2"}
+	err := SendBatchWithRetry(context.Background(), client, "http://localhost:7890/api/v1/events", "token", "agent1", "host1", oldPub, batch)
+	if err != nil {
+		t.Fatalf("SendBatchWithRetry failed to auto-recover on key rotation: %v", err)
+	}
+	if atomic.LoadInt32(&attempts) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+	if !keyUpdated {
+		t.Error("expected key update callback to be notified")
+	}
+}
+
+func TestShipper_HandlePush_Help(t *testing.T) {
+	// Should not panic or exit on "help"
+	HandlePush([]string{"help"}, "5.3.0")
+}
+

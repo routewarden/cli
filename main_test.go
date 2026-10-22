@@ -2082,3 +2082,82 @@ func TestCLI_Schema_HasConfigFile(t *testing.T) {
 		t.Errorf("expected schema properties to contain 'config_file'")
 	}
 }
+
+func TestCLI_Schema_TCP(t *testing.T) {
+	// Test --tcp
+	stdout, stderr, code := runCLI(t, "schema", "--tcp")
+	if code != 0 {
+		t.Fatalf("expected code 0 from schema --tcp, got %d. stderr: %s", code, stderr)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("tcp schema output is not valid JSON: %v", err)
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tcp schema missing properties object")
+	}
+
+	if _, exists := props["services"]; !exists {
+		t.Errorf("expected tcp schema properties to contain 'services'")
+	}
+
+	// Test -t alias
+	stdoutShort, stderrShort, codeShort := runCLI(t, "schema", "-t")
+	if codeShort != 0 {
+		t.Fatalf("expected code 0 from schema -t, got %d. stderr: %s", codeShort, stderrShort)
+	}
+	if stdoutShort != stdout {
+		t.Errorf("expected -t output to match --tcp output")
+	}
+}
+
+func TestCLI_Validate_AutoDetect_TCPWardenYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	yamlContent := `version: "1.0"
+services:
+  echo:
+    listen: ":9999"
+    upstream: "127.0.0.1:9000"
+    protocol: "tcp"
+`
+	if err := os.WriteFile("tcp-warden.yaml", []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, "validate")
+	if code != 0 {
+		t.Fatalf("expected validate without args to auto-detect tcp-warden.yaml, got code %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "VALID (TCP Warden YAML format)") {
+		t.Errorf("expected valid TCP Warden YAML message, got:\n%s", stdout)
+	}
+}
+
+func TestCLI_Validate_TCPWarden_Stdin(t *testing.T) {
+	yamlContent := `version: "1.0"
+services:
+  echo:
+    listen: ":9999"
+    upstream: "127.0.0.1:9000"
+    protocol: "tcp"
+`
+	stdout, stderr, code := runCLIWithStdin(t, yamlContent, "validate", "-")
+	if code != 0 {
+		t.Fatalf("expected validate with stdin to validate TCP Warden YAML, got code %d. stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "VALID (TCP Warden YAML format)") {
+		t.Errorf("expected valid TCP Warden YAML message for stdin, got:\n%s", stdout)
+	}
+}
