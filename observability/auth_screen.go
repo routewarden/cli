@@ -423,7 +423,7 @@ const CustomAuthScreenHTML = `<!DOCTYPE html>
           <div class="cap-dot yellow"></div>
           <div class="cap-dot green"></div>
         </div>
-        <span>terminal.login.v5.3.0</span>
+        <span>terminal.login.v5.3.1</span>
       </div>
 
       <div class="card-body">

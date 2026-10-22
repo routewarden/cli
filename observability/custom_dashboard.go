@@ -3817,7 +3817,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div style="display:flex; align-items:center; gap:8px;">
       <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
       <span>ROUTEWARDEN</span>
-      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.3.0</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.3.1</span>
     </div>
     <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
     <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
@@ -3878,8 +3878,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.3.0 // Traffic & Security Engine</span>
-            <span class="spec-pill spec-pill-green">CORE v5.3.0</span>
+            <span class="spec-val">RouteWarden Core v5.3.1 // Traffic & Security Engine</span>
+            <span class="spec-pill spec-pill-green">CORE v5.3.1</span>
           </div>
         </div>
         <div class="spec-row">
