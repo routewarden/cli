@@ -17,6 +17,15 @@ elif [ -x "/usr/bin/rwarden" ]; then
   /usr/bin/rwarden cleanup >/dev/null 2>&1 || true
 fi
 
+# Stop standalone tcp-warden daemon if installed and running
+if command -v tcp-warden >/dev/null 2>&1; then
+  tcp-warden stop >/dev/null 2>&1 || true
+elif [ -x "/usr/local/bin/tcp-warden" ]; then
+  /usr/local/bin/tcp-warden stop >/dev/null 2>&1 || true
+elif [ -x "/usr/bin/tcp-warden" ]; then
+  /usr/bin/tcp-warden stop >/dev/null 2>&1 || true
+fi
+
 # Stop any running docker dashboard container if docker is accessible
 if command -v docker >/dev/null 2>&1; then
   docker rm -f routewarden-dashboard >/dev/null 2>&1 || true
