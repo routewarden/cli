@@ -121,3 +121,25 @@ jobs:
           push: true
           tags: ${{ steps.meta-dashboard.outputs.tags }}
           labels: ${{ steps.meta-dashboard.outputs.labels }}
+
+      # ── 4. Dedicated TCP Warden Container ───────────────────────────────────
+      - name: Extract Docker metadata (TCP Warden)
+        id: meta-tcp-warden
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tcp-warden
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push TCP Warden Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.tcp-warden
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-tcp-warden.outputs.tags }}
+          labels: ${{ steps.meta-tcp-warden.outputs.labels }}

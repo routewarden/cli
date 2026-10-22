@@ -22,18 +22,50 @@ builds:
     ldflags:
       - -s -w -X main.version={{.Version}}
 
+  - id: tcp-warden
+    main: ./cmd/tcp-warden
+    binary: tcp-warden
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
 archives:
-  - id: default
+  - id: rwarden
+    builds:
+      - rwarden
     formats:
       - tar.gz
     format_overrides:
       - goos: windows
         formats:
           - zip
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "rwarden_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE
+
+  - id: tcp-warden
+    builds:
+      - tcp-warden
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "tcp-warden_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - cmd/tcp-warden/tcp-warden.yaml
 
 checksum:
   name_template: "checksums.txt"
@@ -52,6 +84,7 @@ homebrew_casks:
   - name: rwarden
     binaries:
       - rwarden
+      - tcp-warden
     repository:
       owner: routewarden
       name: homebrew-tap
@@ -70,17 +103,21 @@ homebrew_casks:
             system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["stop"], must_succeed: false
             system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["cleanup"], must_succeed: false
           end
+          if File.exist?("#{HOMEBREW_PREFIX}/bin/tcp-warden")
+            system_command "#{HOMEBREW_PREFIX}/bin/tcp-warden", args: ["stop"], must_succeed: false
+          end
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"] if File.exist?("#{staged_path}/rwarden")
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/tcp-warden"] if File.exist?("#{staged_path}/tcp-warden")
           end
     zap:
       trash:
         - "~/.routewarden"
 
 nfpms:
-  - id: packages
+  - id: rwarden-packages
     package_name: rwarden
     vendor: RouteWarden
     homepage: "https://routewarden.github.io"
@@ -93,11 +130,38 @@ nfpms:
       - apk
     bindir: /usr/local/bin
     section: utils
+    builds:
+      - rwarden
     contents:
       - src: LICENSE
         dst: /usr/share/doc/rwarden/copyright
       - src: README.md
         dst: /usr/share/doc/rwarden/README.md
+    scripts:
+      preremove: scripts/preremove.sh
+
+  - id: tcp-warden-packages
+    package_name: tcp-warden
+    vendor: RouteWarden
+    homepage: "https://routewarden.github.io"
+    maintainer: "RouteWarden Contributors <bot@routewarden.dev>"
+    description: "High-Performance Layer 4 TCP/UDP Reverse Proxy with Protocol Defense"
+    license: "MIT"
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/local/bin
+    section: utils
+    builds:
+      - tcp-warden
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/tcp-warden/copyright
+      - src: README.md
+        dst: /usr/share/doc/tcp-warden/README.md
+      - src: cmd/tcp-warden/tcp-warden.yaml
+        dst: /etc/routewarden/tcp-warden.yaml
     scripts:
       preremove: scripts/preremove.sh
 

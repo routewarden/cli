@@ -41,14 +41,23 @@ jobs:
       - name: Build CLI Binary
         run: go build -v -o rwarden .
 
+      - name: Build TCP Warden Binary
+        run: go build -v -o tcp-warden ./cmd/tcp-warden
+
       - name: Smoke Test CLI Execution
         run: |
           ./rwarden version
           ./rwarden schema > /dev/null
+          ./rwarden schema --tcp > /dev/null
           ./rwarden test --path "/.env"
           ./rwarden test --path "/public/index.html"
+          ./rwarden tcp version
+          ./rwarden tcp validate -c ./cmd/tcp-warden/tcp-warden.yaml
           ./rwarden dashboard export ./obs-smoke-test
           rm -rf ./obs-smoke-test
+          ./tcp-warden version
+          ./tcp-warden validate -c ./cmd/tcp-warden/tcp-warden.yaml
+          ./tcp-warden plugins list
 
   docker-build-test:
     name: Docker Build Validation
@@ -84,6 +93,14 @@ jobs:
           push: false
           tags: ghcr.io/routewarden/dashboard:test
 
+      - name: Build TCP Warden Docker image (Dry Run)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.tcp-warden
+          push: false
+          tags: ghcr.io/routewarden/tcp-warden:test
+
   ci-success:
     name: CI Status Check
     needs: [test-go, docker-build-test]
@@ -97,6 +114,7 @@ jobs:
           echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Go Tests & Race Detector** | ✅ Passed | Ran with \`-race\` on Go 1.26.x |" >> $GITHUB_STEP_SUMMARY
           echo "| **CLI Build & Smoke Tests** | ✅ Passed | Built and verified commands |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Docker Build** | ✅ Passed | Verified Go container |" >> $GITHUB_STEP_SUMMARY
+          echo "| **TCP Warden Binary & L4 Proxy** | ✅ Passed | Built standalone and tested validation & plugins |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Docker Builds** | ✅ Passed | Verified CLI, Shipper, Dashboard & TCP Warden containers |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🎉 **Ready for merge! All checks passed.**" >> $GITHUB_STEP_SUMMARY

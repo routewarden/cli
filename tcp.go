@@ -41,11 +41,16 @@ Commands:
   reload           Send SIGHUP reload signal to running proxy
   validate         Validate YAML configuration file syntax and rules
   plugins          Manage and test modular protocol plugins
+  version          Show TCP proxy version
 
 Flags for up:
   --config, -c     Path to YAML config file (default: tcp-warden.yaml)
   --detach, -d     Run proxy in background (detached) mode
   --verbose, -v    Enable verbose logging`)
+		return
+
+	case "version", "--version", "-v":
+		fmt.Printf("RouteWarden TCP Proxy (%s)\n", version)
 		return
 
 	case "down", "stop":
