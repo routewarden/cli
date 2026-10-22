@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"golang.org/x/mod/semver"
 )
 
 // SemVer represents a parsed Semantic Version conforming to SemVer 2.0.0.
@@ -96,12 +94,6 @@ func (v SemVer) String() string {
 //    0 if v1 == v2
 //    1 if v1 > v2
 func CompareSemVer(v1, v2 SemVer) int {
-	canon1 := "v" + v1.String()
-	canon2 := "v" + v2.String()
-	if semver.IsValid(canon1) && semver.IsValid(canon2) {
-		return semver.Compare(canon1, canon2)
-	}
-
 	if v1.Major != v2.Major {
 		if v1.Major < v2.Major {
 			return -1

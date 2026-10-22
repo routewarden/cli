@@ -15,8 +15,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"golang.org/x/mod/modfile"
-
 	"github.com/routewarden/cli/proxy/plugins/sdk"
 )
 
@@ -747,22 +745,55 @@ func extractModuleRequirements(dir string) []string {
 		if err != nil {
 			continue
 		}
-		f, err := modfile.Parse(cand, data, nil)
-		if err != nil || f == nil {
-			continue
-		}
-		if f.Module != nil && f.Module.Mod.Path == "github.com/routewarden/cli/proxy" {
-			continue
-		}
-		for _, req := range f.Require {
-			if req.Mod.Path == "github.com/routewarden/cli/proxy" || req.Mod.Path == "" {
-				continue
-			}
-			spec := fmt.Sprintf("%s@%s", req.Mod.Path, req.Mod.Version)
+		for _, spec := range parseGoModRequirements(data) {
 			if !seen[spec] {
 				seen[spec] = true
 				reqs = append(reqs, spec)
 			}
+		}
+	}
+	return reqs
+}
+
+// parseGoModRequirements extracts module@version requirement specs from go.mod bytes.
+func parseGoModRequirements(data []byte) []string {
+	var reqs []string
+	lines := strings.Split(string(data), "\n")
+	inRequireBlock := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if idx := strings.Index(line, "//"); idx != -1 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		if line == "" {
+			continue
+		}
+
+		if line == "require (" {
+			inRequireBlock = true
+			continue
+		}
+		if inRequireBlock && line == ")" {
+			inRequireBlock = false
+			continue
+		}
+
+		var modPath, modVer string
+		if inRequireBlock {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				modPath, modVer = parts[0], parts[1]
+			}
+		} else if strings.HasPrefix(line, "require ") {
+			parts := strings.Fields(strings.TrimPrefix(line, "require "))
+			if len(parts) >= 2 {
+				modPath, modVer = parts[0], parts[1]
+			}
+		}
+
+		if modPath != "" && modVer != "" && modPath != "github.com/routewarden/cli/proxy" && !strings.HasPrefix(modPath, "github.com/routewarden/cli") {
+			reqs = append(reqs, fmt.Sprintf("%s@%s", modPath, modVer))
 		}
 	}
 	return reqs

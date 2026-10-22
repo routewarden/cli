@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -14,11 +12,14 @@ const (
 )
 
 type ipRateLimiter struct {
-	limiter    *rate.Limiter
+	tokens     float64
+	capacity   float64
+	refillRate float64 // tokens per second
+	lastRefill time.Time
 	lastAccess time.Time
 }
 
-// RateLimiter manages per-service and per-IP token buckets using standard rate.Limiter.
+// RateLimiter manages per-service and per-IP token buckets.
 type RateLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*ipRateLimiter // key = service:ip
@@ -42,38 +43,52 @@ func (r *RateLimiter) Allow(service, ip string, connsPerMin, burst int) bool {
 		return true
 	}
 
-	capacity := burst
+	capacity := float64(burst)
 	if capacity <= 0 {
-		capacity = connsPerMin / 6 // default burst
+		capacity = float64(connsPerMin / 6) // default burst
 		if capacity < 2 {
 			capacity = 2
 		}
 	}
-	refillRate := rate.Limit(float64(connsPerMin) / 60.0)
+	refillRate := float64(connsPerMin) / 60.0 // tokens per second
 
 	key := service + ":" + ip
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now()
 	entry, exists := r.buckets[key]
 	if !exists {
 		entry = &ipRateLimiter{
-			limiter:    rate.NewLimiter(refillRate, capacity),
-			lastAccess: time.Now(),
+			tokens:     capacity - 1.0, // consume 1 token for initial connection
+			capacity:   capacity,
+			refillRate: refillRate,
+			lastRefill: now,
+			lastAccess: now,
 		}
 		r.buckets[key] = entry
-	} else {
-		entry.lastAccess = time.Now()
-		if entry.limiter.Limit() != refillRate {
-			entry.limiter.SetLimit(refillRate)
-		}
-		if entry.limiter.Burst() != capacity {
-			entry.limiter.SetBurst(capacity)
-		}
+		return true
 	}
 
-	return entry.limiter.Allow()
+	elapsed := now.Sub(entry.lastRefill).Seconds()
+	if elapsed > 0 {
+		entry.tokens += elapsed * entry.refillRate
+		if entry.tokens > capacity {
+			entry.tokens = capacity
+		}
+		entry.lastRefill = now
+	}
+	entry.capacity = capacity
+	entry.refillRate = refillRate
+	entry.lastAccess = now
+
+	if entry.tokens >= 1.0 {
+		entry.tokens -= 1.0
+		return true
+	}
+
+	return false
 }
 
 // Stop shuts down the background cleanup goroutine.
