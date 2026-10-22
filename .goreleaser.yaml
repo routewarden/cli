@@ -82,9 +82,10 @@ changelog:
 
 homebrew_casks:
   - name: rwarden
+    ids:
+      - rwarden
     binaries:
       - rwarden
-      - tcp-warden
     repository:
       owner: routewarden
       name: homebrew-tap
@@ -103,13 +104,40 @@ homebrew_casks:
             system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["stop"], must_succeed: false
             system_command "#{HOMEBREW_PREFIX}/bin/rwarden", args: ["cleanup"], must_succeed: false
           end
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"] if File.exist?("#{staged_path}/rwarden")
+          end
+    zap:
+      trash:
+        - "~/.routewarden"
+
+  - name: tcp-warden
+    ids:
+      - tcp-warden
+    binaries:
+      - tcp-warden
+    repository:
+      owner: routewarden
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: routewarden-bot
+      email: bot@routewarden.dev
+    commit_msg_template: "Brew cask update for tcp-warden version {{ .Tag }}"
+    directory: Casks
+    homepage: "https://routewarden.github.io"
+    description: "High-Performance Layer 4 TCP/UDP Reverse Proxy with Protocol Defense"
+    hooks:
+      pre:
+        uninstall: |
           if File.exist?("#{HOMEBREW_PREFIX}/bin/tcp-warden")
             system_command "#{HOMEBREW_PREFIX}/bin/tcp-warden", args: ["stop"], must_succeed: false
           end
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/rwarden"] if File.exist?("#{staged_path}/rwarden")
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/tcp-warden"] if File.exist?("#{staged_path}/tcp-warden")
           end
     zap:
