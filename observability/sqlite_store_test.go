@@ -635,3 +635,51 @@ func TestStatsReconciliation_DynamicSync(t *testing.T) {
 		t.Fatalf("expected reconciled CleanCount 12, got %d", reconciled.CleanCount)
 	}
 }
+
+func TestSQLiteStore_SearchMethodAndStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "search_test.db")
+	store, err := observability.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create SQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		ClientIP:  "192.0.2.1",
+		Method:    "DELETE",
+		Path:      "/resource/1",
+		Status:    204,
+		Verdict:   "ALLOW",
+	})
+	store.Insert(&observability.SecurityEvent{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		ClientIP:  "192.0.2.2",
+		Method:    "POST",
+		Path:      "/login",
+		Status:    403,
+		Verdict:   "BLOCK",
+		Rule:      "bruteforce",
+	})
+	store.Flush()
+
+	// 1. Search by method "DELETE"
+	delEvents, err := store.Query(observability.LogQueryFilter{Search: "DELETE"})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(delEvents) != 1 || delEvents[0].Method != "DELETE" {
+		t.Errorf("expected 1 DELETE event from search, got %d", len(delEvents))
+	}
+
+	// 2. Search by status code "403"
+	statusEvents, err := store.Query(observability.LogQueryFilter{Search: "403"})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if len(statusEvents) != 1 || statusEvents[0].Status != 403 {
+		t.Errorf("expected 1 event with status 403 from search, got %d", len(statusEvents))
+	}
+}
+

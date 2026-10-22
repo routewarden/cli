@@ -162,12 +162,9 @@ func handleTUI(args []string) {
 			queryToUse = parts[1]
 		}
 
-		statusCode := cfg.StatusCode
-		if statusCode == 0 {
-			statusCode = 403
-		}
+		mode, statusCode, _ := cfg.ResolveResponse()
 		result := eng.EvaluateWithBody(activeMethod, testPath, queryToUse, activeHeaders, activeIP, activeBody)
-		renderEvaluationResult(testPath, activeMethod, activeIP, queryToUse, activeBody, statusCode, result)
+		renderEvaluationResult(testPath, activeMethod, activeIP, queryToUse, activeBody, statusCode, mode, result)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -218,10 +215,14 @@ func printTUIStatus(configName, method, ip, query, body string, headers map[stri
 	fmt.Println()
 }
 
-func renderEvaluationResult(path, method, ip, query, body string, statusCode int, res *engine.EvaluationResult) {
+func renderEvaluationResult(path, method, ip, query, body string, statusCode int, mode string, res *engine.EvaluationResult) {
 	fmt.Println()
 	if res.Blocked {
-		fmt.Printf("  Result: 🛑 BLOCKED (HTTP Status %d)\n", statusCode)
+		if mode != "" && !strings.EqualFold(mode, "text") {
+			fmt.Printf("  Result: 🛑 BLOCKED (HTTP Status %d, Mode: %s)\n", statusCode, mode)
+		} else {
+			fmt.Printf("  Result: 🛑 BLOCKED (HTTP Status %d)\n", statusCode)
+		}
 		fmt.Printf("  Reason:  %s\n", res.Reason)
 		if res.MatchedPattern != "" {
 			fmt.Printf("  Pattern: %s\n", res.MatchedPattern)
@@ -229,9 +230,17 @@ func renderEvaluationResult(path, method, ip, query, body string, statusCode int
 		if res.MatchedTarget != "" {
 			fmt.Printf("  Target:  %s\n", res.MatchedTarget)
 		}
+	} else if res.Bypassed {
+		fmt.Printf("  Result: ⏭️ BYPASSED (%s)\n", res.Reason)
 	} else {
 		fmt.Println("  Result: ✅ ALLOWED (Request permitted to backend)")
-		fmt.Printf("  Reason:  %s\n", res.Reason)
+		if res.Reason == "ip_whitelisted" {
+			fmt.Printf("  Reason:  %s (Whitelisted client IP)\n", res.Reason)
+		} else if res.MatchedPattern != "" {
+			fmt.Printf("  Allowlist Override: %s\n", res.MatchedPattern)
+		} else {
+			fmt.Printf("  Reason:  %s\n", res.Reason)
+		}
 	}
 
 	if len(res.CandidatePaths) > 0 {

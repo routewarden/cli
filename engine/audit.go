@@ -135,7 +135,9 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 
 	// ── Rule RW-A006: ReDoS Catastrophic Backtracking Risks ────────────────
 	nestedQuantifiers := regexp.MustCompile(`(\([^\)]*[\*\+\?][^\)]*\)[\*\+\?]|\.\*[\*\+]|\.\+[\*\+])`)
-	for _, p := range append(cfg.BlockPatterns, cfg.AllowPatterns...) {
+	allPatternsToCheck := append(append([]string{}, cfg.BlockPatterns...), cfg.AllowPatterns...)
+	allPatternsToCheck = append(allPatternsToCheck, cfg.CheckBodyPatterns...)
+	for _, p := range allPatternsToCheck {
 		if nestedQuantifiers.MatchString(p) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A006",
@@ -183,6 +185,47 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		}
 		seenAllow[normalized] = true
 	}
+
+	seenBody := make(map[string]bool)
+	for _, p := range cfg.CheckBodyPatterns {
+		normalized := strings.TrimSpace(p)
+		if seenBody[normalized] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A008",
+				Severity:    SeverityInfo,
+				Title:       "Duplicate Body Pattern",
+				Message:     fmt.Sprintf("Pattern %q is defined multiple times in checkBodyPatterns.", p),
+				Pattern:     p,
+				Field:       "checkBodyPatterns",
+				Remediation: "Remove duplicate body entries to optimize regex inspection.",
+			})
+		}
+		seenBody[normalized] = true
+	}
+
+	// ── Rule RW-A015: Invalid Regular Expression Syntax ─────────────────────
+	checkRegexSyntax := func(patterns []string, field string) {
+		for _, p := range patterns {
+			trimmed := strings.TrimSpace(p)
+			if trimmed == "" {
+				continue
+			}
+			if _, err := regexp.Compile(trimmed); err != nil {
+				report.Issues = append(report.Issues, AuditIssue{
+					Code:        "RW-A015",
+					Severity:    SeverityCritical,
+					Title:       "Invalid Regular Expression Syntax",
+					Message:     fmt.Sprintf("Pattern %q cannot be compiled: %v", p, err),
+					Pattern:     p,
+					Field:       field,
+					Remediation: "Fix the syntax error in the regular expression so it compiles cleanly.",
+				})
+			}
+		}
+	}
+	checkRegexSyntax(cfg.BlockPatterns, "blockPatterns")
+	checkRegexSyntax(cfg.AllowPatterns, "allowPatterns")
+	checkRegexSyntax(cfg.CheckBodyPatterns, "checkBodyPatterns")
 
 	// ── Rule RW-A009: Invalid IP / CIDR Notations ───────────────────────────
 	for _, ipStr := range cfg.AllowedIPs {
@@ -462,7 +505,7 @@ func (r *AuditReport) ToSARIF() ([]byte, error) {
 				Tool: sarifTool{
 					Driver: sarifDriver{
 						Name:           "RouteWarden Security Linter",
-						Version:        "5.2.2", // tool version
+						Version:        "5.3.0", // tool version
 						InformationURI: "https://routewarden.github.io",
 						Rules:          rules,
 					},

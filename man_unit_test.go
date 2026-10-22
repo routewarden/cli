@@ -33,6 +33,7 @@ func TestGenerateManPage_Unit(t *testing.T) {
 		`\fBkeys\fR`,
 		`\fBregister\fR`,
 		`\fBpush\fR`,
+		`\fBtcp\fR`,
 		`\fBstatus\fR`,
 		`\fBstop\fR`,
 		`\fBcleanup\fR`,

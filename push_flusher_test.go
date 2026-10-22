@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -418,3 +420,143 @@ func TestSendBatchWithRetry_ClientErrorNonRetryable(t *testing.T) {
 		t.Errorf("expected 401 in error string, got: %v", err)
 	}
 }
+
+func TestPingDashboard_Success(t *testing.T) {
+	_, pub, err := crypto.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubStr := crypto.EncodePublicKey(pub)
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/api/v1/ping" {
+				t.Errorf("unexpected path: %s", req.URL.Path)
+			}
+			if req.Header.Get("Authorization") != "Bearer test-token" {
+				t.Errorf("unexpected auth header: %s", req.Header.Get("Authorization"))
+			}
+			if req.Header.Get("X-Agent-Hostname") != "node-1" {
+				t.Errorf("unexpected hostname header: %s", req.Header.Get("X-Agent-Hostname"))
+			}
+			rec := httptest.NewRecorder()
+			rec.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rec).Encode(map[string]interface{}{
+				"status":     "ok",
+				"public_key": pubStr,
+				"version":    "5.2.2",
+				"timestamp":  time.Now().UTC().Format(time.RFC3339),
+			})
+			return rec.Result(), nil
+		}),
+	}
+
+	res := pingDashboard(context.Background(), client, "http://localhost:7890", "test-token", "node-1")
+	if !res.Connected {
+		t.Fatalf("expected Connected=true, got false: %v", res.Err)
+	}
+	if res.ServerPubKey == nil {
+		t.Fatal("expected non-nil ServerPubKey")
+	}
+	if res.ServerPubKeyStr != pubStr {
+		t.Errorf("expected ServerPubKeyStr=%s, got %s", pubStr, res.ServerPubKeyStr)
+	}
+}
+
+func TestPingDashboard_AuthFailure(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			rec.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(rec).Encode(map[string]string{"error": "invalid agent token"})
+			return rec.Result(), nil
+		}),
+	}
+
+	res := pingDashboard(context.Background(), client, "http://localhost:7890", "bad-token", "node-1")
+	if res.Connected {
+		t.Fatal("expected Connected=false for 401 Unauthorized")
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected StatusCode=401, got %d", res.StatusCode)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "401") {
+		t.Errorf("expected 401 in error, got: %v", res.Err)
+	}
+}
+
+func TestPingDashboard_Unreachable(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("dial tcp 127.0.0.1:59999: connect: connection refused")
+		}),
+	}
+	res := pingDashboard(context.Background(), client, "http://127.0.0.1:59999", "tok", "host")
+	if res.Connected {
+		t.Fatal("expected Connected=false for unreachable server")
+	}
+	if res.Err == nil {
+		t.Fatal("expected connection error, got nil")
+	}
+}
+
+func TestSendBatchWithRetry_KeyRotationRecovery(t *testing.T) {
+	_, oldPub, _ := crypto.GenerateKeyPair()
+	newPriv, newPub, _ := crypto.GenerateKeyPair()
+	newPubStr := crypto.EncodePublicKey(newPub)
+
+	var attempts int32
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&attempts, 1)
+			var enc crypto.EncryptedPayload
+			_ = json.NewDecoder(req.Body).Decode(&enc)
+
+			rec := httptest.NewRecorder()
+			dec, decErr := crypto.Decrypt(newPriv, &enc)
+			if decErr != nil {
+				// First attempt fails decryption because client used oldPub
+				rec.Header().Set("Content-Type", "application/json")
+				rec.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(rec).Encode(map[string]string{
+					"error":      "decryption failed: " + decErr.Error(),
+					"public_key": newPubStr,
+				})
+				return rec.Result(), nil
+			}
+
+			// Second attempt succeeds decryption because client updated to newPub!
+			var p pushPayload
+			if err := json.Unmarshal(dec, &p); err != nil {
+				t.Errorf("failed to unmarshal decrypted payload: %v", err)
+				rec.WriteHeader(http.StatusBadRequest)
+				return rec.Result(), nil
+			}
+			if len(p.Events) != 2 || p.Events[0] != "event-alpha" {
+				t.Errorf("unexpected events: %v", p.Events)
+			}
+			rec.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(rec).Encode(map[string]string{"status": "ok"})
+			return rec.Result(), nil
+		}),
+	}
+
+	var keyUpdated bool
+	registerKeyUpdateCallback(func(pk *ecdh.PublicKey) {
+		keyUpdated = true
+	})
+
+	batch := []string{"event-alpha", "event-beta"}
+	err := sendBatchWithRetry(context.Background(), client, "http://localhost:7890/api/v1/events", "token", "agent1", "host1", oldPub, batch)
+	if err != nil {
+		t.Fatalf("sendBatchWithRetry failed to auto-recover on key rotation: %v", err)
+	}
+	if atomic.LoadInt32(&attempts) != 2 {
+		t.Fatalf("expected 2 attempts (first failed decryption, second retry with new key succeeded), got %d", attempts)
+	}
+	if !keyUpdated {
+		t.Error("expected key update callback to be notified")
+	}
+}
+
+

@@ -91,3 +91,40 @@ func TestCmdDashboardDistribution_BuildAndHelp(t *testing.T) {
 		t.Errorf("unexpected version output: %s", string(verOut))
 	}
 }
+
+func TestCmdTCPWardenDistribution_BuildAndHelp(t *testing.T) {
+	tmpDir := t.TempDir()
+	tcpBin := filepath.Join(tmpDir, "tcp-warden")
+
+	// 1. Build cmd/tcp-warden
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", tcpBin, "./cmd/tcp-warden")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build ./cmd/tcp-warden: %v\nOutput: %s", err, string(out))
+	}
+
+	// 2. Test running --help
+	helpCmd := exec.Command(tcpBin, "--help")
+	helpOut, err := helpCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tcp-warden --help failed: %v", err)
+	}
+	helpStr := string(helpOut)
+	if !strings.Contains(helpStr, "TCP Warden") {
+		t.Errorf("expected 'TCP Warden' in help, got: %s", helpStr)
+	}
+	if !strings.Contains(helpStr, "run") || !strings.Contains(helpStr, "validate") || !strings.Contains(helpStr, "plugins") {
+		t.Errorf("expected 'run', 'validate', 'plugins' in help, got: %s", helpStr)
+	}
+
+	// 3. Test running version
+	verCmd := exec.Command(tcpBin, "version")
+	verOut, err := verCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tcp-warden version failed: %v", err)
+	}
+	if !strings.Contains(string(verOut), "tcp-warden version") {
+		t.Errorf("unexpected version output: %s", string(verOut))
+	}
+}

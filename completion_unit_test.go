@@ -18,6 +18,7 @@ func TestShellCompletions_Unit(t *testing.T) {
 		"keys",
 		"register",
 		"push",
+		"tcp",
 		"monitor",
 		"tui",
 		"completion",

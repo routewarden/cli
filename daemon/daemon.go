@@ -54,10 +54,15 @@ func RemovePID(name string) {
 
 func SpawnDetached(name, displayName string, rawArgs []string, port int, url string) error {
 	// 1. Check if already running
-	if pid, err := ReadPID(name); err == nil && CheckProcessAlive(pid) {
-		fmt.Fprintf(os.Stderr, "⚠️  %s is already running in background (PID: %d).\n", displayName, pid)
-		fmt.Fprintf(os.Stderr, "   Run 'rwarden %s stop' to terminate it before starting a new instance.\n", name)
-		os.Exit(1)
+	if pid, err := ReadPID(name); err == nil {
+		if CheckProcessAlive(pid) {
+			fmt.Fprintf(os.Stderr, "⚠️  %s is already running in background (PID: %d).\n", displayName, pid)
+			fmt.Fprintf(os.Stderr, "   Run 'rwarden %s stop' to terminate it before starting a new instance.\n", name)
+			os.Exit(1)
+		} else {
+			// Stale PID file left behind by abnormal termination
+			RemovePID(name)
+		}
 	}
 
 	execPath, err := os.Executable()
@@ -226,6 +231,14 @@ func Status(name, displayName string) bool {
 }
 
 func GlobalStatus(args []string) {
+	if len(args) > 0 {
+		arg := strings.ToLower(args[0])
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			fmt.Println("Usage: rwarden status [dashboard|push|tcp|all]")
+			return
+		}
+	}
+
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target = strings.ToLower(args[0])
@@ -234,19 +247,34 @@ func GlobalStatus(args []string) {
 	switch target {
 	case "dashboard":
 		Status("dashboard", "RouteWarden Dashboard")
-	case "push", "agent":
+	case "push", "agent", "shipper":
 		Status("push", "RouteWarden Remote Shipper")
-	default:
+	case "tcp", "proxy", "tcp-warden":
+		Status("tcp", "RouteWarden TCP Proxy")
+	case "", "all":
 		fmt.Println("RouteWarden Background Services:")
 		fmt.Println("─────────────────────────────────────────────────────────────")
 		Status("dashboard", "Dashboard")
 		fmt.Println()
 		Status("push", "Remote Shipper")
+		fmt.Println()
+		Status("tcp", "TCP Proxy")
 		fmt.Println("─────────────────────────────────────────────────────────────")
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown service %q. Available services: dashboard, push, tcp, all\n", target)
+		os.Exit(1)
 	}
 }
 
 func GlobalStop(args []string) {
+	if len(args) > 0 {
+		arg := strings.ToLower(args[0])
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			fmt.Println("Usage: rwarden stop [dashboard|push|tcp|all]")
+			return
+		}
+	}
+
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target = strings.ToLower(args[0])
@@ -255,13 +283,19 @@ func GlobalStop(args []string) {
 	switch target {
 	case "dashboard":
 		_, _ = Stop("dashboard", "RouteWarden Dashboard")
-	case "push", "agent":
+	case "push", "agent", "shipper":
 		_, _ = Stop("push", "RouteWarden Remote Shipper")
-	default:
+	case "tcp", "proxy", "tcp-warden":
+		_, _ = Stop("tcp", "RouteWarden TCP Proxy")
+	case "", "all":
 		fmt.Println("Stopping RouteWarden Background Services...")
 		fmt.Println("─────────────────────────────────────────────────────────────")
 		_, _ = Stop("dashboard", "Dashboard")
 		_, _ = Stop("push", "Remote Shipper")
+		_, _ = Stop("tcp", "TCP Proxy")
 		fmt.Println("─────────────────────────────────────────────────────────────")
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown service %q. Available services: dashboard, push, tcp, all\n", target)
+		os.Exit(1)
 	}
 }

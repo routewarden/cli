@@ -1010,7 +1010,7 @@ func processLogStream(msgChan <-chan streamMsg, verdictFilter, ipFilter, pathFil
 }
 
 func parseLogLine(line string) *logEvent {
-	trimmed := strings.TrimRight(line, " \r\t")
+	trimmed := strings.TrimSpace(line)
 	// Try parsing as JSON first
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		var ev logEvent
