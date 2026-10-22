@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.3.1
+# rwarden version 5.3.2
 ```
 
 ---
@@ -794,7 +794,7 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 **Example Output:**
 ```text
-rwarden version 5.3.1
+rwarden version 5.3.2
 ```
 
 ---

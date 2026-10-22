@@ -9,7 +9,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.3.1"
+var version = "5.3.2"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Shipper (` + version + `) — Lightweight Remote Security Log Shipper

@@ -28,7 +28,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.3.1"
+var version = "5.3.2"
 
 type stringSlice []string
 

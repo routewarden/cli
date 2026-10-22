@@ -5,7 +5,7 @@
 #   BUILDPLATFORM  – native platform of the builder host  (e.g. linux/amd64)
 #   TARGETOS       – target OS                            (e.g. linux)
 #   TARGETARCH     – target CPU arch                      (e.g. arm64)
-#   VERSION        – binary version string                (e.g. v5.3.1)
+#   VERSION        – binary version string                (e.g. v5.3.2)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build the Go binary on native platform with cross-compilation
