@@ -1,0 +1,60 @@
+# tcp-warden.yaml
+# RouteWarden TCP Security Proxy & L4 Firewall Configuration
+# Schema: https://routewarden.github.io/tcp-warden.schema.json
+
+version: "1.0"
+# Global daemon policy defaults
+global:
+  max_connections: 10000
+  ban_duration: "1h"
+  ban_after_failures: 5
+  tarpit_ms: 1000
+  log_level: "warn"
+  log_file: "/var/log/routewarden/tcp-warden.jsonl"
+  # Directory for persistent runtime state (bans.db SQLite database survives restarts)
+  data_dir: "/var/lib/routewarden"
+  geoip_db: "/etc/routewarden/GeoLite2-Country.mmdb"
+  ip_filter:
+    allow: []
+    deny: []
+  geo_block:
+    deny_countries: []
+    allow_countries: []
+# Management & metrics API (REST + Server-Sent Events)
+api:
+  enabled: true
+  listen: "${ROUTEWARDEN_API_LISTEN:-127.0.0.1:9091}"
+  socket: "${ROUTEWARDEN_API_SOCKET:-/var/run/routewarden/tcp-warden.sock}"
+  socket_mode: "0666"
+# CrowdSec LAPI Bouncer integration
+crowdsec:
+  enabled: false
+  lapi_url: "http://127.0.0.1:8080"
+  api_key: "${CROWDSEC_API_KEY}"
+  update_frequency: "10s"
+# Modular Protocol Plugins (https://github.com/routewarden/plugins)
+# Install plugins on demand via CLI: tcp-warden plugins install <name>
+plugins: {}
+
+# Active Services
+services:
+  # Generic Layer 4 TCP Bastion (Built-in Core Protocol)
+  generic_bastion:
+    listen: ":15432"
+    upstream: "127.0.0.1:5432"
+    protocol: "tcp"
+    rate_limit:
+      connections_per_minute: 120
+      burst: 30
+    ip_filter:
+      allow:
+        - "10.0.0.0/8"
+        - "192.168.0.0/16"
+        - "127.0.0.1/32"
+      deny:
+        - "198.51.100.0/24"
+    geo_block:
+      deny_countries:
+        - "KP"
+      allow_countries: []
+

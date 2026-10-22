@@ -120,6 +120,18 @@ if [ -f "${ROOT_DIR}/cmd/dashboard/main.go" ]; then
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
 
+if [ -f "${ROOT_DIR}/cmd/tcp-warden/main.go" ]; then
+  sed_inplace "s|([[:space:]]*version[[:space:]]*=[[:space:]]*\")[^\"]*(\")|\1${SEMVER_NO_V}\2|g" "${ROOT_DIR}/cmd/tcp-warden/main.go"
+  echo "  ✓ Synchronized cmd/tcp-warden/main.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
+if [ -f "${ROOT_DIR}/proxy/plugins/sdk/sdk.go" ]; then
+  sed_inplace "s|(const[[:space:]]+Version[[:space:]]*=[[:space:]]*\")[^\"]*(\")|\1${SEMVER_NO_V}\2|g" "${ROOT_DIR}/proxy/plugins/sdk/sdk.go"
+  echo "  ✓ Synchronized proxy/plugins/sdk/sdk.go"
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+fi
+
 # 2. Update package.json ("version": "X.Y.Z") if present
 if [ -f "${ROOT_DIR}/package.json" ]; then
   sed_inplace "s|(\"version\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")|\1${SEMVER_NO_V}\2|g" "${ROOT_DIR}/package.json"
@@ -160,7 +172,7 @@ fi
 
 # 7. Update README.md version comment
 if [ -f "${ROOT_DIR}/README.md" ]; then
-  sed_inplace "s|(# rwarden version )[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
+  sed_inplace "s|(#?[[:space:]]*rwarden version )[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?|\1${SEMVER_NO_V}|g" "${ROOT_DIR}/README.md"
   echo "  ✓ Synchronized README.md"
   UPDATED_COUNT=$((UPDATED_COUNT + 1))
 fi
@@ -173,7 +185,7 @@ if [ -f "${ROOT_DIR}/VERSIONING.md" ]; then
 fi
 
 # 9. Update Dockerfiles (version documentation examples)
-for DOCKERFILE in "${ROOT_DIR}/Dockerfile" "${ROOT_DIR}/Dockerfile.dashboard" "${ROOT_DIR}/Dockerfile.shipper"; do
+for DOCKERFILE in "${ROOT_DIR}/Dockerfile" "${ROOT_DIR}/Dockerfile.dashboard" "${ROOT_DIR}/Dockerfile.shipper" "${ROOT_DIR}/Dockerfile.tcp-warden"; do
   if [ -f "$DOCKERFILE" ]; then
     sed_inplace "s|(#[[:space:]]*VERSION[[:space:]]+.*\(e\.g\.[[:space:]]*)v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\))|\1${TARGET_VERSION}\3|g" "$DOCKERFILE"
     echo "  ✓ Synchronized $(basename "$DOCKERFILE")"

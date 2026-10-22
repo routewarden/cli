@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -59,3 +60,9 @@ func terminateProcess(pid int) error {
 func killProcess(pid int) error {
 	return terminateProcess(pid)
 }
+
+func signalProcess(_ int, _ syscall.Signal) error {
+	return fmt.Errorf("signals are not supported on Windows")
+}
+
+

@@ -1,0 +1,5 @@
+# CrowdSec Acquisition Configuration for TCP Warden
+filenames:
+  - /var/log/routewarden/tcp-warden.jsonl
+labels:
+  type: routewarden-tcp-warden

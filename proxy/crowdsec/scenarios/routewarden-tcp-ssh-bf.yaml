@@ -1,0 +1,13 @@
+# Detect SSH brute-force attacks via TCP Warden
+type: leaky
+name: routewarden/tcp-ssh-bf
+description: "Detect multiple SSH authentication failures via TCP Warden"
+filter: "evt.Meta.log_type == 'tcp_warden_event' && evt.Meta.protocol == 'ssh' && (evt.Meta.action == 'blocked' || evt.Meta.reason == 'max_auth_failures_exceeded' || evt.Meta.reason == 'ssh_auth_failure')"
+groupby: "evt.Meta.source_ip"
+capacity: 5
+leakspeed: "30s"
+blackhole: 1m
+labels:
+  remediation: true
+  type: bruteforce
+  service: ssh

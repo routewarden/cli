@@ -13,7 +13,7 @@ import (
 	"github.com/routewarden/cli/shipper"
 )
 
-var version = "5.2.2"
+var version = "5.3.0"
 
 func printUsage() {
 	fmt.Println(`RouteWarden Dashboard (` + version + `) — Standalone Real-Time SOC Security Dashboard
@@ -48,6 +48,10 @@ Flags for up:
   --container, -c      Tail a specific Docker container
   --dir                Directory to store configs (default: ~/.routewarden/dashboard)
   --verbose, -v        Enable verbose event-level logging
+  --retention          Data retention window (e.g. '30d', '7d', '48h', or '0' for unlimited)
+  --max-events         Maximum event row count capacity (default: 100000, 0 = unlimited)
+  --prune-interval     Automated background pruning frequency (default: '1h')
+  --max-log-size       Maximum access.log size before rotation (default: '50MB')
 `)
 }
 
@@ -114,6 +118,10 @@ func handleDashboardUp(args []string) {
 	host := fs.String("host", "", "Host IP interface to bind")
 	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
 	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
+	retention := fs.String("retention", "30d", "Data retention window (e.g. '30d', '7d', '48h', or '0' for unlimited)")
+	maxEvents := fs.Int("max-events", 100000, "Maximum event row count capacity before pruning (default: 100000, 0 = unlimited)")
+	pruneInterval := fs.String("prune-interval", "1h", "Automated background pruning frequency (e.g. '1h', '30m')")
+	maxLogSize := fs.String("max-log-size", "50MB", "Maximum size of access.log before rotation (e.g. '50MB', '100MB')")
 	_ = shipper.ParseFlagsLenient(fs, args)
 
 	if *host == "" {
@@ -170,7 +178,7 @@ func handleDashboardUp(args []string) {
 	}
 
 	ctx := context.Background()
-	if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr); err != nil {
+	if err := observability.Up(ctx, *dir, *port, *noOpen, *file, *container, *label, authStr, *host, verboseStr, *retention, strconv.Itoa(*maxEvents), *pruneInterval, *maxLogSize); err != nil {
 		fmt.Fprintf(os.Stderr, "Dashboard error: %v\n", err)
 		os.Exit(1)
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const hkdfInfo = "routewarden-v1-log-encryption"
@@ -32,12 +33,15 @@ func GenerateKeyPair() (*ecdh.PrivateKey, *ecdh.PublicKey, error) {
 
 // EncodePrivateKey returns the Base64 representation of an X25519 private key.
 func EncodePrivateKey(key *ecdh.PrivateKey) string {
+	if key == nil {
+		return ""
+	}
 	return base64.StdEncoding.EncodeToString(key.Bytes())
 }
 
 // DecodePrivateKey parses an X25519 private key from Base64.
 func DecodePrivateKey(encoded string) (*ecdh.PrivateKey, error) {
-	raw, err := base64.StdEncoding.DecodeString(encoded)
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
 		return nil, fmt.Errorf("decode base64 private key: %w", err)
 	}
@@ -46,12 +50,15 @@ func DecodePrivateKey(encoded string) (*ecdh.PrivateKey, error) {
 
 // EncodePublicKey returns the Base64 representation of an X25519 public key.
 func EncodePublicKey(key *ecdh.PublicKey) string {
+	if key == nil {
+		return ""
+	}
 	return base64.StdEncoding.EncodeToString(key.Bytes())
 }
 
 // DecodePublicKey parses an X25519 public key from Base64.
 func DecodePublicKey(encoded string) (*ecdh.PublicKey, error) {
-	raw, err := base64.StdEncoding.DecodeString(encoded)
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
 		return nil, fmt.Errorf("decode base64 public key: %w", err)
 	}

@@ -42,10 +42,12 @@ _rwarden_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="up test validate generate audit diff sandbox dashboard keys register push monitor tui status stop completion man cleanup schema version help"
+    local commands="up test validate generate audit diff sandbox dashboard keys register push tcp monitor tui status stop completion man cleanup schema version help"
     local generate_targets="traefik-yaml traefik-toml traefik-labels caddy nginx tcp-warden"
     local dashboard_cmds="up down status stop export"
-    local push_cmds="status stop"
+    local push_cmds="up down start run status stop"
+    local tcp_cmds="up down status stop reload plugins validate"
+    local tcp_plugin_cmds="list test enable disable install uninstall create"
     local formats="text json sarif"
     local methods="GET POST PUT DELETE PATCH HEAD OPTIONS"
 
@@ -56,6 +58,30 @@ _rwarden_completions() {
 
     local command="${words[1]}"
     case "$command" in
+        status|stop)
+            if [ "$cword" -eq 2 ]; then
+                COMPREPLY=( $(compgen -W "dashboard push tcp all" -- "$cur") )
+                return 0
+            fi
+            ;;
+        tcp)
+            if [ "$cword" -eq 2 ]; then
+                COMPREPLY=( $(compgen -W "$tcp_cmds" -- "$cur") )
+                return 0
+            fi
+            if [ "${words[2]}" = "plugins" ] && [ "$cword" -eq 3 ]; then
+                COMPREPLY=( $(compgen -W "$tcp_plugin_cmds" -- "$cur") )
+                return 0
+            fi
+            case "$prev" in
+                -c|--config)
+                    _filedir yaml
+                    return 0
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "--config -c --detach -d --verbose -v --help -h" -- "$cur") )
+            return 0
+            ;;
         generate)
             if [ "$cword" -eq 2 ]; then
                 COMPREPLY=( $(compgen -W "$generate_targets" -- "$cur") )
@@ -192,6 +218,7 @@ _rwarden() {
         'keys:Manage API authentication keys for remote log streaming'
         'register:Enroll remote server with a central RouteWarden dashboard'
         'push:Stream encrypted logs from a remote node to central dashboard'
+        'tcp:Launch or manage TCP/UDP Reverse Proxy and Guard Engine'
         'monitor:Tail and colorize live reverse proxy security events'
         'tui:Launch interactive terminal simulator'
         'status:Show running status of background dashboard and shipper daemons'
@@ -213,6 +240,16 @@ _rwarden() {
             ;;
         args)
             case $words[1] in
+                status|stop)
+                    _arguments '1:service:(dashboard push tcp all)'
+                    ;;
+                tcp)
+                    _arguments \
+                        '1:subcommand:(up down status stop reload plugins validate)' \
+                        '(-c --config)'{-c,--config}'[Path to TCP Warden YAML config]:file:_files -g "*.yaml"' \
+                        '(-d --detach)'{-d,--detach}'[Run in background detached mode]' \
+                        '(-v --verbose)'{-v,--verbose}'[Enable verbose logging]'
+                    ;;
                 generate)
                     _arguments \
                         '1:target:(traefik-yaml traefik-toml traefik-labels caddy nginx tcp-warden)' \
@@ -311,6 +348,7 @@ complete -c rwarden -n "__fish_use_subcommand" -a dashboard -d "Launch real-time
 complete -c rwarden -n "__fish_use_subcommand" -a keys -d "Manage API keys for remote log streaming"
 complete -c rwarden -n "__fish_use_subcommand" -a register -d "Enroll remote server with central dashboard"
 complete -c rwarden -n "__fish_use_subcommand" -a push -d "Stream encrypted logs to central dashboard"
+complete -c rwarden -n "__fish_use_subcommand" -a tcp -d "Launch or manage TCP/UDP Reverse Proxy and Guard Engine"
 complete -c rwarden -n "__fish_use_subcommand" -a monitor -d "Stream and colorize reverse proxy security events"
 complete -c rwarden -n "__fish_use_subcommand" -a tui -d "Interactive terminal path testing REPL"
 complete -c rwarden -n "__fish_use_subcommand" -a status -d "Show running status of background daemons"
@@ -328,9 +366,12 @@ complete -c rwarden -n "__fish_seen_subcommand_from generate" -a "traefik-yaml t
 complete -c rwarden -n "__fish_seen_subcommand_from audit" -s f -l format -a "text json sarif" -d "Output format"
 complete -c rwarden -n "__fish_seen_subcommand_from audit" -s s -l strict -d "Fail on warnings"
 
-# Subcommands for dashboard
+# Subcommands for dashboard, push, tcp, status, stop
 complete -c rwarden -n "__fish_seen_subcommand_from dashboard" -a "up down status stop export"
 complete -c rwarden -n "__fish_seen_subcommand_from push" -a "status stop"
+complete -c rwarden -n "__fish_seen_subcommand_from tcp" -a "up down status stop reload plugins validate"
+complete -c rwarden -n "__fish_seen_subcommand_from status stop" -a "dashboard push tcp all"
+complete -c rwarden -n "__fish_seen_subcommand_from plugins" -a "list test enable disable install"
 
 # Completion shells
 complete -c rwarden -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell"
@@ -344,7 +385,7 @@ func generatePowerShellCompletion() string {
 Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('up', 'test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'monitor', 'tui', 'status', 'stop', 'completion', 'man', 'cleanup', 'schema', 'version')
+    $commands = @('up', 'test', 'validate', 'generate', 'audit', 'diff', 'sandbox', 'dashboard', 'keys', 'register', 'push', 'tcp', 'monitor', 'tui', 'status', 'stop', 'completion', 'man', 'cleanup', 'schema', 'version')
     $elements = $commandAst.Elements
 
     if ($elements.Count -eq 2) {
@@ -356,6 +397,24 @@ Register-ArgumentCompleter -Native -CommandName rwarden -ScriptBlock {
 
     $subCommand = $elements[1].Value
     switch ($subCommand) {
+        'status' {
+            @('dashboard', 'push', 'tcp', 'all') |
+                Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+        }
+        'stop' {
+            @('dashboard', 'push', 'tcp', 'all') |
+                Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+        }
+        'tcp' {
+            @('up', 'down', 'status', 'stop', 'reload', 'plugins', 'validate') |
+                Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+        }
         'generate' {
             @('traefik-yaml', 'traefik-toml', 'traefik-labels', 'caddy', 'nginx', 'tcp-warden') |
                 Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {

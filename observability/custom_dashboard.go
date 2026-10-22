@@ -149,6 +149,13 @@ func GlobalStore() *EventStore {
 	return globalStore
 }
 
+// GetSQLite returns the attached persistent SQLiteStore, if any.
+func (s *EventStore) GetSQLite() *SQLiteStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sqlite
+}
+
 // AttachSQLite connects a persistent SQLiteStore to the EventStore.
 // It also preloads the latest events from SQLite into memory.
 func (s *EventStore) AttachSQLite(sq *SQLiteStore) {
@@ -430,16 +437,29 @@ func (s *EventStore) ingestInternal(ev *SecurityEvent, persist bool) {
 	// Top Countries
 	countryName := ev.Country
 	if countryName == "" {
-		countryName = "Unknown"
+		if ev.CountryCode != "" {
+			countryName = CountryCodeToName(ev.CountryCode)
+		} else {
+			countryName = "Unknown"
+		}
 	}
 	cItem, ok := s.countryCounts[countryName]
 	if !ok {
+		code := ev.CountryCode
+		if code == "" && countryName != "Unknown" {
+			code = CountryNameToCode(countryName)
+		}
 		cItem = &TopMetricItem{
 			Name:        countryName,
 			Country:     countryName,
-			CountryCode: ev.CountryCode,
+			CountryCode: code,
 		}
 		s.countryCounts[countryName] = cItem
+	}
+	if cItem.CountryCode == "" && ev.CountryCode != "" {
+		cItem.CountryCode = ev.CountryCode
+	} else if cItem.CountryCode == "" && countryName != "Unknown" {
+		cItem.CountryCode = CountryNameToCode(countryName)
 	}
 	cItem.Count++
 	if isBlocked {
@@ -834,6 +854,9 @@ func (s *EventStore) GetStats() DashboardStats {
 	// Sort Top Countries (deterministic: count desc, then name asc)
 	topCountries := make([]TopMetricItem, 0, len(s.countryCounts))
 	for _, item := range s.countryCounts {
+		if item.CountryCode == "" && item.Name != "" && item.Name != "Unknown" {
+			item.CountryCode = CountryNameToCode(item.Name)
+		}
 		topCountries = append(topCountries, *item)
 	}
 	sort.Slice(topCountries, func(i, j int) bool {
@@ -842,8 +865,8 @@ func (s *EventStore) GetStats() DashboardStats {
 		}
 		return topCountries[i].Name < topCountries[j].Name
 	})
-	if len(topCountries) > 10 {
-		topCountries = topCountries[:10]
+	if len(topCountries) > 250 {
+		topCountries = topCountries[:250]
 	}
 
 	// Sort Top Paths (deterministic: count desc, then name asc)
@@ -959,7 +982,9 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, store *EventStore) {
 		}()
 	}
 
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ok\"}\n\n")
+	if _, err := fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ok\"}\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	pingTicker := time.NewTicker(15 * time.Second)
@@ -969,16 +994,23 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, store *EventStore) {
 		select {
 		case <-r.Context().Done():
 			return
-		case ev := <-ch:
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
 			if ev != nil {
 				data, err := json.Marshal(ev)
 				if err == nil {
-					fmt.Fprintf(w, "event: event\ndata: %s\n\n", data)
+					if _, err := fmt.Fprintf(w, "event: event\ndata: %s\n\n", data); err != nil {
+						return
+					}
 					flusher.Flush()
 				}
 			}
 		case <-pingTicker.C:
-			fmt.Fprintf(w, "event: ping\ndata: {}\n\n")
+			if _, err := fmt.Fprintf(w, "event: ping\ndata: {}\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -2821,6 +2853,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
 
     .table-container {
+      min-height: 120px;
       max-height: 480px;
       overflow-y: auto;
       overflow-x: auto;
@@ -3703,6 +3736,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
 
       /* Stream Table Touch Scroll */
       .table-container {
+        min-height: 120px;
         max-height: 420px !important;
         -webkit-overflow-scrolling: touch !important;
       }
@@ -3783,7 +3817,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div style="display:flex; align-items:center; gap:8px;">
       <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
       <span>ROUTEWARDEN</span>
-      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.2.2</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.3.0</span>
     </div>
     <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
     <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
@@ -3802,6 +3836,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     </button>
     <button class="tui-btn" id="btn-toggle-scroll" onclick="toggleStreamPause()">⏸ Pause</button>
     <button class="tui-btn" id="btn-export-json">📥 Export</button>
+    <button class="tui-btn" id="btn-storage" onclick="openStorageModal()" title="Database Storage & Retention Policy">💾 Storage</button>
   </div>
 </div>
 
@@ -3843,8 +3878,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.2.2 // Traffic & Security Engine</span>
-            <span class="spec-pill spec-pill-green">CORE v5.2.2</span>
+            <span class="spec-val">RouteWarden Core v5.3.0 // Traffic & Security Engine</span>
+            <span class="spec-pill spec-pill-green">CORE v5.3.0</span>
           </div>
         </div>
         <div class="spec-row">
@@ -4066,8 +4101,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         </thead>
         <tbody id="stream-tbody"></tbody>
       </table>
-      <div style="position:sticky; bottom:12px; display:flex; justify-content:center; pointer-events:none; width:100%; margin-top:-36px;">
-        <button id="btn-scroll-top" class="tui-btn" style="display:none; pointer-events:auto; background:var(--teal); color:var(--crust); font-weight:700; border-color:var(--teal); box-shadow:0 2px 10px rgba(0,0,0,0.35); cursor:pointer;" onclick="jumpToLatest()">▲ JUMP TO LATEST</button>
+      <div style="position:sticky; bottom:12px; display:flex; justify-content:center; pointer-events:none; width:100%; height:0; overflow:visible;">
+        <button id="btn-scroll-top" class="tui-btn" style="display:none; pointer-events:auto; transform:translateY(-100%); background:var(--teal); color:var(--crust); font-weight:700; border-color:var(--teal); box-shadow:0 2px 10px rgba(0,0,0,0.35); cursor:pointer;" onclick="jumpToLatest()">▲ JUMP TO LATEST</button>
       </div>
     </div>
 
@@ -4290,6 +4325,19 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   </div>
 </div>
 
+<!-- ── Storage & Retention Policy Modal ──────────────────────── -->
+<div class="modal-overlay" id="storage-modal">
+  <div class="modal-card" style="max-width:620px;">
+    <div class="modal-header">
+      <span class="modal-title">💾 Storage & Data Retention</span>
+      <span class="modal-close" id="storage-modal-close-btn" onclick="closeStorageModal()">&times;</span>
+    </div>
+    <div class="modal-body" id="storage-modal-content">
+      <div style="text-align:center; padding:30px; color:var(--text-dim);">Loading storage telemetry...</div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Terminal Keybindings Status Footer ────────────────────── -->
 <div class="tui-footer">
   <div class="footer-keys">
@@ -4378,9 +4426,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   var modalContent = document.getElementById('modal-content');
   var modalClose = document.getElementById('modal-close-btn');
 
-  // ═══════════════════════════════════════════════════════════════
-  // Theme Management (System theme by default with override)
-  // ═══════════════════════════════════════════════════════════════
+  function escapeHTML(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function getSystemTheme() {
     return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
   }
@@ -4789,7 +4844,11 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
   });
 
   modalClose.addEventListener('click', function() { modal.style.display = 'none'; });
-  window.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+  window.addEventListener('click', function(e) {
+    if (e.target === modal) modal.style.display = 'none';
+    var stModal = document.getElementById('storage-modal');
+    if (stModal && e.target === stModal) stModal.style.display = 'none';
+  });
 
   // Keyboard Shortcuts
   window.addEventListener('keydown', function(e) {
@@ -4803,6 +4862,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       modal.style.display = 'none';
       var ipModal = document.getElementById('ip-modal');
       if (ipModal) ipModal.style.display = 'none';
+      var stModal = document.getElementById('storage-modal');
+      if (stModal) stModal.style.display = 'none';
     } else if (e.code === 'Space' || e.key === ' ') {
       e.preventDefault();
       toggleStreamPause();
@@ -5045,17 +5106,24 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var flag = getFlagEmoji(ev.country_code);
       var countryTitle = ev.country ? (flag + ' ' + ev.country) : 'Client IP';
 
-      rowsHTML += '<tr onclick="inspectEvent(' + ev.id + ')">' +
-        '<td>' + formatLocalTime(ev) + '</td>' +
+      var evId = (ev && typeof ev.id !== 'undefined') ? ev.id : 0;
+      var evTime = formatLocalTime(ev);
+      var evPath = (ev && ev.path) ? ev.path : '/';
+      var evClientIP = (ev && ev.client_ip) ? ev.client_ip : '127.0.0.1';
+      var evStatus = (ev && typeof ev.status !== 'undefined') ? ev.status : 200;
+      var latVal = (ev && typeof ev.latency_ms === 'number' && !isNaN(ev.latency_ms)) ? ev.latency_ms.toFixed(1) : '0.0';
+
+      rowsHTML += '<tr onclick="inspectEvent(' + evId + ')">' +
+        '<td>' + evTime + '</td>' +
         '<td><span class="bracket-badge ' + verdictClass + '">' + verdictLabel + '</span></td>' +
         '<td><span class="badge-method ' + methodClass + '">' + m + '</span></td>' +
-        '<td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="' + ev.path + '">' + ev.path + '</td>' +
-        '<td><span class="ip-clickable" title="' + countryTitle + '" onclick="event.stopPropagation(); inspectIP(\'' + ev.client_ip + '\')">' +
-          '<span style="margin-right:5px;">' + flag + '</span>' + ev.client_ip +
+        '<td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHTML(evPath) + '">' + escapeHTML(evPath) + '</td>' +
+        '<td><span class="ip-clickable" title="' + escapeHTML(countryTitle) + '" onclick="event.stopPropagation(); inspectIP(\'' + escapeHTML(evClientIP) + '\')">' +
+          '<span style="margin-right:5px;">' + flag + '</span>' + escapeHTML(evClientIP) +
         '</span></td>' +
-        '<td>[' + ev.status + ']</td>' +
+        '<td>[' + evStatus + ']</td>' +
         '<td>' + ruleHTML + '</td>' +
-        '<td style="color:var(--subtext);">' + ev.latency_ms.toFixed(1) + 'ms</td>' +
+        '<td style="color:var(--subtext);">' + latVal + 'ms</td>' +
       '</tr>';
     });
 
@@ -5394,81 +5462,272 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     scrollToLiveLog();
   };
 
-  // Precise GPS coordinates (latitude, longitude) for countries worldwide
+  // Precise GPS coordinates (latitude, longitude) for countries and territories worldwide
   var countryCoords = {
-    'US': { lat: 37.0902, lon: -95.7129, name: 'United States' },
-    'CA': { lat: 56.1304, lon: -106.3468, name: 'Canada' },
-    'MX': { lat: 23.6345, lon: -102.5528, name: 'Mexico' },
-    'BR': { lat: -14.2350, lon: -51.9253, name: 'Brazil' },
+    'AD': { lat: 42.5063, lon: 1.5218, name: 'Andorra' },
+    'AE': { lat: 23.4241, lon: 53.8478, name: 'United Arab Emirates' },
+    'AF': { lat: 33.9391, lon: 67.7100, name: 'Afghanistan' },
+    'AG': { lat: 17.0608, lon: -61.7964, name: 'Antigua and Barbuda' },
+    'AI': { lat: 18.2206, lon: -63.0686, name: 'Anguilla' },
+    'AL': { lat: 41.1533, lon: 20.1683, name: 'Albania' },
+    'AM': { lat: 40.0691, lon: 45.0382, name: 'Armenia' },
+    'AO': { lat: -11.2027, lon: 17.8739, name: 'Angola' },
+    'AQ': { lat: -75.2509, lon: -0.0714, name: 'Antarctica' },
     'AR': { lat: -38.4161, lon: -63.6167, name: 'Argentina' },
-    'CL': { lat: -35.6751, lon: -71.5430, name: 'Chile' },
-    'CO': { lat: 4.5709, lon: -74.2973, name: 'Colombia' },
-    'PE': { lat: -9.1900, lon: -75.0152, name: 'Peru' },
-    'VE': { lat: 6.4238, lon: -66.5897, name: 'Venezuela' },
-    'EC': { lat: -1.8312, lon: -78.1834, name: 'Ecuador' },
-    'GB': { lat: 55.3781, lon: -3.4360, name: 'United Kingdom' },
-    'IE': { lat: 53.1424, lon: -7.6921, name: 'Ireland' },
-    'FR': { lat: 46.2276, lon: 2.2137, name: 'France' },
-    'DE': { lat: 51.1657, lon: 10.4515, name: 'Germany' },
-    'NL': { lat: 52.1326, lon: 5.2913, name: 'Netherlands' },
-    'BE': { lat: 50.5039, lon: 4.4699, name: 'Belgium' },
-    'LU': { lat: 49.8153, lon: 6.1296, name: 'Luxembourg' },
-    'ES': { lat: 40.4637, lon: -3.7492, name: 'Spain' },
-    'PT': { lat: 39.3999, lon: -8.2245, name: 'Portugal' },
-    'IT': { lat: 41.8719, lon: 12.5674, name: 'Italy' },
-    'CH': { lat: 46.8182, lon: 8.2275, name: 'Switzerland' },
+    'AS': { lat: -14.2710, lon: -170.1322, name: 'American Samoa' },
     'AT': { lat: 47.5162, lon: 14.5501, name: 'Austria' },
-    'SE': { lat: 60.1282, lon: 18.6435, name: 'Sweden' },
-    'NO': { lat: 60.4720, lon: 8.4689, name: 'Norway' },
-    'FI': { lat: 61.9241, lon: 25.7482, name: 'Finland' },
-    'DK': { lat: 56.2639, lon: 9.5018, name: 'Denmark' },
-    'IS': { lat: 64.9631, lon: -19.0208, name: 'Iceland' },
-    'PL': { lat: 51.9194, lon: 19.1451, name: 'Poland' },
-    'CZ': { lat: 49.8175, lon: 15.4730, name: 'Czech Republic' },
-    'SK': { lat: 48.6690, lon: 19.6990, name: 'Slovakia' },
-    'HU': { lat: 47.1625, lon: 19.5033, name: 'Hungary' },
-    'RO': { lat: 45.9432, lon: 24.9668, name: 'Romania' },
+    'AU': { lat: -25.2744, lon: 133.7751, name: 'Australia' },
+    'AW': { lat: 12.5211, lon: -69.9683, name: 'Aruba' },
+    'AX': { lat: 60.1785, lon: 19.9156, name: 'Åland Islands' },
+    'AZ': { lat: 40.1431, lon: 47.5769, name: 'Azerbaijan' },
+    'BA': { lat: 43.9159, lon: 17.6791, name: 'Bosnia and Herzegovina' },
+    'BB': { lat: 13.1939, lon: -59.5432, name: 'Barbados' },
+    'BD': { lat: 23.6850, lon: 90.3563, name: 'Bangladesh' },
+    'BE': { lat: 50.5039, lon: 4.4699, name: 'Belgium' },
+    'BF': { lat: 12.2383, lon: -1.5616, name: 'Burkina Faso' },
     'BG': { lat: 42.7339, lon: 25.4858, name: 'Bulgaria' },
-    'UA': { lat: 48.3794, lon: 31.1656, name: 'Ukraine' },
-    'EE': { lat: 58.5953, lon: 25.0136, name: 'Estonia' },
-    'LV': { lat: 56.8796, lon: 24.6032, name: 'Latvia' },
-    'LT': { lat: 55.1694, lon: 23.8813, name: 'Lithuania' },
-    'GR': { lat: 39.0742, lon: 21.8243, name: 'Greece' },
+    'BH': { lat: 26.0667, lon: 50.5577, name: 'Bahrain' },
+    'BI': { lat: -3.3731, lon: 29.9189, name: 'Burundi' },
+    'BJ': { lat: 9.3077, lon: 2.3158, name: 'Benin' },
+    'BL': { lat: 17.9000, lon: -62.8333, name: 'Saint Barthélemy' },
+    'BM': { lat: 32.3078, lon: -64.7505, name: 'Bermuda' },
+    'BN': { lat: 4.5353, lon: 114.7277, name: 'Brunei' },
+    'BO': { lat: -16.2902, lon: -63.5887, name: 'Bolivia' },
+    'BQ': { lat: 12.1784, lon: -68.2385, name: 'Caribbean Netherlands' },
+    'BR': { lat: -14.2350, lon: -51.9253, name: 'Brazil' },
+    'BS': { lat: 25.0343, lon: -77.3963, name: 'Bahamas' },
+    'BT': { lat: 27.5142, lon: 90.4336, name: 'Bhutan' },
+    'BV': { lat: -54.4208, lon: 3.3464, name: 'Bouvet Island' },
+    'BW': { lat: -22.3285, lon: 24.6849, name: 'Botswana' },
+    'BY': { lat: 53.7098, lon: 27.9534, name: 'Belarus' },
+    'BZ': { lat: 17.1899, lon: -88.4976, name: 'Belize' },
+    'CA': { lat: 56.1304, lon: -106.3468, name: 'Canada' },
+    'CC': { lat: -12.1642, lon: 96.8710, name: 'Cocos Islands' },
+    'CD': { lat: -4.0383, lon: 21.7587, name: 'Democratic Republic of the Congo' },
+    'CF': { lat: 6.6111, lon: 20.9394, name: 'Central African Republic' },
+    'CG': { lat: -0.2280, lon: 15.8277, name: 'Republic of the Congo' },
+    'CH': { lat: 46.8182, lon: 8.2275, name: 'Switzerland' },
+    'CI': { lat: 7.5400, lon: -5.5471, name: 'Ivory Coast' },
+    'CK': { lat: -21.2367, lon: -159.7777, name: 'Cook Islands' },
+    'CL': { lat: -35.6751, lon: -71.5430, name: 'Chile' },
+    'CM': { lat: 7.3697, lon: 12.3547, name: 'Cameroon' },
+    'CN': { lat: 35.8617, lon: 104.1954, name: 'China' },
+    'CO': { lat: 4.5709, lon: -74.2973, name: 'Colombia' },
+    'CR': { lat: 9.7489, lon: -83.7534, name: 'Costa Rica' },
+    'CU': { lat: 21.5218, lon: -77.7812, name: 'Cuba' },
+    'CV': { lat: 16.0022, lon: -24.0131, name: 'Cape Verde' },
+    'CW': { lat: 12.1696, lon: -68.9900, name: 'Curaçao' },
+    'CX': { lat: -10.4475, lon: 105.6904, name: 'Christmas Island' },
     'CY': { lat: 35.1264, lon: 33.4299, name: 'Cyprus' },
+    'CZ': { lat: 49.8175, lon: 15.4730, name: 'Czech Republic' },
+    'DE': { lat: 51.1657, lon: 10.4515, name: 'Germany' },
+    'DJ': { lat: 11.8251, lon: 42.5903, name: 'Djibouti' },
+    'DK': { lat: 56.2639, lon: 9.5018, name: 'Denmark' },
+    'DM': { lat: 15.4150, lon: -61.3710, name: 'Dominica' },
+    'DO': { lat: 18.7357, lon: -70.1627, name: 'Dominican Republic' },
+    'DZ': { lat: 28.0339, lon: 1.6596, name: 'Algeria' },
+    'EC': { lat: -1.8312, lon: -78.1834, name: 'Ecuador' },
+    'EE': { lat: 58.5953, lon: 25.0136, name: 'Estonia' },
+    'EG': { lat: 26.8206, lon: 30.8025, name: 'Egypt' },
+    'EH': { lat: 24.2155, lon: -12.8858, name: 'Western Sahara' },
+    'ER': { lat: 15.1794, lon: 39.7823, name: 'Eritrea' },
+    'ES': { lat: 40.4637, lon: -3.7492, name: 'Spain' },
+    'ET': { lat: 9.1450, lon: 40.4897, name: 'Ethiopia' },
+    'FI': { lat: 61.9241, lon: 25.7482, name: 'Finland' },
+    'FJ': { lat: -17.7134, lon: 178.0650, name: 'Fiji' },
+    'FK': { lat: -51.7963, lon: -59.5236, name: 'Falkland Islands' },
+    'FM': { lat: 7.4256, lon: 150.5508, name: 'Micronesia' },
+    'FO': { lat: 61.8926, lon: -6.9118, name: 'Faroe Islands' },
+    'FR': { lat: 46.2276, lon: 2.2137, name: 'France' },
+    'GA': { lat: -0.8037, lon: 11.6094, name: 'Gabon' },
+    'GB': { lat: 55.3781, lon: -3.4360, name: 'United Kingdom' },
+    'GD': { lat: 12.1165, lon: -61.6790, name: 'Grenada' },
+    'GE': { lat: 42.3154, lon: 43.3569, name: 'Georgia' },
+    'GF': { lat: 3.9339, lon: -53.1258, name: 'French Guiana' },
+    'GG': { lat: 49.4657, lon: -2.5853, name: 'Guernsey' },
+    'GH': { lat: 7.9465, lon: -1.0232, name: 'Ghana' },
+    'GI': { lat: 36.1408, lon: -5.3536, name: 'Gibraltar' },
+    'GL': { lat: 71.7069, lon: -42.6043, name: 'Greenland' },
+    'GM': { lat: 13.4432, lon: -15.3101, name: 'Gambia' },
+    'GN': { lat: 9.9456, lon: -9.6966, name: 'Guinea' },
+    'GP': { lat: 16.2650, lon: -61.5510, name: 'Guadeloupe' },
+    'GQ': { lat: 1.6508, lon: 10.2679, name: 'Equatorial Guinea' },
+    'GR': { lat: 39.0742, lon: 21.8243, name: 'Greece' },
+    'GS': { lat: -54.4296, lon: -36.5879, name: 'South Georgia' },
+    'GT': { lat: 15.7835, lon: -90.2308, name: 'Guatemala' },
+    'GU': { lat: 13.4443, lon: 144.7937, name: 'Guam' },
+    'GW': { lat: 11.8037, lon: -15.1804, name: 'Guinea-Bissau' },
+    'GY': { lat: 4.8604, lon: -58.9302, name: 'Guyana' },
+    'HK': { lat: 22.3193, lon: 114.1694, name: 'Hong Kong' },
+    'HM': { lat: -53.0818, lon: 73.5042, name: 'Heard Island and McDonald Islands' },
+    'HN': { lat: 15.2000, lon: -86.2419, name: 'Honduras' },
     'HR': { lat: 45.1000, lon: 15.2000, name: 'Croatia' },
-    'SI': { lat: 46.1512, lon: 14.9955, name: 'Slovenia' },
+    'HT': { lat: 18.9712, lon: -72.2852, name: 'Haiti' },
+    'HU': { lat: 47.1625, lon: 19.5033, name: 'Hungary' },
+    'ID': { lat: -0.7893, lon: 113.9213, name: 'Indonesia' },
+    'IE': { lat: 53.1424, lon: -7.6921, name: 'Ireland' },
+    'IL': { lat: 31.0461, lon: 34.8516, name: 'Israel' },
+    'IM': { lat: 54.2361, lon: -4.5481, name: 'Isle of Man' },
+    'IN': { lat: 20.5937, lon: 78.9629, name: 'India' },
+    'IO': { lat: -6.3432, lon: 71.8765, name: 'British Indian Ocean Territory' },
+    'IQ': { lat: 33.2232, lon: 43.6793, name: 'Iraq' },
+    'IR': { lat: 32.4279, lon: 53.6880, name: 'Iran' },
+    'IS': { lat: 64.9631, lon: -19.0208, name: 'Iceland' },
+    'IT': { lat: 41.8719, lon: 12.5674, name: 'Italy' },
+    'JE': { lat: 49.2144, lon: -2.1313, name: 'Jersey' },
+    'JM': { lat: 18.1096, lon: -77.2975, name: 'Jamaica' },
+    'JO': { lat: 30.5852, lon: 36.2384, name: 'Jordan' },
+    'JP': { lat: 36.2048, lon: 138.2529, name: 'Japan' },
+    'KE': { lat: -0.0236, lon: 37.9062, name: 'Kenya' },
+    'KG': { lat: 41.2044, lon: 74.7661, name: 'Kyrgyzstan' },
+    'KH': { lat: 12.5657, lon: 104.9910, name: 'Cambodia' },
+    'KI': { lat: -3.3704, lon: -168.7340, name: 'Kiribati' },
+    'KM': { lat: -11.8750, lon: 43.8722, name: 'Comoros' },
+    'KN': { lat: 17.3578, lon: -62.7830, name: 'Saint Kitts and Nevis' },
+    'KP': { lat: 40.3399, lon: 127.5101, name: 'North Korea' },
+    'KR': { lat: 35.9078, lon: 127.7669, name: 'South Korea' },
+    'KW': { lat: 29.3117, lon: 47.4818, name: 'Kuwait' },
+    'KY': { lat: 19.5135, lon: -80.5670, name: 'Cayman Islands' },
+    'KZ': { lat: 48.0196, lon: 66.9237, name: 'Kazakhstan' },
+    'LA': { lat: 19.8563, lon: 102.4955, name: 'Laos' },
+    'LB': { lat: 33.8547, lon: 35.8623, name: 'Lebanon' },
+    'LC': { lat: 13.9094, lon: -60.9789, name: 'Saint Lucia' },
+    'LI': { lat: 47.1660, lon: 9.5554, name: 'Liechtenstein' },
+    'LK': { lat: 7.8731, lon: 80.7718, name: 'Sri Lanka' },
+    'LR': { lat: 6.4281, lon: -9.4295, name: 'Liberia' },
+    'LS': { lat: -29.6100, lon: 28.2336, name: 'Lesotho' },
+    'LT': { lat: 55.1694, lon: 23.8813, name: 'Lithuania' },
+    'LU': { lat: 49.8153, lon: 6.1296, name: 'Luxembourg' },
+    'LV': { lat: 56.8796, lon: 24.6032, name: 'Latvia' },
+    'LY': { lat: 26.3351, lon: 17.2283, name: 'Libya' },
+    'MA': { lat: 31.7917, lon: -7.0926, name: 'Morocco' },
+    'MC': { lat: 43.7384, lon: 7.4246, name: 'Monaco' },
+    'MD': { lat: 47.4116, lon: 28.3699, name: 'Moldova' },
+    'ME': { lat: 42.7087, lon: 19.3744, name: 'Montenegro' },
+    'MF': { lat: 18.0708, lon: -63.0501, name: 'Saint Martin' },
+    'MG': { lat: -18.7669, lon: 46.8691, name: 'Madagascar' },
+    'MH': { lat: 7.1315, lon: 171.1845, name: 'Marshall Islands' },
+    'MK': { lat: 41.6086, lon: 21.7453, name: 'North Macedonia' },
+    'ML': { lat: 17.5707, lon: -3.9962, name: 'Mali' },
+    'MM': { lat: 21.9162, lon: 95.9560, name: 'Myanmar' },
+    'MN': { lat: 46.8625, lon: 103.8467, name: 'Mongolia' },
+    'MO': { lat: 22.1987, lon: 113.5439, name: 'Macao' },
+    'MP': { lat: 15.0979, lon: 145.6739, name: 'Northern Mariana Islands' },
+    'MQ': { lat: 14.6415, lon: -61.0242, name: 'Martinique' },
+    'MR': { lat: 21.0079, lon: -10.9408, name: 'Mauritania' },
+    'MS': { lat: 16.7425, lon: -62.1874, name: 'Montserrat' },
+    'MT': { lat: 35.9375, lon: 14.3754, name: 'Malta' },
+    'MU': { lat: -20.3484, lon: 57.5522, name: 'Mauritius' },
+    'MV': { lat: 3.2028, lon: 73.2207, name: 'Maldives' },
+    'MW': { lat: -13.2543, lon: 34.3015, name: 'Malawi' },
+    'MX': { lat: 23.6345, lon: -102.5528, name: 'Mexico' },
+    'MY': { lat: 4.2105, lon: 101.9758, name: 'Malaysia' },
+    'MZ': { lat: -18.6657, lon: 35.5296, name: 'Mozambique' },
+    'NA': { lat: -22.9576, lon: 18.4904, name: 'Namibia' },
+    'NC': { lat: -20.9043, lon: 165.6180, name: 'New Caledonia' },
+    'NE': { lat: 17.6078, lon: 8.0817, name: 'Niger' },
+    'NF': { lat: -29.0408, lon: 167.9547, name: 'Norfolk Island' },
+    'NG': { lat: 9.0820, lon: 8.6753, name: 'Nigeria' },
+    'NI': { lat: 12.8654, lon: -85.2072, name: 'Nicaragua' },
+    'NL': { lat: 52.1326, lon: 5.2913, name: 'Netherlands' },
+    'NO': { lat: 60.4720, lon: 8.4689, name: 'Norway' },
+    'NP': { lat: 28.3949, lon: 84.1240, name: 'Nepal' },
+    'NR': { lat: -0.5228, lon: 166.9315, name: 'Nauru' },
+    'NU': { lat: -19.0544, lon: -169.8672, name: 'Niue' },
+    'NZ': { lat: -40.9006, lon: 174.8860, name: 'New Zealand' },
+    'OM': { lat: 21.5126, lon: 55.9233, name: 'Oman' },
+    'PA': { lat: 8.5379, lon: -80.7821, name: 'Panama' },
+    'PE': { lat: -9.1900, lon: -75.0152, name: 'Peru' },
+    'PF': { lat: -17.6797, lon: -149.4068, name: 'French Polynesia' },
+    'PG': { lat: -6.3150, lon: 143.9555, name: 'Papua New Guinea' },
+    'PH': { lat: 12.8797, lon: 121.7740, name: 'Philippines' },
+    'PK': { lat: 30.3753, lon: 69.3451, name: 'Pakistan' },
+    'PL': { lat: 51.9194, lon: 19.1451, name: 'Poland' },
+    'PM': { lat: 46.8852, lon: -56.3159, name: 'Saint Pierre and Miquelon' },
+    'PN': { lat: -24.7036, lon: -127.4393, name: 'Pitcairn' },
+    'PR': { lat: 18.2208, lon: -66.5901, name: 'Puerto Rico' },
+    'PS': { lat: 31.9522, lon: 35.2332, name: 'Palestine' },
+    'PT': { lat: 39.3999, lon: -8.2245, name: 'Portugal' },
+    'PW': { lat: 7.5150, lon: 134.5825, name: 'Palau' },
+    'PY': { lat: -23.4425, lon: -58.4438, name: 'Paraguay' },
+    'QA': { lat: 25.3548, lon: 51.1839, name: 'Qatar' },
+    'RE': { lat: -21.1151, lon: 55.5364, name: 'Réunion' },
+    'RO': { lat: 45.9432, lon: 24.9668, name: 'Romania' },
     'RS': { lat: 44.0165, lon: 21.0059, name: 'Serbia' },
     'RU': { lat: 61.5240, lon: 105.3188, name: 'Russia' },
-    'TR': { lat: 38.9637, lon: 35.2433, name: 'Turkey' },
-    'CN': { lat: 35.8617, lon: 104.1954, name: 'China' },
-    'JP': { lat: 36.2048, lon: 138.2529, name: 'Japan' },
-    'KR': { lat: 35.9078, lon: 127.7669, name: 'South Korea' },
-    'IN': { lat: 20.5937, lon: 78.9629, name: 'India' },
-    'PK': { lat: 30.3753, lon: 69.3451, name: 'Pakistan' },
-    'BD': { lat: 23.6850, lon: 90.3563, name: 'Bangladesh' },
-    'LK': { lat: 7.8731, lon: 80.7718, name: 'Sri Lanka' },
-    'SG': { lat: 1.3521, lon: 103.8198, name: 'Singapore' },
-    'MY': { lat: 4.2105, lon: 101.9758, name: 'Malaysia' },
-    'ID': { lat: -0.7893, lon: 113.9213, name: 'Indonesia' },
-    'PH': { lat: 12.8797, lon: 121.7740, name: 'Philippines' },
-    'TH': { lat: 15.8700, lon: 100.9925, name: 'Thailand' },
-    'VN': { lat: 14.0583, lon: 108.2772, name: 'Vietnam' },
-    'TW': { lat: 23.6978, lon: 120.9605, name: 'Taiwan' },
-    'HK': { lat: 22.3193, lon: 114.1694, name: 'Hong Kong' },
-    'AU': { lat: -25.2744, lon: 133.7751, name: 'Australia' },
-    'NZ': { lat: -40.9006, lon: 174.8860, name: 'New Zealand' },
-    'ZA': { lat: -30.5595, lon: 22.9375, name: 'South Africa' },
-    'EG': { lat: 26.8206, lon: 30.8025, name: 'Egypt' },
-    'NG': { lat: 9.0820, lon: 8.6753, name: 'Nigeria' },
-    'KE': { lat: -0.0236, lon: 37.9062, name: 'Kenya' },
-    'MA': { lat: 31.7917, lon: -7.0926, name: 'Morocco' },
-    'DZ': { lat: 28.0339, lon: 1.6596, name: 'Algeria' },
+    'RW': { lat: -1.9403, lon: 29.8739, name: 'Rwanda' },
     'SA': { lat: 23.8859, lon: 45.0792, name: 'Saudi Arabia' },
-    'AE': { lat: 23.4241, lon: 53.8478, name: 'United Arab Emirates' },
-    'IL': { lat: 31.0461, lon: 34.8516, name: 'Israel' },
-    'QA': { lat: 25.3548, lon: 51.1839, name: 'Qatar' },
-    'KW': { lat: 29.3117, lon: 47.4818, name: 'Kuwait' }
+    'SB': { lat: -9.6457, lon: 160.1562, name: 'Solomon Islands' },
+    'SC': { lat: -4.6796, lon: 55.4920, name: 'Seychelles' },
+    'SD': { lat: 12.8628, lon: 30.2176, name: 'Sudan' },
+    'SE': { lat: 60.1282, lon: 18.6435, name: 'Sweden' },
+    'SG': { lat: 1.3521, lon: 103.8198, name: 'Singapore' },
+    'SH': { lat: -24.1435, lon: -10.0307, name: 'Saint Helena' },
+    'SI': { lat: 46.1512, lon: 14.9955, name: 'Slovenia' },
+    'SJ': { lat: 77.5536, lon: 23.6703, name: 'Svalbard and Jan Mayen' },
+    'SK': { lat: 48.6690, lon: 19.6990, name: 'Slovakia' },
+    'SL': { lat: 8.4606, lon: -11.7799, name: 'Sierra Leone' },
+    'SM': { lat: 43.9424, lon: 12.4578, name: 'San Marino' },
+    'SN': { lat: 14.4974, lon: -14.4524, name: 'Senegal' },
+    'SO': { lat: 5.1521, lon: 46.1996, name: 'Somalia' },
+    'SR': { lat: 3.9193, lon: -56.0278, name: 'Suriname' },
+    'SS': { lat: 6.8770, lon: 31.3070, name: 'South Sudan' },
+    'ST': { lat: 0.1864, lon: 6.6131, name: 'São Tomé and Príncipe' },
+    'SV': { lat: 13.7942, lon: -88.8965, name: 'El Salvador' },
+    'SX': { lat: 18.0425, lon: -63.0548, name: 'Sint Maarten' },
+    'SY': { lat: 34.8021, lon: 38.9968, name: 'Syria' },
+    'SZ': { lat: -26.5225, lon: 31.4659, name: 'Eswatini' },
+    'TC': { lat: 21.6940, lon: -71.7979, name: 'Turks and Caicos Islands' },
+    'TD': { lat: 15.4542, lon: 18.7322, name: 'Chad' },
+    'TF': { lat: -49.2804, lon: 69.3486, name: 'French Southern Territories' },
+    'TG': { lat: 8.6195, lon: 0.8248, name: 'Togo' },
+    'TH': { lat: 15.8700, lon: 100.9925, name: 'Thailand' },
+    'TJ': { lat: 38.8610, lon: 71.2761, name: 'Tajikistan' },
+    'TK': { lat: -8.9674, lon: -171.8559, name: 'Tokelau' },
+    'TL': { lat: -8.8742, lon: 125.7275, name: 'Timor-Leste' },
+    'TM': { lat: 38.9697, lon: 59.5563, name: 'Turkmenistan' },
+    'TN': { lat: 33.8869, lon: 9.5375, name: 'Tunisia' },
+    'TO': { lat: -21.1790, lon: -175.1982, name: 'Tonga' },
+    'TR': { lat: 38.9637, lon: 35.2433, name: 'Turkey' },
+    'TT': { lat: 10.6918, lon: -61.2225, name: 'Trinidad and Tobago' },
+    'TV': { lat: -7.1095, lon: 177.6493, name: 'Tuvalu' },
+    'TW': { lat: 23.6978, lon: 120.9605, name: 'Taiwan' },
+    'TZ': { lat: -6.3690, lon: 34.8888, name: 'Tanzania' },
+    'UA': { lat: 48.3794, lon: 31.1656, name: 'Ukraine' },
+    'UG': { lat: 1.3733, lon: 32.2903, name: 'Uganda' },
+    'UM': { lat: 19.2823, lon: 166.6470, name: 'U.S. Outlying Islands' },
+    'US': { lat: 37.0902, lon: -95.7129, name: 'United States' },
+    'UY': { lat: -32.5228, lon: -55.7658, name: 'Uruguay' },
+    'UZ': { lat: 41.3775, lon: 64.5853, name: 'Uzbekistan' },
+    'VA': { lat: 41.9029, lon: 12.4534, name: 'Vatican City' },
+    'VC': { lat: 12.9843, lon: -61.2872, name: 'Saint Vincent and the Grenadines' },
+    'VE': { lat: 6.4238, lon: -66.5897, name: 'Venezuela' },
+    'VG': { lat: 18.4207, lon: -64.6400, name: 'British Virgin Islands' },
+    'VI': { lat: 18.3358, lon: -64.8963, name: 'U.S. Virgin Islands' },
+    'VN': { lat: 14.0583, lon: 108.2772, name: 'Vietnam' },
+    'VU': { lat: -15.3767, lon: 166.9592, name: 'Vanuatu' },
+    'WF': { lat: -13.7688, lon: -177.1561, name: 'Wallis and Futuna' },
+    'WS': { lat: -13.7590, lon: -172.1046, name: 'Samoa' },
+    'XK': { lat: 42.6026, lon: 20.9030, name: 'Kosovo' },
+    'YE': { lat: 15.5527, lon: 48.5164, name: 'Yemen' },
+    'YT': { lat: -12.8275, lon: 45.1662, name: 'Mayotte' },
+    'ZA': { lat: -30.5595, lon: 22.9375, name: 'South Africa' },
+    'ZM': { lat: -13.1339, lon: 27.8493, name: 'Zambia' },
+    'ZW': { lat: -19.0154, lon: 29.1549, name: 'Zimbabwe' },
+    'EU': { lat: 50.8503, lon: 4.3517, name: 'European Union' },
+    'AP': { lat: 1.3521, lon: 103.8198, name: 'Asia-Pacific' }
   };
+
+  // Build secondary name-to-coordinates lookup for name-based fallback
+  var countryNameToCoords = {};
+  for (var cCode in countryCoords) {
+    if (countryCoords.hasOwnProperty(cCode)) {
+      countryCoords[cCode].code = cCode;
+      if (countryCoords[cCode].name) {
+        countryNameToCoords[countryCoords[cCode].name.toLowerCase()] = countryCoords[cCode];
+      }
+    }
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // Leaflet OSM Dark Engine
@@ -5526,15 +5785,31 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       countEl.textContent = countries.length + (countries.length === 1 ? ' Country Detected' : ' Countries Detected');
     }
 
+    if (!leafletMap && typeof L !== 'undefined') {
+      initLeafletMap();
+    }
+
     // 1. Render Interactive Markers on Leaflet map (if active)
     if (leafletMap && mapMarkersLayer) {
       mapMarkersLayer.clearLayers();
 
       countries.forEach(function(c) {
-        var code = (c.country_code || '').toUpperCase();
-        if (!code || code === 'LAN' || code === 'LOCAL') return;
-        var geo = countryCoords[code];
+        var code = (c.country_code || '').trim().toUpperCase();
+        var geo = null;
+        if (code && code !== 'LAN' && code !== 'LOCAL') {
+          geo = countryCoords[code];
+        }
+        if (!geo && c.name) {
+          geo = countryNameToCoords[c.name.trim().toLowerCase()];
+        }
+        if (!geo && c.country) {
+          geo = countryNameToCoords[c.country.trim().toLowerCase()];
+        }
         if (!geo) return;
+
+        if (!code && geo.code) {
+          code = geo.code;
+        }
 
         var total = c.count || 0;
         var blocked = c.blocked || 0;
@@ -5581,11 +5856,15 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         });
 
         marker.on('click', function() {
-          filterByCountry(c.name);
+          filterByCountry(c.name || geo.name || code);
         });
 
         marker.addTo(mapMarkersLayer);
       });
+
+      setTimeout(function() {
+        if (leafletMap) leafletMap.invalidateSize();
+      }, 100);
     }
 
     // 2. Render Sidebar country breakdown with ASCII Progress Bars
@@ -5888,7 +6167,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
 
     if (sources.targets && sources.targets.length > 0) {
-      sources.targets.forEach(function(t) {
+      var sortedTargets = sources.targets.slice().sort(function(a, b) {
+        return (a.name || '').localeCompare(b.name || '') || (a.id || '').localeCompare(b.id || '');
+      });
+      sortedTargets.forEach(function(t) {
         nodeNames.push(t.name);
         var sid = (t.id && t.id.length > 12) ? t.id.substring(0, 12) : t.id;
         var isAct = (filters.node === t.name);
@@ -5898,7 +6180,10 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
 
     if (sources.agents && sources.agents.length > 0) {
-      sources.agents.forEach(function(ag) {
+      var sortedAgents = sources.agents.slice().sort(function(a, b) {
+        return (a.name || '').localeCompare(b.name || '') || (a.id || '').localeCompare(b.id || '');
+      });
+      sortedAgents.forEach(function(ag) {
         nodeNames.push(ag.name);
         var isAct = (filters.node === ag.name);
         sHTML += '<span class="source-tag' + (isAct ? ' active' : '') + '" onclick="filterByNode(\'' + ag.name.replace(/'/g, "\\'") + '\')" title="Filter events from agent: ' + ag.name.replace(/"/g, '&quot;') + '">🌐 ' + ag.name + ' (' + (ag.remote_ip || 'remote') + ') <span style="color:var(--mauve);">🔒 X25519</span></span>';
@@ -5909,7 +6194,9 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     if (count === 0 && sources.mode !== 'file') {
       sHTML += '<span style="color: var(--overlay); font-style: italic;">Awaiting local containers or remote agents (<code>rwarden push</code>)...</span>';
     }
-    sourcesContainer.innerHTML = sHTML;
+    if (sourcesContainer && sourcesContainer.innerHTML !== sHTML) {
+      sourcesContainer.innerHTML = sHTML;
+    }
 
     // Harvest extra sources from allEvents or currentEvents
     if (allEvents && allEvents.length > 0) {
@@ -5922,9 +6209,16 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       var currentNode = filters.node || 'ALL';
       var nOptHTML = '<option value="ALL">📡 All Nodes</option>';
       var seen = {};
+      var uniqueNodes = [];
       nodeNames.forEach(function(name) {
         if (!name || seen[name]) return;
         seen[name] = true;
+        uniqueNodes.push(name);
+      });
+      uniqueNodes.sort(function(a, b) {
+        return a.localeCompare(b);
+      });
+      uniqueNodes.forEach(function(name) {
         var sel = (name === currentNode) ? ' selected' : '';
         nOptHTML += '<option value="' + name.replace(/"/g, '&quot;') + '"' + sel + '>📡 ' + name + '</option>';
       });
@@ -6443,11 +6737,143 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     }
   }
 
+  // Storage & Retention Modal Logic
+  window.openStorageModal = function() {
+    var modal = document.getElementById('storage-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    fetchStorageStats();
+  };
+
+  window.closeStorageModal = function() {
+    var modal = document.getElementById('storage-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.fetchStorageStats = function() {
+    var content = document.getElementById('storage-modal-content');
+    if (!content) return;
+    content.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-dim); font-size:12px;">⏳ Fetching storage telemetry and retention policy...</div>';
+
+    fetch('/api/v1/storage')
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        renderStorageModal(data);
+      })
+      .catch(function(err) {
+        content.innerHTML = '<div style="padding:20px; color:var(--red); font-size:12px;">⚠️ Failed to load storage telemetry: ' + escapeHTML(err.message) + '</div>';
+      });
+  };
+
+  window.renderStorageModal = function(data) {
+    var content = document.getElementById('storage-modal-content');
+    if (!content) return;
+
+    var storage = data.storage || {};
+    var policy = data.policy || {};
+    var retention = data.retention || {};
+    var accessLog = data.access_log || {};
+
+    var dbSize = storage.database_size_human || '0 B';
+    var eventCount = (storage.event_count || 0).toLocaleString();
+    var retentionPeriod = policy.retention_period || (policy.retention_days ? policy.retention_days + 'd' : '30d');
+    var maxEvents = policy.max_events ? policy.max_events.toLocaleString() : 'Unlimited';
+    var pruneInterval = policy.prune_interval || '1h';
+    var maxLogSize = policy.max_log_size || '50 MB';
+    var logSize = accessLog.size_human || '0 B';
+
+    var oldest = storage.oldest_event ? storage.oldest_event.replace('T', ' ').substring(0, 19) : 'None';
+    var newest = storage.newest_event ? storage.newest_event.replace('T', ' ').substring(0, 19) : 'None';
+    var lastPrunedAt = retention.last_pruned_at && retention.last_pruned_at !== '0001-01-01T00:00:00Z' ? retention.last_pruned_at.replace('T', ' ').substring(0, 19) : 'Never';
+    var lastPrunedCount = retention.last_pruned_count || 0;
+    var totalPruned = retention.total_pruned || 0;
+
+    var html = '';
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:16px;">';
+    html += '  <div style="background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px;">';
+    html += '    <div style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">DATABASE FOOTPRINT</div>';
+    html += '    <div style="font-size:20px; font-weight:800; color:var(--cyan); margin:4px 0;">' + dbSize + '</div>';
+    html += '    <div style="font-size:11px; color:var(--text-dim);">SQLite WAL Persistent</div>';
+    html += '  </div>';
+    html += '  <div style="background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px;">';
+    html += '    <div style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">STORED EVENTS</div>';
+    html += '    <div style="font-size:20px; font-weight:800; color:var(--green); margin:4px 0;">' + eventCount + '</div>';
+    html += '    <div style="font-size:11px; color:var(--text-dim);">Cap: ' + maxEvents + '</div>';
+    html += '  </div>';
+    html += '  <div style="background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px;">';
+    html += '    <div style="font-size:10px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">RETENTION WINDOW</div>';
+    html += '    <div style="font-size:20px; font-weight:800; color:var(--orange); margin:4px 0;">' + retentionPeriod + '</div>';
+    html += '    <div style="font-size:11px; color:var(--text-dim);">Prune: ' + pruneInterval + '</div>';
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div style="background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px;">';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Active Retention Policy</span><span style="font-weight:600;">' + retentionPeriod + ' / Max ' + maxEvents + ' events</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Background Pruning Frequency</span><span style="font-weight:600;">Every ' + pruneInterval + '</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Access Log Rotation</span><span style="font-weight:600;">' + logSize + ' (Max: ' + maxLogSize + ')</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Oldest Ingested Event</span><span>' + oldest + '</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Newest Ingested Event</span><span>' + newest + '</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);"><span style="color:var(--text-dim);">Last Pruned</span><span>' + lastPrunedAt + ' (' + lastPrunedCount.toLocaleString() + ' rows)</span></div>';
+    html += '  <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="color:var(--text-dim);">Lifetime Pruned Events</span><span style="color:var(--text); font-weight:700;">' + totalPruned.toLocaleString() + '</span></div>';
+    html += '</div>';
+
+    html += '<div id="prune-feedback" style="display:none; margin-bottom:12px; padding:10px; border-radius:4px; font-size:12px;"></div>';
+    html += '<div style="display:flex; gap:10px; justify-content:flex-end;">';
+    html += '  <button class="tui-btn" onclick="fetchStorageStats()">🔄 Refresh</button>';
+    html += '  <button class="tui-btn" id="btn-prune-now" onclick="triggerPruneNow()" style="background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700;">🧹 Prune & Compact Now</button>';
+    html += '</div>';
+
+    content.innerHTML = html;
+  };
+
+  window.triggerPruneNow = function() {
+    var btn = document.getElementById('btn-prune-now');
+    var feedback = document.getElementById('prune-feedback');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Pruning...';
+    }
+
+    fetch('/api/v1/prune', { method: 'POST' })
+      .then(function(res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        if (feedback) {
+          feedback.style.display = 'block';
+          feedback.style.background = 'rgba(16, 185, 129, 0.15)';
+          feedback.style.border = '1px solid var(--green)';
+          feedback.style.color = 'var(--green)';
+          var count = data.pruned_events || 0;
+          feedback.innerHTML = '✅ Prune complete! Deleted ' + count.toLocaleString() + ' expired/overflow event(s) and compacted database.';
+        }
+        setTimeout(fetchStorageStats, 1200);
+      })
+      .catch(function(err) {
+        if (feedback) {
+          feedback.style.display = 'block';
+          feedback.style.background = 'rgba(239, 68, 68, 0.15)';
+          feedback.style.border = '1px solid var(--red)';
+          feedback.style.color = 'var(--red)';
+          feedback.innerHTML = '❌ Pruning failed: ' + escapeHTML(err.message);
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = '🧹 Prune & Compact Now';
+        }
+      });
+  };
+
   // Initial startup
   initLeafletMap();
   initMobileNavObserver();
   fetchStats();
   initSSE();
+  fetchFilteredLogs(1, false);
   setInterval(fetchStats, 3000);
 })();
 </script>

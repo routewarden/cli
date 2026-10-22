@@ -211,6 +211,26 @@ func TestParseLogLine(t *testing.T) {
 			t.Errorf("expected nil for corrupt JSON, got: %+v", ev)
 		}
 	})
+
+	t.Run("leading whitespace handling", func(t *testing.T) {
+		lineJSON := `   {"time":"2026-10-18T10:00:00Z","client_ip":"192.168.1.100","verdict":"BLOCK","method":"GET","path":"/.env","status":403}  `
+		ev := parseLogLine(lineJSON)
+		if ev == nil {
+			t.Fatalf("expected non-nil logEvent from indented JSON")
+		}
+		if ev.getIP() != "192.168.1.100" || ev.getPath() != "/.env" {
+			t.Errorf("unexpected parsed indented JSON: %+v", ev)
+		}
+
+		lineCombined := "\t  198.51.100.42 - - [18/Oct/2026:14:22:01 +0000] \"GET /phpmyadmin HTTP/1.1\" 403 145 \"-\" \"curl/7.68.0\" \r"
+		evComb := parseLogLine(lineCombined)
+		if evComb == nil {
+			t.Fatalf("expected non-nil logEvent from indented combined log")
+		}
+		if evComb.ClientIP != "198.51.100.42" {
+			t.Errorf("expected 198.51.100.42, got %s", evComb.ClientIP)
+		}
+	})
 }
 
 func TestProcessLogStream_FiltersAndOutput(t *testing.T) {

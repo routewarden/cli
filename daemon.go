@@ -231,6 +231,14 @@ func checkDaemonStatus(name, displayName string) bool {
 }
 
 func handleGlobalStatus(args []string) {
+	if len(args) > 0 {
+		arg := strings.ToLower(args[0])
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			fmt.Println("Usage: rwarden status [dashboard|push|tcp|all]")
+			return
+		}
+	}
+
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target = strings.ToLower(args[0])
@@ -239,19 +247,34 @@ func handleGlobalStatus(args []string) {
 	switch target {
 	case "dashboard":
 		checkDaemonStatus("dashboard", "RouteWarden Dashboard")
-	case "push", "agent":
+	case "push", "agent", "shipper":
 		checkDaemonStatus("push", "RouteWarden Remote Shipper")
-	default:
+	case "tcp", "proxy", "tcp-warden":
+		checkDaemonStatus("tcp", "RouteWarden TCP Proxy")
+	case "", "all":
 		fmt.Println("RouteWarden Background Services:")
 		fmt.Println("─────────────────────────────────────────────────────────────")
 		checkDaemonStatus("dashboard", "Dashboard")
 		fmt.Println()
 		checkDaemonStatus("push", "Remote Shipper")
+		fmt.Println()
+		checkDaemonStatus("tcp", "TCP Proxy")
 		fmt.Println("─────────────────────────────────────────────────────────────")
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown service %q. Available services: dashboard, push, tcp, all\n", target)
+		os.Exit(1)
 	}
 }
 
 func handleGlobalStop(args []string) {
+	if len(args) > 0 {
+		arg := strings.ToLower(args[0])
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			fmt.Println("Usage: rwarden stop [dashboard|push|tcp|all]")
+			return
+		}
+	}
+
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target = strings.ToLower(args[0])
@@ -260,13 +283,19 @@ func handleGlobalStop(args []string) {
 	switch target {
 	case "dashboard":
 		_, _ = stopDaemon("dashboard", "RouteWarden Dashboard")
-	case "push", "agent":
+	case "push", "agent", "shipper":
 		_, _ = stopDaemon("push", "RouteWarden Remote Shipper")
-	default:
+	case "tcp", "proxy", "tcp-warden":
+		_, _ = stopDaemon("tcp", "RouteWarden TCP Proxy")
+	case "", "all":
 		fmt.Println("Stopping RouteWarden Background Services...")
 		fmt.Println("─────────────────────────────────────────────────────────────")
 		_, _ = stopDaemon("dashboard", "Dashboard")
 		_, _ = stopDaemon("push", "Remote Shipper")
+		_, _ = stopDaemon("tcp", "TCP Proxy")
 		fmt.Println("─────────────────────────────────────────────────────────────")
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown service %q. Available services: dashboard, push, tcp, all\n", target)
+		os.Exit(1)
 	}
 }
