@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -1509,7 +1510,7 @@ func LookupIP(ipStr string) *IPDetails {
 	defer resp.Body.Close()
 
 	var details IPDetails
-	if err := json.NewDecoder(resp.Body).Decode(&details); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&details); err != nil {
 		if IsMaxMindLoaded() {
 			if cName, cCode, ok := LookupMaxMind(parsed); ok {
 				return &IPDetails{

@@ -1634,7 +1634,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 		var hb struct {
 			Hostname string `json:"hostname"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&hb)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&hb)
 
 		UpdateAgentLastSeen(key.ID, dir)
 		registerOrTouchAgent(key.ID, key.Name, hb.Hostname, clientIP, 0)
@@ -1850,7 +1850,7 @@ func NewDashboardHandlerWithAuth(dir string, serverPriv *ecdh.PrivateKey, server
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&creds); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request format"})
