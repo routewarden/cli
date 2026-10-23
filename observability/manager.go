@@ -29,7 +29,7 @@ import (
 )
 
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
-var Version = "5.3.2"
+var Version = "5.3.3"
 
 var (
 	verboseLogging   bool
@@ -236,6 +236,48 @@ type streamMsg struct {
 	Line      string
 }
 
+type flexibleInt int
+
+func (fi *flexibleInt) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	s := strings.TrimSpace(string(b))
+	if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		s = strings.Trim(s, `"`)
+		if n, err := strconv.Atoi(s); err == nil {
+			*fi = flexibleInt(n)
+		}
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*fi = flexibleInt(n)
+	}
+	return nil
+}
+
+type flexibleFloat float64
+
+func (ff *flexibleFloat) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	s := strings.TrimSpace(string(b))
+	if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		s = strings.Trim(s, `"`)
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			*ff = flexibleFloat(f)
+		}
+		return nil
+	}
+	var f float64
+	if err := json.Unmarshal(b, &f); err == nil {
+		*ff = flexibleFloat(f)
+	}
+	return nil
+}
+
 type logEvent struct {
 	Timestamp      string          `json:"time"`
 	TimestampAlt   string          `json:"timestamp"`
@@ -255,12 +297,12 @@ type logEvent struct {
 	URI            string          `json:"uri"`
 	MatchedPattern string          `json:"matched_pattern"`
 	MatchedRuleAlt string          `json:"rule"`
-	StatusCode     int             `json:"status"`
-	StatusCodeAlt  int             `json:"status_code"`
-	DownstreamStat int             `json:"DownstreamStatus"`
-	LatencyMs      float64         `json:"latency_ms"`
-	DurationMsAlt  float64         `json:"duration_ms"`
-	DurationSec    float64         `json:"duration"`
+	StatusCode     flexibleInt     `json:"status"`
+	StatusCodeAlt  flexibleInt     `json:"status_code"`
+	DownstreamStat flexibleInt     `json:"DownstreamStatus"`
+	LatencyMs      flexibleFloat   `json:"latency_ms"`
+	DurationMsAlt  flexibleFloat   `json:"duration_ms"`
+	DurationSec    flexibleFloat   `json:"duration"`
 	Request        *struct {
 		ClientIP   string `json:"client_ip"`
 		RemoteIP   string `json:"remote_ip"`
@@ -350,21 +392,36 @@ func toCombinedLog(line string) string {
 			}
 			method = strings.ReplaceAll(method, `"`, "")
 
-			status := ev.StatusCode
+			status := int(ev.StatusCode)
 			if status == 0 {
-				status = ev.StatusCodeAlt
+				status = int(ev.StatusCodeAlt)
 			}
 			if status == 0 {
-				status = ev.DownstreamStat
+				status = int(ev.DownstreamStat)
 			}
+			verdict := strings.ToUpper(ev.Verdict)
 			if status == 0 {
-				switch strings.ToUpper(ev.Verdict) {
+				switch verdict {
 				case "BLOCK":
 					status = 403
 				case "TARPIT":
 					status = 429
+				case "FAILED":
+					status = 500
 				default:
 					status = 200
+				}
+			}
+			if verdict == "" {
+				switch status {
+				case 403:
+					verdict = "BLOCK"
+				case 429:
+					verdict = "TARPIT"
+				default:
+					if status >= 400 {
+						verdict = "FAILED"
+					}
 				}
 			}
 
@@ -375,8 +432,10 @@ func toCombinedLog(line string) string {
 			if rule == "" {
 				rule = ev.MatchedRuleAlt
 			}
+			if rule == "" && verdict == "FAILED" {
+				rule = fmt.Sprintf("HTTP %d", status)
+			}
 			rule = strings.ReplaceAll(rule, `"`, `'`)
-			verdict := strings.ToUpper(ev.Verdict)
 
 			userAgent := "RouteWarden"
 			if rule != "" {

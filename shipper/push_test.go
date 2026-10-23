@@ -361,9 +361,9 @@ func TestShipper_IsRouteWardenLog_FilterValidation(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "Traefik JSON access log format",
+			name:     "Traefik JSON access log format 200 OK (filtered by default)",
 			line:     `{"ClientHost":"198.51.100.5","RequestPath":"/api/v1/status","RequestMethod":"GET","DownstreamStatus":200}`,
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "Layer 4 UDP / tcp-warden security log",
@@ -376,8 +376,18 @@ func TestShipper_IsRouteWardenLog_FilterValidation(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "Docker timestamp prefix with Combined log",
+			name:     "Docker timestamp prefix with Combined log 200 OK (filtered by default)",
 			line:     `2026-10-20T14:00:01.123456789Z 198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET / HTTP/1.1" 200 12 "-" "-"`,
+			expected: false,
+		},
+		{
+			name:     "Combined log with 403 Forbidden (security event)",
+			line:     `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /secret HTTP/1.1" 403 12 "-" "-"`,
+			expected: true,
+		},
+		{
+			name:     "Combined log with 429 Too Many Requests (security event)",
+			line:     `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /api HTTP/1.1" 429 12 "-" "-"`,
 			expected: true,
 		},
 		{
@@ -411,9 +421,9 @@ func TestShipper_IsRouteWardenLog_FilterValidation(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "Docker log with UTC+05:30 timezone offset prefix",
+			name:     "Docker log with UTC+05:30 timezone offset prefix 200 OK (filtered by default)",
 			line:     `2026-10-21T13:18:12.123456789+05:30 198.51.100.1 - - [21/Oct/2026:07:48:12 +0000] "GET / HTTP/1.1" 200 123`,
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "Caddy startup non-access info message (should be filtered out)",
@@ -462,6 +472,40 @@ func TestShipper_FilterRouteWardenLog_AllLogsBypass(t *testing.T) {
 	cleanDefault, okDefault := FilterRouteWardenLog(rawLine, false)
 	if okDefault || cleanDefault != "" {
 		t.Errorf("expected line to be filtered when allLogs=false, got ok=%v clean=%q", okDefault, cleanDefault)
+	}
+}
+
+func TestShipper_FilterRouteWardenLog_FilterOptions(t *testing.T) {
+	caddy404 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/not-found","method":"GET"},"status":404}`
+	caddy500 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/server-error","method":"GET"},"status":500}`
+	caddy200 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/ok","method":"GET"},"status":200}`
+	caddy403 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/forbidden","method":"GET"},"status":403}`
+
+	// 1. Default: only 403 passes (security event)
+	if _, ok := FilterRouteWardenLogOpts(caddy200, FilterOptions{}); ok {
+		t.Error("expected caddy 200 to be filtered by default")
+	}
+	if _, ok := FilterRouteWardenLogOpts(caddy404, FilterOptions{}); ok {
+		t.Error("expected caddy 404 to be filtered by default")
+	}
+	if _, ok := FilterRouteWardenLogOpts(caddy403, FilterOptions{}); !ok {
+		t.Error("expected caddy 403 to pass by default")
+	}
+
+	// 2. IncludeFailed: 404, 500, 403 pass, 200 fails
+	if _, ok := FilterRouteWardenLogOpts(caddy404, FilterOptions{IncludeFailed: true}); !ok {
+		t.Error("expected caddy 404 to pass with IncludeFailed")
+	}
+	if _, ok := FilterRouteWardenLogOpts(caddy500, FilterOptions{IncludeFailed: true}); !ok {
+		t.Error("expected caddy 500 to pass with IncludeFailed")
+	}
+	if _, ok := FilterRouteWardenLogOpts(caddy200, FilterOptions{IncludeFailed: true}); ok {
+		t.Error("expected caddy 200 to be filtered even with IncludeFailed")
+	}
+
+	// 3. AllTraffic: 200 passes
+	if _, ok := FilterRouteWardenLogOpts(caddy200, FilterOptions{AllTraffic: true}); !ok {
+		t.Error("expected caddy 200 to pass with AllTraffic")
 	}
 }
 
@@ -581,4 +625,527 @@ func TestShipper_HandlePush_Help(t *testing.T) {
 	// Should not panic or exit on "help"
 	HandlePush([]string{"help"}, "5.3.0")
 }
+
+func TestShipper_MultiProxy_ComprehensiveStatusMatrix(t *testing.T) {
+	type testCase struct {
+		name              string
+		proxy             string
+		status            int
+		line              string
+		passDefault       bool
+		passIncludeFailed bool
+		passAllTraffic    bool
+	}
+
+	testCases := []testCase{
+		// Caddy JSON format
+		{
+			name:              "Caddy 101 Switching Protocols",
+			proxy:             "caddy",
+			status:            101,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/ws","method":"GET"},"status":101}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 200 OK",
+			proxy:             "caddy",
+			status:            200,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/home","method":"GET"},"status":200}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 201 Created",
+			proxy:             "caddy",
+			status:            201,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/api/users","method":"POST"},"status":201}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 204 No Content",
+			proxy:             "caddy",
+			status:            204,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/api/heartbeat","method":"POST"},"status":204}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 301 Moved Permanently",
+			proxy:             "caddy",
+			status:            301,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/old-url","method":"GET"},"status":301}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 302 Found",
+			proxy:             "caddy",
+			status:            302,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/login","method":"GET"},"status":302}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 304 Not Modified",
+			proxy:             "caddy",
+			status:            304,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/static/app.css","method":"GET"},"status":304}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 400 Bad Request",
+			proxy:             "caddy",
+			status:            400,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/api/query","method":"GET"},"status":400}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 401 Unauthorized",
+			proxy:             "caddy",
+			status:            401,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/admin","method":"GET"},"status":401}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 403 Forbidden (Security Event)",
+			proxy:             "caddy",
+			status:            403,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/.env","method":"GET"},"status":403}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 404 Not Found",
+			proxy:             "caddy",
+			status:            404,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/missing","method":"GET"},"status":404}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 405 Method Not Allowed",
+			proxy:             "caddy",
+			status:            405,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/static","method":"DELETE"},"status":405}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 422 Unprocessable Entity",
+			proxy:             "caddy",
+			status:            422,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/api/validate","method":"POST"},"status":422}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 429 Too Many Requests (Security Event)",
+			proxy:             "caddy",
+			status:            429,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/api/limit","method":"POST"},"status":429}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 500 Internal Server Error",
+			proxy:             "caddy",
+			status:            500,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/crash","method":"GET"},"status":500}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 502 Bad Gateway",
+			proxy:             "caddy",
+			status:            502,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/upstream-down","method":"GET"},"status":502}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 503 Service Unavailable",
+			proxy:             "caddy",
+			status:            503,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/maint","method":"GET"},"status":503}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Caddy 504 Gateway Timeout",
+			proxy:             "caddy",
+			status:            504,
+			line:              `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/slow-api","method":"GET"},"status":504}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+
+		// Traefik JSON format
+		{
+			name:              "Traefik JSON 200 OK",
+			proxy:             "traefik",
+			status:            200,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/metrics","RequestMethod":"GET","DownstreamStatus":200}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Traefik JSON 403 Forbidden (Security Event)",
+			proxy:             "traefik",
+			status:            403,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/.git/config","RequestMethod":"GET","DownstreamStatus":403}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Traefik JSON 404 Not Found",
+			proxy:             "traefik",
+			status:            404,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/not-found","RequestMethod":"GET","DownstreamStatus":404}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Traefik JSON 429 Too Many Requests (Security Event)",
+			proxy:             "traefik",
+			status:            429,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/rate-limited","RequestMethod":"POST","DownstreamStatus":429}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Traefik JSON 500 Server Error",
+			proxy:             "traefik",
+			status:            500,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/broken-endpoint","RequestMethod":"POST","DownstreamStatus":500}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Traefik JSON 502 Bad Gateway",
+			proxy:             "traefik",
+			status:            502,
+			line:              `{"ClientHost":"198.51.100.5","RequestPath":"/api/v2","RequestMethod":"GET","DownstreamStatus":502}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+
+		// NGINX JSON format
+		{
+			name:              "NGINX JSON 200 OK",
+			proxy:             "nginx",
+			status:            200,
+			line:              `{"remote_addr":"198.51.100.44","status":200,"request_uri":"/index.html","method":"GET"}`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "NGINX JSON 403 Forbidden (Security Event)",
+			proxy:             "nginx",
+			status:            403,
+			line:              `{"remote_addr":"198.51.100.44","status":403,"request_uri":"/wp-config.php","method":"GET"}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "NGINX JSON 404 Not Found",
+			proxy:             "nginx",
+			status:            404,
+			line:              `{"remote_addr":"198.51.100.44","status":404,"request_uri":"/missing.js","method":"GET"}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "NGINX JSON 429 Too Many Requests (Security Event)",
+			proxy:             "nginx",
+			status:            429,
+			line:              `{"remote_addr":"198.51.100.44","status":429,"request_uri":"/login","method":"POST"}`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "NGINX JSON 500 Internal Error",
+			proxy:             "nginx",
+			status:            500,
+			line:              `{"remote_addr":"198.51.100.44","status":500,"request_uri":"/crash","method":"GET"}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "NGINX JSON 503 Service Unavailable",
+			proxy:             "nginx",
+			status:            503,
+			line:              `{"remote_addr":"198.51.100.44","status":503,"request_uri":"/status","method":"GET"}`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+
+		// Combined Log format (NGINX / Apache / Traefik / Caddy common log)
+		{
+			name:              "Combined Log 200 OK",
+			proxy:             "combined",
+			status:            200,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /app.js HTTP/1.1" 200 4500 "-" "Mozilla/5.0"`,
+			passDefault:       false,
+			passIncludeFailed: false,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Combined Log 403 Forbidden (Security Event)",
+			proxy:             "combined",
+			status:            403,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /.aws/credentials HTTP/1.1" 403 0 "-" "curl/7.88.1"`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Combined Log 429 Too Many Requests (Security Event)",
+			proxy:             "combined",
+			status:            429,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "POST /api/v1/auth HTTP/1.1" 429 12 "-" "Python-requests"`,
+			passDefault:       true,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Combined Log 404 Not Found",
+			proxy:             "combined",
+			status:            404,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /unknown-path HTTP/1.1" 404 150 "-" "-"`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Combined Log 500 Server Error",
+			proxy:             "combined",
+			status:            500,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /fail HTTP/1.1" 500 0 "-" "-"`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+		{
+			name:              "Combined Log 502 Bad Gateway",
+			proxy:             "combined",
+			status:            502,
+			line:              `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /api HTTP/1.1" 502 0 "-" "-"`,
+			passDefault:       false,
+			passIncludeFailed: true,
+			passAllTraffic:    true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Mode 1: Default
+			_, okDef := FilterRouteWardenLogOpts(tc.line, FilterOptions{})
+			if okDef != tc.passDefault {
+				t.Errorf("[%s] Default mode: got ok=%v, expected=%v for line: %s", tc.name, okDef, tc.passDefault, tc.line)
+			}
+
+			// Mode 2: IncludeFailed
+			_, okFail := FilterRouteWardenLogOpts(tc.line, FilterOptions{IncludeFailed: true})
+			if okFail != tc.passIncludeFailed {
+				t.Errorf("[%s] IncludeFailed mode: got ok=%v, expected=%v for line: %s", tc.name, okFail, tc.passIncludeFailed, tc.line)
+			}
+
+			// Mode 3: AllTraffic
+			_, okAll := FilterRouteWardenLogOpts(tc.line, FilterOptions{AllTraffic: true})
+			if okAll != tc.passAllTraffic {
+				t.Errorf("[%s] AllTraffic mode: got ok=%v, expected=%v for line: %s", tc.name, okAll, tc.passAllTraffic, tc.line)
+			}
+
+			// Mode 4: AllLogs (always true)
+			_, okAllLogs := FilterRouteWardenLogOpts(tc.line, FilterOptions{AllLogs: true})
+			if !okAllLogs {
+				t.Errorf("[%s] AllLogs mode: expected true, got false", tc.name)
+			}
+		})
+	}
+}
+
+func TestShipper_ExplicitSecurityTagsOverrideAllModes(t *testing.T) {
+	securityLines := []struct {
+		name string
+		line string
+	}{
+		{"Bracket TARPIT tag", `198.51.100.2 - - [21/Oct/2026:12:00:00 +0000] "GET /.env HTTP/1.1" 200 0 "-" "[TARPIT: SlowDown]"`},
+		{"Bracket HONEYPOT tag", `198.51.100.2 - - [21/Oct/2026:12:00:00 +0000] "GET /fake.sql HTTP/1.1" 200 0 "-" "[HONEYPOT: DecoyTable]"`},
+		{"Bracket RULE tag", `198.51.100.2 - - [21/Oct/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 0 "-" "[RULE: SQLInjectionDetected]"`},
+		{"Bracket BLOCK tag", `198.51.100.2 - - [21/Oct/2026:12:00:00 +0000] "GET /admin HTTP/1.1" 200 0 "-" "[BLOCK: AdminOnly]"`},
+		{"Bracket ALLOW tag", `198.51.100.2 - - [21/Oct/2026:12:00:00 +0000] "GET /health HTTP/1.1" 200 0 "-" "[ALLOW: WhitelistedIP]"`},
+		{"JSON verdict BLOCK", `{"client_ip":"198.51.100.3","path":"/.env","verdict":"BLOCK","rule":"DotEnv"}`},
+		{"JSON verdict TARPIT", `{"client_ip":"198.51.100.3","path":"/crawl","verdict":"TARPIT","action":"tarpit"}`},
+		{"JSON verdict HONEYPOT", `{"client_ip":"198.51.100.3","path":"/decoy","verdict":"HONEYPOT","rule":"trap"}`},
+		{"JSON plugin signal", `{"client_ip":"198.51.100.3","path":"/query","plugin":"caddy-warden","rule":"rfi"}`},
+		{"JSON gateway signal", `{"client_ip":"198.51.100.3","path":"/auth","gateway":"traefik-warden","rule":"auth_bypass"}`},
+	}
+
+	for _, item := range securityLines {
+		t.Run(item.name, func(t *testing.T) {
+			// Must pass in default mode with no flags
+			clean, ok := FilterRouteWardenLogOpts(item.line, FilterOptions{})
+			if !ok || clean == "" {
+				t.Fatalf("expected security event to pass by default, got ok=%v: %s", ok, item.line)
+			}
+		})
+	}
+}
+
+func TestShipper_NonHTTPAndCorruptLogs(t *testing.T) {
+	nonHTTP := []struct {
+		name string
+		line string
+	}{
+		{"Empty string", ""},
+		{"Whitespace only", "    \t \r\n"},
+		{"Corrupt JSON starting with brace", `{"client_ip": "1.2.3.4", incomplete`},
+		{"Non-access JSON system event", `{"level":"info","msg":"Listening on :80","service":"web"}`},
+		{"Plain application debug text", `[DEBUG] (cache) hit key=session:1234 duration=12ms`},
+		{"Systemd syslog line", `Oct 21 12:00:00 node01 systemd[1]: Started Network Time Service.`},
+		{"Panic stack trace", `goroutine 1 [running]: main.main() /app/main.go:42`},
+		{"Combined log with non-integer status", `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET / HTTP/1.1" ABC 123`},
+	}
+
+	for _, item := range nonHTTP {
+		t.Run(item.name, func(t *testing.T) {
+			// Should be rejected in Default, IncludeFailed, and AllTraffic modes
+			if _, ok := FilterRouteWardenLogOpts(item.line, FilterOptions{}); ok {
+				t.Errorf("[%s] expected false in Default mode, got true", item.name)
+			}
+			if _, ok := FilterRouteWardenLogOpts(item.line, FilterOptions{IncludeFailed: true}); ok {
+				t.Errorf("[%s] expected false in IncludeFailed mode, got true", item.name)
+			}
+			if _, ok := FilterRouteWardenLogOpts(item.line, FilterOptions{AllTraffic: true}); ok {
+				t.Errorf("[%s] expected false in AllTraffic mode, got true", item.name)
+			}
+
+			// Should only pass when AllLogs is explicitly true (except empty/whitespace)
+			clean, okAll := FilterRouteWardenLogOpts(item.line, FilterOptions{AllLogs: true})
+			trimmed := strings.TrimSpace(item.line)
+			if trimmed == "" {
+				if okAll {
+					t.Errorf("[%s] expected false even in AllLogs for empty string", item.name)
+				}
+			} else {
+				if !okAll || clean != item.line {
+					t.Errorf("[%s] expected true in AllLogs mode, got ok=%v", item.name, okAll)
+				}
+			}
+		})
+	}
+}
+
+func TestShipper_AgentConfig_PersistenceAndResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "agent.json")
+
+	cfg := &AgentConfig{
+		DashboardURL:    "http://dashboard.internal:7890",
+		AgentToken:      "rw_sec_test_token_12345",
+		AgentID:         "agent-node-matrix",
+		AgentName:       "matrix-01",
+		ServerPublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...",
+		IncludeFailed:   true,
+		AllTraffic:      true,
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	readBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	var loaded AgentConfig
+	if err := json.Unmarshal(readBytes, &loaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !loaded.IncludeFailed {
+		t.Errorf("expected IncludeFailed=true, got false")
+	}
+	if !loaded.AllTraffic {
+		t.Errorf("expected AllTraffic=true, got false")
+	}
+}
+
+func TestShipper_StringStatusCodesAndFlexibleParsing(t *testing.T) {
+	// NGINX custom JSON logger commonly formats $status as quoted string: "status": "$status"
+	nginxString404 := `{"remote_addr":"198.51.100.1","request_uri":"/missing","method":"GET","status":"404"}`
+	nginxString500 := `{"remote_addr":"198.51.100.1","request_uri":"/crash","method":"GET","status":"500"}`
+	nginxString403 := `{"remote_addr":"198.51.100.1","request_uri":"/forbidden","method":"GET","status":"403"}`
+	nginxString200 := `{"remote_addr":"198.51.100.1","request_uri":"/ok","method":"GET","status":"200"}`
+
+	// 1. Default mode: string "403" is recognized as security event and passes, while "200" and "404" are filtered
+	if _, ok := FilterRouteWardenLogOpts(nginxString403, FilterOptions{}); !ok {
+		t.Error("expected quoted status \"403\" to pass in default mode")
+	}
+	if _, ok := FilterRouteWardenLogOpts(nginxString200, FilterOptions{}); ok {
+		t.Error("expected quoted status \"200\" to be filtered by default")
+	}
+	if _, ok := FilterRouteWardenLogOpts(nginxString404, FilterOptions{}); ok {
+		t.Error("expected quoted status \"404\" to be filtered by default")
+	}
+
+	// 2. IncludeFailed mode: string "404" and "500" pass, "200" is filtered
+	if _, ok := FilterRouteWardenLogOpts(nginxString404, FilterOptions{IncludeFailed: true}); !ok {
+		t.Error("expected quoted status \"404\" to pass with IncludeFailed")
+	}
+	if _, ok := FilterRouteWardenLogOpts(nginxString500, FilterOptions{IncludeFailed: true}); !ok {
+		t.Error("expected quoted status \"500\" to pass with IncludeFailed")
+	}
+	if _, ok := FilterRouteWardenLogOpts(nginxString200, FilterOptions{IncludeFailed: true}); ok {
+		t.Error("expected quoted status \"200\" to be filtered with IncludeFailed")
+	}
+
+	// 3. AllTraffic mode: string "200" passes
+	if _, ok := FilterRouteWardenLogOpts(nginxString200, FilterOptions{AllTraffic: true}); !ok {
+		t.Error("expected quoted status \"200\" to pass with AllTraffic")
+	}
+}
+
+
 

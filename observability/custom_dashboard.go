@@ -624,12 +624,12 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 				ev.Method = "GET"
 			}
 
-			ev.Status = le.StatusCode
+			ev.Status = int(le.StatusCode)
 			if ev.Status == 0 {
-				ev.Status = le.StatusCodeAlt
+				ev.Status = int(le.StatusCodeAlt)
 			}
 			if ev.Status == 0 {
-				ev.Status = le.DownstreamStat
+				ev.Status = int(le.DownstreamStat)
 			}
 
 			ev.Verdict = strings.ToUpper(le.Verdict)
@@ -640,7 +640,11 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 				case 429:
 					ev.Verdict = "TARPIT"
 				default:
-					ev.Verdict = "ALLOW"
+					if ev.Status >= 400 {
+						ev.Verdict = "FAILED"
+					} else {
+						ev.Verdict = "ALLOW"
+					}
 				}
 			}
 			if ev.Status == 0 {
@@ -649,6 +653,8 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 					ev.Status = 403
 				case "TARPIT":
 					ev.Status = 429
+				case "FAILED":
+					ev.Status = 500
 				default:
 					ev.Status = 200
 				}
@@ -658,13 +664,16 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 			if ev.Rule == "" {
 				ev.Rule = le.MatchedRuleAlt
 			}
+			if ev.Rule == "" && ev.Verdict == "FAILED" {
+				ev.Rule = fmt.Sprintf("HTTP %d", ev.Status)
+			}
 
-			ev.LatencyMs = le.LatencyMs
+			ev.LatencyMs = float64(le.LatencyMs)
 			if ev.LatencyMs == 0 {
-				ev.LatencyMs = le.DurationMsAlt
+				ev.LatencyMs = float64(le.DurationMsAlt)
 			}
 			if ev.LatencyMs == 0 && le.DurationSec > 0 {
-				ev.LatencyMs = le.DurationSec * 1000.0
+				ev.LatencyMs = float64(le.DurationSec) * 1000.0
 			}
 			if ev.LatencyMs == 0 {
 				if ev.Verdict == "TARPIT" {
@@ -732,7 +741,11 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 			case 429:
 				ev.Verdict = "TARPIT"
 			default:
-				ev.Verdict = "ALLOW"
+				if ev.Status >= 400 {
+					ev.Verdict = "FAILED"
+				} else {
+					ev.Verdict = "ALLOW"
+				}
 			}
 		} else {
 			switch ev.Status {
@@ -741,7 +754,14 @@ func (s *EventStore) ParseAndIngest(line string, source string) *SecurityEvent {
 			case 429:
 				ev.Verdict = "TARPIT"
 			default:
-				ev.Verdict = "ALLOW"
+				if ev.Status >= 400 {
+					ev.Verdict = "FAILED"
+					if ev.Rule == "" {
+						ev.Rule = fmt.Sprintf("HTTP %d", ev.Status)
+					}
+				} else {
+					ev.Verdict = "ALLOW"
+				}
 			}
 		}
 
@@ -3817,7 +3837,7 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
     <div style="display:flex; align-items:center; gap:8px;">
       <img src="/icon.svg" alt="RouteWarden Logo" style="width:17px; height:17px; border-radius:3px; display:inline-block; vertical-align:middle; filter:drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));">
       <span>ROUTEWARDEN</span>
-      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.3.2</span>
+      <span class="dash-version-badge" style="font-size:10px; color:var(--overlay); font-family:var(--mono); border:1px solid var(--line-hi); padding:1px 5px; border-radius:3px;">v5.3.3</span>
     </div>
     <span id="auth-status-badge" style="display:none; font-size:10px; padding:2px 7px; border-radius:3px; background:rgba(34,211,238,0.12); border:1px solid var(--teal); color:var(--teal); font-weight:700;">🔒 AUTH</span>
     <button class="tui-btn" id="btn-logout" style="display:none; padding:2px 7px; font-size:10px; color:var(--pink); border-color:var(--pink-border); background:var(--pink-bg);" onclick="logoutDashboard()" title="Sign out of console">🚪 Sign Out</button>
@@ -3878,8 +3898,8 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
             <span class="spec-key">ENGINE</span>
           </div>
           <div class="spec-body">
-            <span class="spec-val">RouteWarden Core v5.3.2 // Traffic & Security Engine</span>
-            <span class="spec-pill spec-pill-green">CORE v5.3.2</span>
+            <span class="spec-val">RouteWarden Core v5.3.3 // Traffic & Security Engine</span>
+            <span class="spec-pill spec-pill-green">CORE v5.3.3</span>
           </div>
         </div>
         <div class="spec-row">

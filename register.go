@@ -20,6 +20,8 @@ type AgentConfig struct {
 	AgentName       string `json:"agent_name"`
 	ServerPublicKey string `json:"server_public_key"`
 	RegisteredAt    string `json:"registered_at"`
+	IncludeFailed   bool   `json:"include_failed,omitempty"`
+	AllTraffic      bool   `json:"all_traffic,omitempty"`
 }
 
 func defaultAgentConfigPath() string {
@@ -133,6 +135,9 @@ func handleRegister(args []string) {
 	agentToken := fs.String("key", "", "Remote agent authentication key (rw_sec_...)")
 	fs.StringVar(agentToken, "k", "", "Alias for --key")
 	configPath := fs.String("config", "", "Custom path to store agent configuration (default: ~/.routewarden/agent.json)")
+	includeFailed := fs.Bool("include-failed", false, "Always ship failed HTTP requests (status >= 400)")
+	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
+	allTraffic := fs.Bool("all-traffic", false, "Always ship all HTTP access traffic (including 200 OK)")
 	_ = parseFlagsLenient(fs, args)
 
 	if *dashboardURL == "" {
@@ -170,6 +175,16 @@ func handleRegister(args []string) {
 		destPath = defaultAgentConfigPath()
 	}
 
+	if *includeFailed {
+		cfg.IncludeFailed = true
+	}
+	if *allTraffic {
+		cfg.AllTraffic = true
+	}
+	if *includeFailed || *allTraffic {
+		_ = saveAgentConfig(destPath, cfg)
+	}
+
 	fmt.Println("✅ Successfully registered with RouteWarden Central Dashboard!")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("  Dashboard URL:     %s\n", cfg.DashboardURL)
@@ -177,6 +192,11 @@ func handleRegister(args []string) {
 	fmt.Printf("  Agent ID:          %s\n", cfg.AgentID)
 	if len(cfg.ServerPublicKey) > 20 {
 		fmt.Printf("  Server Public Key: %s...\n", cfg.ServerPublicKey[:20])
+	}
+	if cfg.AllTraffic {
+		fmt.Println("  Telemetry Filter:  All HTTP access traffic (--all-traffic)")
+	} else if cfg.IncludeFailed {
+		fmt.Println("  Telemetry Filter:  Security events + failed HTTP calls (--include-failed)")
 	}
 	fmt.Printf("  Config Saved:      %s\n", destPath)
 	fmt.Println("─────────────────────────────────────────────────────────────")
