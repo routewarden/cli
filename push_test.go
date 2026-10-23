@@ -914,3 +914,100 @@ func TestStringStatusCodesAndFlexibleParsing(t *testing.T) {
 		t.Error("expected quoted status \"200\" to pass with AllTraffic")
 	}
 }
+
+func TestStatusCodeFilter_ParsingAndMatching(t *testing.T) {
+	// 1. Parsing ranges and single codes
+	filter := ParseStatusCodeFilter("400-599, 301, 302, 4xx, 5xx")
+	if len(filter) == 0 {
+		t.Fatal("expected non-empty filter")
+	}
+
+	testCases := []struct {
+		status   int
+		expected bool
+	}{
+		{200, false},
+		{204, false},
+		{301, true},
+		{302, true},
+		{304, false},
+		{400, true},
+		{404, true},
+		{418, true},
+		{499, true},
+		{500, true},
+		{502, true},
+		{503, true},
+		{504, true},
+	}
+
+	for _, tc := range testCases {
+		if got := filter.Matches(tc.status); got != tc.expected {
+			t.Errorf("status %d: got %v, expected %v", tc.status, got, tc.expected)
+		}
+	}
+
+	// 2. Wildcards (4xx, 5xx)
+	wildcardFilter := ParseStatusCodeFilter("4xx, 5XX")
+	if !wildcardFilter.Matches(404) || !wildcardFilter.Matches(499) || !wildcardFilter.Matches(500) || wildcardFilter.Matches(200) || wildcardFilter.Matches(301) {
+		t.Errorf("unexpected wildcard matching behavior: %v", wildcardFilter)
+	}
+
+	// 3. Formatted string
+	str := ParseStatusCodeFilter("400-599, 301").String()
+	if str != "400-599, 301" {
+		t.Errorf("expected '400-599, 301', got %q", str)
+	}
+
+	// 4. Edge cases
+	empty := ParseStatusCodeFilter("")
+	if empty != nil || empty.Matches(200) {
+		t.Errorf("expected empty filter to be nil and not match")
+	}
+	invalid := ParseStatusCodeFilter("invalid, 9999, 50-10, -5")
+	if len(invalid) != 0 {
+		t.Errorf("expected invalid parts to be ignored, got %v", invalid)
+	}
+}
+
+func TestFilterRouteWardenLog_ExplicitStatusCodes(t *testing.T) {
+	opts := FilterOptions{
+		StatusCodes: ParseStatusCodeFilter("400-599, 301"),
+	}
+
+	caddy301 := `{"level":"info","ts":1729432800.0,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","remote_addr":"198.51.100.1:4567","method":"GET","uri":"/redirect","proto":"HTTP/1.1"},"status":301,"size":0,"duration":0.001}`
+	traefik301 := `{"ClientHost":"198.51.100.1","DownstreamStatus":301,"RequestPath":"/redirect","RequestMethod":"GET","OriginStatus":301}`
+	nginx301 := `{"ip":"198.51.100.1","status":"301","request_uri":"/redirect","method":"GET","request_time":"0.002"}`
+	combined301 := `198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /redirect HTTP/1.1" 301 0 "-" "-"`
+
+	caddy200 := `{"level":"info","ts":1729432800.0,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","remote_addr":"198.51.100.1:4567","method":"GET","uri":"/clean","proto":"HTTP/1.1"},"status":200,"size":123,"duration":0.001}`
+	caddy404 := `{"level":"info","ts":1729432800.0,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","remote_addr":"198.51.100.1:4567","method":"GET","uri":"/notfound","proto":"HTTP/1.1"},"status":404,"size":0,"duration":0.001}`
+	caddy502 := `{"level":"info","ts":1729432800.0,"logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","remote_addr":"198.51.100.1:4567","method":"GET","uri":"/badgw","proto":"HTTP/1.1"},"status":502,"size":0,"duration":0.001}`
+
+	// 1. Status 301 passes across all reverse proxies
+	if _, ok := filterRouteWardenLogOpts(caddy301, opts); !ok {
+		t.Error("expected Caddy 301 to pass with status filter 400-599, 301")
+	}
+	if _, ok := filterRouteWardenLogOpts(traefik301, opts); !ok {
+		t.Error("expected Traefik 301 to pass with status filter 400-599, 301")
+	}
+	if _, ok := filterRouteWardenLogOpts(nginx301, opts); !ok {
+		t.Error("expected NGINX 301 to pass with status filter 400-599, 301")
+	}
+	if _, ok := filterRouteWardenLogOpts(combined301, opts); !ok {
+		t.Error("expected Combined 301 to pass with status filter 400-599, 301")
+	}
+
+	// 2. Status 404 and 502 pass
+	if _, ok := filterRouteWardenLogOpts(caddy404, opts); !ok {
+		t.Error("expected Caddy 404 to pass with status filter 400-599, 301")
+	}
+	if _, ok := filterRouteWardenLogOpts(caddy502, opts); !ok {
+		t.Error("expected Caddy 502 to pass with status filter 400-599, 301")
+	}
+
+	// 3. Status 200 is filtered out
+	if _, ok := filterRouteWardenLogOpts(caddy200, opts); ok {
+		t.Error("expected Caddy 200 to be filtered out with status filter 400-599, 301")
+	}
+}

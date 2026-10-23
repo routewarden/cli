@@ -58,8 +58,7 @@ Flags:
   --container, -c      Tail specific Docker container(s)
   --file, -f           Log file(s) to monitor and push (or '-' for STDIN)
   --event, -e          Push one or more specific event strings directly
-  --stdin              Read and push events line-by-line from STDIN
-  --include-failed, -F Include failed HTTP requests (status >= 400) from reverse proxies
+  --status, -s         Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')
   --all-traffic        Include all HTTP reverse proxy traffic (including 200 OK)
   --detach, -d         Run remote shipper in background (detached) mode
   --verbose, -v        Enable verbose event-level logging`)
@@ -88,7 +87,11 @@ Flags:
 	fs.Var(&eventFlags, "event", "Push one or more specific event strings directly (repeatable)")
 	fs.Var(&eventFlags, "e", "Alias for --event")
 	stdinMode := fs.Bool("stdin", false, "Read and push events line-by-line from STDIN")
-	includeFailed := fs.Bool("include-failed", false, "Include failed HTTP requests (status >= 400) whether blocked by Routewarden or not")
+	statusCodesFlag := fs.String("status", "", "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
+	fs.StringVar(statusCodesFlag, "s", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "status-codes", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "include-status", "", "Alias for --status")
+	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
 	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
 	allTraffic := fs.Bool("all-traffic", false, "Include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)")
 	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
@@ -185,12 +188,20 @@ Flags:
 		agentToken = *keyFlag
 	}
 
-	if !*includeFailed {
-		if env := os.Getenv("RW_INCLUDE_FAILED"); env == "1" || strings.EqualFold(env, "true") {
-			*includeFailed = true
-		} else if agentCfg != nil && agentCfg.IncludeFailed {
-			*includeFailed = true
+	if *statusCodesFlag == "" {
+		if env := os.Getenv("RW_STATUS"); env != "" {
+			*statusCodesFlag = env
+		} else if env := os.Getenv("RW_STATUS_CODES"); env != "" {
+			*statusCodesFlag = env
+		} else if env := os.Getenv("RW_INCLUDE_STATUS"); env != "" {
+			*statusCodesFlag = env
+		} else if agentCfg != nil && agentCfg.StatusCodes != "" {
+			*statusCodesFlag = agentCfg.StatusCodes
 		}
+	}
+	if *statusCodesFlag == "" && (*includeFailed || (agentCfg != nil && agentCfg.IncludeFailed) || os.Getenv("RW_INCLUDE_FAILED") == "1" || strings.EqualFold(os.Getenv("RW_INCLUDE_FAILED"), "true")) {
+		*statusCodesFlag = "400-599"
+		*includeFailed = true
 	}
 	if !*allTraffic {
 		if env := os.Getenv("RW_ALL_TRAFFIC"); env == "1" || strings.EqualFold(env, "true") {
@@ -369,8 +380,10 @@ Flags:
 	}
 	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
 	fmt.Printf("  Offline Queue:   Max=%d, Timeout=%s\n", *maxQueueSize, *disconnectTimeout)
+	statusFilter := ParseStatusCodeFilter(*statusCodesFlag)
 	filterOpts := FilterOptions{
-		IncludeFailed: *includeFailed,
+		StatusCodes:   statusFilter,
+		IncludeFailed: *includeFailed || len(statusFilter) > 0,
 		AllTraffic:    *allTraffic,
 		AllLogs:       *allLogs,
 	}
@@ -379,6 +392,8 @@ Flags:
 		fmt.Println("  Filter:          Disabled (--all-logs: shipping all raw lines)")
 	} else if *allTraffic {
 		fmt.Println("  Filter:          All HTTP traffic (--all-traffic: security + 2xx/3xx/4xx/5xx)")
+	} else if len(statusFilter) > 0 {
+		fmt.Printf("  Filter:          Security events + HTTP status [%s]\n", statusFilter.String())
 	} else if *includeFailed {
 		fmt.Println("  Filter:          Security events + failed HTTP calls (--include-failed: 4xx/5xx)")
 	} else {
@@ -880,11 +895,83 @@ func StreamFileFilteredToChan(ctx context.Context, path, tailLines string, opts 
 	}
 }
 
+// StatusRange represents an inclusive HTTP status code range [Min, Max].
+type StatusRange struct {
+	Min int
+	Max int
+}
+
+// StatusCodeFilter matches HTTP status codes against a list of StatusRanges.
+type StatusCodeFilter []StatusRange
+
+func (f StatusCodeFilter) Matches(status int) bool {
+	for _, r := range f {
+		if status >= r.Min && status <= r.Max {
+			return true
+		}
+	}
+	return false
+}
+
+func (f StatusCodeFilter) String() string {
+	if len(f) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range f {
+		if r.Min == r.Max {
+			parts = append(parts, strconv.Itoa(r.Min))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d-%d", r.Min, r.Max))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ParseStatusCodeFilter parses a comma-separated list of status codes or ranges.
+// Examples: "400-599", "301", "404, 500-504", "4xx, 5xx", "4XX".
+func ParseStatusCodeFilter(expr string) StatusCodeFilter {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	var filter StatusCodeFilter
+	parts := strings.Split(expr, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		if len(lower) == 3 && strings.HasSuffix(lower, "xx") && lower[0] >= '1' && lower[0] <= '5' {
+			hundred := int(lower[0]-'0') * 100
+			filter = append(filter, StatusRange{Min: hundred, Max: hundred + 99})
+			continue
+		}
+		if strings.Contains(part, "-") {
+			rangeParts := strings.SplitN(part, "-", 2)
+			minStr := strings.TrimSpace(rangeParts[0])
+			maxStr := strings.TrimSpace(rangeParts[1])
+			min, errMin := strconv.Atoi(minStr)
+			max, errMax := strconv.Atoi(maxStr)
+			if errMin == nil && errMax == nil && min <= max && min >= 100 && max <= 999 {
+				filter = append(filter, StatusRange{Min: min, Max: max})
+			}
+			continue
+		}
+		if code, err := strconv.Atoi(part); err == nil && code >= 100 && code <= 999 {
+			filter = append(filter, StatusRange{Min: code, Max: code})
+		}
+	}
+	return filter
+}
+
 // FilterOptions controls which lines are forwarded by the remote shipper.
 type FilterOptions struct {
-	IncludeFailed bool // If true, include failed HTTP requests (status >= 400), whether blocked by Routewarden or not
-	AllTraffic    bool // If true, include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)
-	AllLogs       bool // If true, ship all raw container lines without filtering
+	StatusCodes   StatusCodeFilter // Match HTTP requests matching specific status codes or ranges (e.g. 400-599, 301, 4xx, 5xx)
+	IncludeFailed bool             // Legacy fallback: if true and StatusCodes is empty, treats as 400-599
+	AllTraffic    bool             // If true, include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)
+	AllLogs       bool             // If true, ship all raw container lines without filtering
 }
 
 // CombinedLogRegex matches standard Common / Combined Apache and NGINX access log lines:
@@ -1079,7 +1166,11 @@ func IsRouteWardenLogOpts(line string, opts FilterOptions) bool {
 		if opts.AllTraffic {
 			return true
 		}
-		if opts.IncludeFailed && status >= 400 {
+		if len(opts.StatusCodes) > 0 {
+			if opts.StatusCodes.Matches(status) {
+				return true
+			}
+		} else if opts.IncludeFailed && status >= 400 {
 			return true
 		}
 	}
