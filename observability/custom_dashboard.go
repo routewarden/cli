@@ -4101,9 +4101,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
         </thead>
         <tbody id="stream-tbody"></tbody>
       </table>
-      <div style="position:sticky; bottom:12px; display:flex; justify-content:center; pointer-events:none; width:100%; height:0; overflow:visible;">
-        <button id="btn-scroll-top" class="tui-btn" style="display:none; pointer-events:auto; transform:translateY(-100%); background:var(--teal); color:var(--crust); font-weight:700; border-color:var(--teal); box-shadow:0 2px 10px rgba(0,0,0,0.35); cursor:pointer;" onclick="jumpToLatest()">▲ JUMP TO LATEST</button>
-      </div>
     </div>
 
     <!-- Terminal Table Pagination Bar -->
@@ -4784,15 +4781,6 @@ const CustomSOCDashboardHTML = `<!DOCTYPE html>
       toggleStreamPause();
     }
   };
-
-  if (streamContainer) {
-    streamContainer.addEventListener('scroll', function() {
-      var btn = document.getElementById('btn-scroll-top');
-      if (btn) {
-        btn.style.display = streamContainer.scrollTop > 100 ? 'inline-flex' : 'none';
-      }
-    });
-  }
 
   btnResetFilters.addEventListener('click', function() {
     resetAllFilters();
