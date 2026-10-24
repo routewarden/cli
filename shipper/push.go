@@ -58,7 +58,8 @@ Flags:
   --container, -c      Tail specific Docker container(s)
   --file, -f           Log file(s) to monitor and push (or '-' for STDIN)
   --event, -e          Push one or more specific event strings directly
-  --stdin              Read and push events line-by-line from STDIN
+  --status, -s         Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')
+  --all-traffic        Include all HTTP reverse proxy traffic (including 200 OK)
   --detach, -d         Run remote shipper in background (detached) mode
   --verbose, -v        Enable verbose event-level logging`)
 			return
@@ -86,6 +87,13 @@ Flags:
 	fs.Var(&eventFlags, "event", "Push one or more specific event strings directly (repeatable)")
 	fs.Var(&eventFlags, "e", "Alias for --event")
 	stdinMode := fs.Bool("stdin", false, "Read and push events line-by-line from STDIN")
+	statusCodesFlag := fs.String("status", "", "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
+	fs.StringVar(statusCodesFlag, "s", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "status-codes", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "include-status", "", "Alias for --status")
+	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
+	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
+	allTraffic := fs.Bool("all-traffic", false, "Include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)")
 	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
 	fs.StringVar(customLabel, "l", "", "Alias for --label")
 	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
@@ -178,6 +186,29 @@ Flags:
 	}
 	if *keyFlag != "" {
 		agentToken = *keyFlag
+	}
+
+	if *statusCodesFlag == "" {
+		if env := os.Getenv("RW_STATUS"); env != "" {
+			*statusCodesFlag = env
+		} else if env := os.Getenv("RW_STATUS_CODES"); env != "" {
+			*statusCodesFlag = env
+		} else if env := os.Getenv("RW_INCLUDE_STATUS"); env != "" {
+			*statusCodesFlag = env
+		} else if agentCfg != nil && agentCfg.StatusCodes != "" {
+			*statusCodesFlag = agentCfg.StatusCodes
+		}
+	}
+	if *statusCodesFlag == "" && (*includeFailed || (agentCfg != nil && agentCfg.IncludeFailed) || os.Getenv("RW_INCLUDE_FAILED") == "1" || strings.EqualFold(os.Getenv("RW_INCLUDE_FAILED"), "true")) {
+		*statusCodesFlag = "400-599"
+		*includeFailed = true
+	}
+	if !*allTraffic {
+		if env := os.Getenv("RW_ALL_TRAFFIC"); env == "1" || strings.EqualFold(env, "true") {
+			*allTraffic = true
+		} else if agentCfg != nil && agentCfg.AllTraffic {
+			*allTraffic = true
+		}
 	}
 
 	hostname, _ := os.Hostname()
@@ -349,10 +380,24 @@ Flags:
 	}
 	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
 	fmt.Printf("  Offline Queue:   Max=%d, Timeout=%s\n", *maxQueueSize, *disconnectTimeout)
+	statusFilter := ParseStatusCodeFilter(*statusCodesFlag)
+	filterOpts := FilterOptions{
+		StatusCodes:   statusFilter,
+		IncludeFailed: *includeFailed || len(statusFilter) > 0,
+		AllTraffic:    *allTraffic,
+		AllLogs:       *allLogs,
+	}
+
 	if *allLogs {
 		fmt.Println("  Filter:          Disabled (--all-logs: shipping all raw lines)")
+	} else if *allTraffic {
+		fmt.Println("  Filter:          All HTTP traffic (--all-traffic: security + 2xx/3xx/4xx/5xx)")
+	} else if len(statusFilter) > 0 {
+		fmt.Printf("  Filter:          Security events + HTTP status [%s]\n", statusFilter.String())
+	} else if *includeFailed {
+		fmt.Println("  Filter:          Security events + failed HTTP calls (--include-failed: 4xx/5xx)")
 	} else {
-		fmt.Println("  Filter:          RouteWarden logs only (security events & access logs)")
+		fmt.Println("  Filter:          Security events only (blocks, tarpits & matched rules)")
 	}
 	if *verbose {
 		fmt.Println("  Logging:         Verbose enabled (event-level previews)")
@@ -368,7 +413,7 @@ Flags:
 	if len(filesToMonitor) > 0 {
 		for _, f := range filesToMonitor {
 			fmt.Printf("  Monitoring File: %s\n", f)
-			go TailFileToChan(ctx, f, *tailLines, eventChan)
+			go TailFileFilteredToChan(ctx, f, *tailLines, filterOpts, eventChan)
 		}
 	}
 	if len(containersToTail) > 0 {
@@ -377,7 +422,7 @@ Flags:
 			go func(containerName string) {
 				currentTail := *tailLines
 				for {
-					TailContainerFilteredToChan(ctx, containerName, currentTail, *allLogs, eventChan)
+					TailContainerWithFilterOptsToChan(ctx, containerName, currentTail, filterOpts, eventChan)
 					select {
 					case <-ctx.Done():
 						return
@@ -394,7 +439,7 @@ Flags:
 			labelDesc = fmt.Sprintf("'%s'", *customLabel)
 		}
 		fmt.Printf("  Auto-Discovery:  Watching Docker containers with label %s\n", labelDesc)
-		go WatchDockerContainersFilteredToChan(ctx, *customLabel, *tailLines, *allLogs, eventChan)
+		go WatchDockerContainersWithFilterOptsToChan(ctx, *customLabel, *tailLines, filterOpts, eventChan)
 	}
 
 	// Dynamic observer: continuously watch for new log files matching glob patterns or directories
@@ -433,7 +478,7 @@ Flags:
 						if !monitored[f] {
 							monitored[f] = true
 							fmt.Printf("📄 [File] Attached to new log file: %s\n", f)
-							go TailFileToChan(ctx, f, *tailLines, eventChan)
+							go TailFileFilteredToChan(ctx, f, *tailLines, filterOpts, eventChan)
 						}
 					}
 				}
@@ -635,6 +680,10 @@ Flags:
 }
 
 func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- string) {
+	TailFileFilteredToChan(ctx, path, tailLines, FilterOptions{AllLogs: true}, out)
+}
+
+func TailFileFilteredToChan(ctx context.Context, path, tailLines string, opts FilterOptions, out chan<- string) {
 	if tailLines == "" {
 		tailLines = "50"
 	}
@@ -642,22 +691,27 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to open pipe: %v; falling back to native file watcher\n", path, err)
-		StreamFileToChan(ctx, path, tailLines, out)
+		StreamFileFilteredToChan(ctx, path, tailLines, opts, out)
 		return
 	}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️ [File %s] Failed to start tail command: %v; falling back to native file watcher\n", path, err)
-		StreamFileToChan(ctx, path, tailLines, out)
+		StreamFileFilteredToChan(ctx, path, tailLines, opts, out)
 		return
 	}
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
+		raw := scanner.Text()
+		clean, ok := FilterRouteWardenLogOpts(raw, opts)
+		if !ok {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			_ = cmd.Wait()
 			return
-		case out <- scanner.Text():
+		case out <- clean:
 		}
 	}
 	waitErr := cmd.Wait()
@@ -667,11 +721,15 @@ func TailFileToChan(ctx context.Context, path, tailLines string, out chan<- stri
 		} else if waitErr != nil {
 			fmt.Fprintf(os.Stderr, "⚠️ [File %s] tail command stopped (%v); switching to native file watcher\n", path, waitErr)
 		}
-		StreamFileToChan(ctx, path, "0", out)
+		StreamFileFilteredToChan(ctx, path, "0", opts, out)
 	}
 }
 
 func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- string) {
+	StreamFileFilteredToChan(ctx, path, tailLines, FilterOptions{AllLogs: true}, out)
+}
+
+func StreamFileFilteredToChan(ctx context.Context, path, tailLines string, opts FilterOptions, out chan<- string) {
 	var f *os.File
 	for {
 		var err error
@@ -710,7 +768,9 @@ func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 			scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 			var initialLines []string
 			for scanner.Scan() {
-				initialLines = append(initialLines, scanner.Text())
+				if clean, ok := FilterRouteWardenLogOpts(scanner.Text(), opts); ok {
+					initialLines = append(initialLines, clean)
+				}
 			}
 			if scanErr := scanner.Err(); scanErr != nil {
 				fmt.Fprintf(os.Stderr, "⚠️ [File %s] Scanner error during initial tail: %v\n", path, scanErr)
@@ -755,10 +815,12 @@ func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 			}
 			line = strings.TrimRight(line, "\r\n")
 			if line != "" {
-				select {
-				case <-ctx.Done():
-					return
-				case out <- line:
+				if clean, ok := FilterRouteWardenLogOpts(line, opts); ok {
+					select {
+					case <-ctx.Done():
+						return
+					case out <- clean:
+					}
 				}
 			}
 			continue
@@ -800,10 +862,12 @@ func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 						pendingLine = ""
 						trimmed := strings.TrimRight(combinedStr, "\r\n")
 						if trimmed != "" {
-							select {
-							case <-ctx.Done():
-								return
-							case out <- trimmed:
+							if clean, ok := FilterRouteWardenLogOpts(trimmed, opts); ok {
+								select {
+								case <-ctx.Done():
+									return
+								case out <- clean:
+								}
 							}
 						}
 					}
@@ -831,6 +895,85 @@ func StreamFileToChan(ctx context.Context, path, tailLines string, out chan<- st
 	}
 }
 
+// StatusRange represents an inclusive HTTP status code range [Min, Max].
+type StatusRange struct {
+	Min int
+	Max int
+}
+
+// StatusCodeFilter matches HTTP status codes against a list of StatusRanges.
+type StatusCodeFilter []StatusRange
+
+func (f StatusCodeFilter) Matches(status int) bool {
+	for _, r := range f {
+		if status >= r.Min && status <= r.Max {
+			return true
+		}
+	}
+	return false
+}
+
+func (f StatusCodeFilter) String() string {
+	if len(f) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, r := range f {
+		if r.Min == r.Max {
+			parts = append(parts, strconv.Itoa(r.Min))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d-%d", r.Min, r.Max))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ParseStatusCodeFilter parses a comma-separated list of status codes or ranges.
+// Examples: "400-599", "301", "404, 500-504", "4xx, 5xx", "4XX".
+func ParseStatusCodeFilter(expr string) StatusCodeFilter {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	var filter StatusCodeFilter
+	parts := strings.Split(expr, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		if len(lower) == 3 && strings.HasSuffix(lower, "xx") && lower[0] >= '1' && lower[0] <= '5' {
+			hundred := int(lower[0]-'0') * 100
+			filter = append(filter, StatusRange{Min: hundred, Max: hundred + 99})
+			continue
+		}
+		if strings.Contains(part, "-") {
+			rangeParts := strings.SplitN(part, "-", 2)
+			minStr := strings.TrimSpace(rangeParts[0])
+			maxStr := strings.TrimSpace(rangeParts[1])
+			min, errMin := strconv.Atoi(minStr)
+			max, errMax := strconv.Atoi(maxStr)
+			if errMin == nil && errMax == nil && min <= max && min >= 100 && max <= 999 {
+				filter = append(filter, StatusRange{Min: min, Max: max})
+			}
+			continue
+		}
+		if code, err := strconv.Atoi(part); err == nil && code >= 100 && code <= 999 {
+			filter = append(filter, StatusRange{Min: code, Max: code})
+		}
+	}
+	return filter
+}
+
+// FilterOptions controls which lines are forwarded by the remote shipper.
+type FilterOptions struct {
+	StatusCodes   StatusCodeFilter // Match HTTP requests matching specific status codes or ranges (e.g. 400-599, 301, 4xx, 5xx)
+	IncludeFailed bool             // Legacy fallback: if true and StatusCodes is empty, treats as 400-599
+	AllTraffic    bool             // If true, include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)
+	AllLogs       bool             // If true, ship all raw container lines without filtering
+}
+
 // CombinedLogRegex matches standard Common / Combined Apache and NGINX access log lines:
 // e.g. 198.51.100.1 - - [20/Oct/2026:14:00:01 +0000] "GET /api HTTP/1.1" 200 123 "-" "..."
 var CombinedLogRegex = regexp.MustCompile(`^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s+[^"]+"\s+(\d{3})\s+\S+`)
@@ -839,28 +982,49 @@ var CombinedLogRegex = regexp.MustCompile(`^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"
 // e.g. "2026-10-20T14:00:01.123456789Z " or "2026-10-20T14:00:01.123456789+00:00 "
 var DockerTimestampPrefixRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+`)
 
+type flexibleInt int
+
+func (fi *flexibleInt) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	s := strings.TrimSpace(string(b))
+	if strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`) {
+		s = strings.Trim(s, `"`)
+		if n, err := strconv.Atoi(s); err == nil {
+			*fi = flexibleInt(n)
+		}
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*fi = flexibleInt(n)
+	}
+	return nil
+}
+
 type RouteWardenCheck struct {
-	ClientIP       string `json:"client_ip"`
-	ClientIPAlt    string `json:"ip"`
-	ClientHost     string `json:"ClientHost"`
-	RemoteAddr     string `json:"remote_addr"`
-	RemoteIP       string `json:"remote_ip"`
-	Verdict        string `json:"verdict"`
-	Action         string `json:"action"`
-	Method         string `json:"method"`
-	RequestMethod  string `json:"RequestMethod"`
-	Path           string `json:"path"`
-	PathAlt        string `json:"request_uri"`
-	RequestPath    string `json:"RequestPath"`
-	URI            string `json:"uri"`
-	MatchedPattern string `json:"matched_pattern"`
-	Rule           string `json:"rule"`
-	StatusCode     int    `json:"status"`
-	StatusCodeAlt  int    `json:"status_code"`
-	DownstreamStat int    `json:"DownstreamStatus"`
-	Plugin         string `json:"plugin"`
-	Gateway        string `json:"gateway"`
-	Logger         string `json:"logger"`
+	ClientIP       string      `json:"client_ip"`
+	ClientIPAlt    string      `json:"ip"`
+	ClientHost     string      `json:"ClientHost"`
+	RemoteAddr     string      `json:"remote_addr"`
+	RemoteIP       string      `json:"remote_ip"`
+	Verdict        string      `json:"verdict"`
+	Action         string      `json:"action"`
+	Method         string      `json:"method"`
+	RequestMethod  string      `json:"RequestMethod"`
+	Path           string      `json:"path"`
+	PathAlt        string      `json:"request_uri"`
+	RequestPath    string      `json:"RequestPath"`
+	URI            string      `json:"uri"`
+	MatchedPattern string      `json:"matched_pattern"`
+	Rule           string      `json:"rule"`
+	StatusCode     flexibleInt `json:"status"`
+	StatusCodeAlt  flexibleInt `json:"status_code"`
+	DownstreamStat flexibleInt `json:"DownstreamStatus"`
+	Plugin         string      `json:"plugin"`
+	Gateway        string      `json:"gateway"`
+	Logger         string      `json:"logger"`
 	Request        *struct {
 		ClientIP   string `json:"client_ip"`
 		RemoteIP   string `json:"remote_ip"`
@@ -871,99 +1035,168 @@ type RouteWardenCheck struct {
 	} `json:"request"`
 }
 
-// IsRouteWardenLog returns true if line is a valid RouteWarden security event or proxy access log.
+// isSecurityEvent checks if a line has explicit Routewarden security signals or security status codes (403, 429).
+func isSecurityEvent(line string, ev *RouteWardenCheck) bool {
+	if ev != nil {
+		if ev.Verdict != "" || ev.Action != "" {
+			return true
+		}
+		if ev.Rule != "" || ev.MatchedPattern != "" {
+			return true
+		}
+		if ev.Plugin != "" || ev.Gateway != "" {
+			return true
+		}
+		st := ev.StatusCode
+		if st == 0 {
+			st = ev.StatusCodeAlt
+		}
+		if st == 0 {
+			st = ev.DownstreamStat
+		}
+		if st == 403 || st == 429 {
+			return true
+		}
+	}
+	// Common / Combined log with RouteWarden indicators: [BLOCK: ...], [TARPIT: ...], [RULE: ...], etc.
+	if strings.Contains(line, "[BLOCK") || strings.Contains(line, "[TARPIT") ||
+		strings.Contains(line, "[RULE") || strings.Contains(line, "[HONEYPOT") ||
+		strings.Contains(line, "[ALLOW") || strings.Contains(line, "RouteWarden") ||
+		strings.Contains(line, "Routewarden") {
+		return true
+	}
+	// Check Combined / Common Log format for status 403 or 429
+	if match := CombinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
+		if match[5] == "403" || match[5] == "429" {
+			return true
+		}
+	}
+	return false
+}
+
+// extractHTTPStatus parses the HTTP status code and verifies if line is an HTTP access event.
+func extractHTTPStatus(line string, ev *RouteWardenCheck) (status int, isHTTP bool) {
+	if ev != nil {
+		if ev.Request != nil {
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.ClientIP
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.RemoteIP
+			}
+			if ev.ClientIP == "" {
+				ev.ClientIP = ev.Request.RemoteAddr
+			}
+			if ev.Path == "" {
+				ev.Path = ev.Request.URI
+			}
+			if ev.Method == "" {
+				ev.Method = ev.Request.Method
+			}
+		}
+		if ev.ClientIP == "" {
+			ev.ClientIP = ev.RemoteAddr
+		}
+		if ev.ClientIP == "" {
+			ev.ClientIP = ev.RemoteIP
+		}
+		if ev.Path == "" {
+			ev.Path = ev.URI
+		}
+
+		hasIP := ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != ""
+		hasPath := ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != ""
+		hasMethod := ev.Method != "" || ev.RequestMethod != ""
+		st := ev.StatusCode
+		if st == 0 {
+			st = ev.StatusCodeAlt
+		}
+		if st == 0 {
+			st = ev.DownstreamStat
+		}
+
+		if (hasIP && (hasPath || hasMethod || st > 0)) || (hasPath && hasMethod) || ev.Logger == "http.log.access" || strings.HasPrefix(ev.Logger, "http.log.access") {
+			return int(st), true
+		}
+	}
+
+	// Check Combined / Common Log format
+	if match := CombinedLogRegex.FindStringSubmatch(line); len(match) >= 6 {
+		st, err := strconv.Atoi(match[5])
+		if err == nil {
+			return st, true
+		}
+		return 0, true
+	}
+
+	return 0, false
+}
+
+// IsRouteWardenLog returns true if line is a valid RouteWarden security event.
 func IsRouteWardenLog(line string) bool {
+	return IsRouteWardenLogOpts(line, FilterOptions{})
+}
+
+// IsRouteWardenLogOpts returns true if line matches the active FilterOptions.
+func IsRouteWardenLogOpts(line string, opts FilterOptions) bool {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return false
 	}
-
-	// 1. Check for standard Combined / Common Access Log format
-	if CombinedLogRegex.MatchString(line) {
+	if opts.AllLogs {
 		return true
 	}
 
-	// 2. Check for RouteWarden structured JSON log event
+	var ev *RouteWardenCheck
 	if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
-		var ev RouteWardenCheck
-		if err := json.Unmarshal([]byte(line), &ev); err == nil {
-			// Security enforcement events (e.g. BLOCK, ALLOW, TARPIT)
-			if ev.Verdict != "" || ev.Action != "" {
-				return true
-			}
-			// Threat rule or pattern detection
-			if ev.Rule != "" || ev.MatchedPattern != "" {
-				return true
-			}
-			// RouteWarden / TCP Warden plugin tags
-			if ev.Plugin != "" || ev.Gateway != "" {
-				return true
-			}
-			// Standard Caddy access logger tag
-			if ev.Logger == "http.log.access" {
-				return true
-			}
+		var check RouteWardenCheck
+		if err := json.Unmarshal([]byte(line), &check); err == nil {
+			ev = &check
+		}
+	}
 
-			// Unpack nested request if present (e.g. Caddy JSON access log)
-			if ev.Request != nil {
-				if ev.ClientIP == "" {
-					ev.ClientIP = ev.Request.ClientIP
-				}
-				if ev.ClientIP == "" {
-					ev.ClientIP = ev.Request.RemoteIP
-				}
-				if ev.ClientIP == "" {
-					ev.ClientIP = ev.Request.RemoteAddr
-				}
-				if ev.Path == "" {
-					ev.Path = ev.Request.URI
-				}
-				if ev.Method == "" {
-					ev.Method = ev.Request.Method
-				}
-			}
-			if ev.ClientIP == "" {
-				ev.ClientIP = ev.RemoteAddr
-			}
-			if ev.ClientIP == "" {
-				ev.ClientIP = ev.RemoteIP
-			}
-			if ev.Path == "" {
-				ev.Path = ev.URI
-			}
+	// 1. Always accept explicit security enforcement events & threat rule detections
+	if isSecurityEvent(line, ev) {
+		return true
+	}
 
-			// Access events: must have client IP and (request path or HTTP method or status code)
-			hasIP := ev.ClientIP != "" || ev.ClientIPAlt != "" || ev.ClientHost != ""
-			hasPath := ev.Path != "" || ev.PathAlt != "" || ev.RequestPath != ""
-			hasMethod := ev.Method != "" || ev.RequestMethod != ""
-			hasStatus := ev.StatusCode > 0 || ev.StatusCodeAlt > 0 || ev.DownstreamStat > 0
-
-			if hasIP && (hasPath || hasMethod || hasStatus) {
+	// 2. Check if this is an HTTP request log
+	status, isHTTP := extractHTTPStatus(line, ev)
+	if isHTTP {
+		if opts.AllTraffic {
+			return true
+		}
+		if len(opts.StatusCodes) > 0 {
+			if opts.StatusCodes.Matches(status) {
 				return true
 			}
-			if hasPath && hasMethod {
-				return true
-			}
+		} else if opts.IncludeFailed && status >= 400 {
+			return true
 		}
 	}
 
 	return false
 }
 
-// FilterRouteWardenLog sanitizes a container log line and checks if it should be shipped.
+// FilterRouteWardenLog sanitizes a container log line and checks if it should be shipped (backward compatible).
 func FilterRouteWardenLog(line string, allLogs bool) (string, bool) {
+	return FilterRouteWardenLogOpts(line, FilterOptions{AllLogs: allLogs})
+}
+
+// FilterRouteWardenLogOpts sanitizes a container log line and checks if it should be shipped based on options.
+func FilterRouteWardenLogOpts(line string, opts FilterOptions) (string, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return "", false
 	}
-	if allLogs {
+	if opts.AllLogs {
 		return line, true
 	}
 	cleanLine := line
 	if loc := DockerTimestampPrefixRegex.FindStringIndex(line); loc != nil && loc[0] == 0 {
 		cleanLine = strings.TrimSpace(line[loc[1]:])
 	}
-	if IsRouteWardenLog(cleanLine) {
+	if IsRouteWardenLogOpts(cleanLine, opts) {
 		return cleanLine, true
 	}
 	return "", false
@@ -971,11 +1204,16 @@ func FilterRouteWardenLog(line string, allLogs bool) (string, bool) {
 
 // TailContainerToChan tails a container with RouteWarden log filtering enabled by default.
 func TailContainerToChan(ctx context.Context, containerName, tailLines string, out chan<- string) {
-	TailContainerFilteredToChan(ctx, containerName, tailLines, false, out)
+	TailContainerWithFilterOptsToChan(ctx, containerName, tailLines, FilterOptions{}, out)
 }
 
 // TailContainerFilteredToChan tails a container, optionally bypassing RouteWarden filtering if allLogs is true.
 func TailContainerFilteredToChan(ctx context.Context, containerName, tailLines string, allLogs bool, out chan<- string) {
+	TailContainerWithFilterOptsToChan(ctx, containerName, tailLines, FilterOptions{AllLogs: allLogs}, out)
+}
+
+// TailContainerWithFilterOptsToChan tails a container with configurable FilterOptions.
+func TailContainerWithFilterOptsToChan(ctx context.Context, containerName, tailLines string, opts FilterOptions, out chan<- string) {
 	cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", tailLines, containerName)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -997,7 +1235,7 @@ func TailContainerFilteredToChan(ctx context.Context, containerName, tailLines s
 		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			rawText := scanner.Text()
-			cleanText, ok := FilterRouteWardenLog(rawText, allLogs)
+			cleanText, ok := FilterRouteWardenLogOpts(rawText, opts)
 			if !ok {
 				continue
 			}
@@ -1030,11 +1268,16 @@ func TailContainerFilteredToChan(ctx context.Context, containerName, tailLines s
 
 // WatchDockerContainersToChan watches discovered containers with RouteWarden filtering enabled.
 func WatchDockerContainersToChan(ctx context.Context, customLabel, tailLines string, out chan<- string) {
-	WatchDockerContainersFilteredToChan(ctx, customLabel, tailLines, false, out)
+	WatchDockerContainersWithFilterOptsToChan(ctx, customLabel, tailLines, FilterOptions{}, out)
 }
 
 // WatchDockerContainersFilteredToChan watches discovered containers with configurable allLogs filtering.
 func WatchDockerContainersFilteredToChan(ctx context.Context, customLabel, tailLines string, allLogs bool, out chan<- string) {
+	WatchDockerContainersWithFilterOptsToChan(ctx, customLabel, tailLines, FilterOptions{AllLogs: allLogs}, out)
+}
+
+// WatchDockerContainersWithFilterOptsToChan watches discovered containers with configurable FilterOptions.
+func WatchDockerContainersWithFilterOptsToChan(ctx context.Context, customLabel, tailLines string, opts FilterOptions, out chan<- string) {
 	var mu sync.Mutex
 	active := make(map[string]context.CancelFunc)
 
@@ -1060,7 +1303,7 @@ func WatchDockerContainersFilteredToChan(ctx context.Context, customLabel, tailL
 				}
 			}()
 
-			TailContainerFilteredToChan(cCtx, id, tailLines, allLogs, out)
+			TailContainerWithFilterOptsToChan(cCtx, id, tailLines, opts, out)
 		}()
 	}
 

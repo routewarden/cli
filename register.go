@@ -20,6 +20,9 @@ type AgentConfig struct {
 	AgentName       string `json:"agent_name"`
 	ServerPublicKey string `json:"server_public_key"`
 	RegisteredAt    string `json:"registered_at"`
+	StatusCodes     string `json:"status_codes,omitempty"`
+	IncludeFailed   bool   `json:"include_failed,omitempty"`
+	AllTraffic      bool   `json:"all_traffic,omitempty"`
 }
 
 func defaultAgentConfigPath() string {
@@ -133,6 +136,13 @@ func handleRegister(args []string) {
 	agentToken := fs.String("key", "", "Remote agent authentication key (rw_sec_...)")
 	fs.StringVar(agentToken, "k", "", "Alias for --key")
 	configPath := fs.String("config", "", "Custom path to store agent configuration (default: ~/.routewarden/agent.json)")
+	statusCodesFlag := fs.String("status", "", "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
+	fs.StringVar(statusCodesFlag, "s", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "status-codes", "", "Alias for --status")
+	fs.StringVar(statusCodesFlag, "include-status", "", "Alias for --status")
+	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
+	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
+	allTraffic := fs.Bool("all-traffic", false, "Always ship all HTTP access traffic (including 200 OK)")
 	_ = parseFlagsLenient(fs, args)
 
 	if *dashboardURL == "" {
@@ -170,6 +180,23 @@ func handleRegister(args []string) {
 		destPath = defaultAgentConfigPath()
 	}
 
+	if *statusCodesFlag == "" && *includeFailed {
+		*statusCodesFlag = "400-599"
+	}
+	if *statusCodesFlag != "" {
+		cfg.StatusCodes = *statusCodesFlag
+		cfg.IncludeFailed = true
+	}
+	if *includeFailed {
+		cfg.IncludeFailed = true
+	}
+	if *allTraffic {
+		cfg.AllTraffic = true
+	}
+	if *statusCodesFlag != "" || *includeFailed || *allTraffic {
+		_ = saveAgentConfig(destPath, cfg)
+	}
+
 	fmt.Println("✅ Successfully registered with RouteWarden Central Dashboard!")
 	fmt.Println("─────────────────────────────────────────────────────────────")
 	fmt.Printf("  Dashboard URL:     %s\n", cfg.DashboardURL)
@@ -177,6 +204,13 @@ func handleRegister(args []string) {
 	fmt.Printf("  Agent ID:          %s\n", cfg.AgentID)
 	if len(cfg.ServerPublicKey) > 20 {
 		fmt.Printf("  Server Public Key: %s...\n", cfg.ServerPublicKey[:20])
+	}
+	if cfg.AllTraffic {
+		fmt.Println("  Telemetry Filter:  All HTTP access traffic (--all-traffic)")
+	} else if cfg.StatusCodes != "" {
+		fmt.Printf("  Telemetry Filter:  Security events + HTTP status [%s]\n", cfg.StatusCodes)
+	} else if cfg.IncludeFailed {
+		fmt.Println("  Telemetry Filter:  Security events + failed HTTP calls (--include-failed)")
 	}
 	fmt.Printf("  Config Saved:      %s\n", destPath)
 	fmt.Println("─────────────────────────────────────────────────────────────")
