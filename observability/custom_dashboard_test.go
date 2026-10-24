@@ -96,6 +96,50 @@ func TestEventStore_ParseAndIngest(t *testing.T) {
 	}
 }
 
+func TestEventStore_ParseAndIngest_FailedHTTPRequests(t *testing.T) {
+	store := observability.NewEventStore()
+
+	// 1. Unblocked 404 Caddy access log
+	caddy404 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/not-found","method":"GET"},"status":404}`
+	ev1 := store.ParseAndIngest(caddy404, "caddy-agent")
+	if ev1 == nil {
+		t.Fatalf("expected non-nil event for caddy 404")
+	}
+	if ev1.Verdict != "FAILED" || ev1.Rule != "HTTP 404" || ev1.Status != 404 {
+		t.Errorf("expected FAILED/HTTP 404, got %+v", ev1)
+	}
+
+	// 2. Unblocked 500 Traefik JSON access log
+	traefik500 := `{"ClientHost":"198.51.100.5","RequestPath":"/checkout","RequestMethod":"POST","DownstreamStatus":500}`
+	ev2 := store.ParseAndIngest(traefik500, "traefik-agent")
+	if ev2 == nil {
+		t.Fatalf("expected non-nil event for traefik 500")
+	}
+	if ev2.Verdict != "FAILED" || ev2.Rule != "HTTP 500" || ev2.Status != 500 {
+		t.Errorf("expected FAILED/HTTP 500, got %+v", ev2)
+	}
+
+	// 3. Unblocked 502 NGINX Combined access log
+	nginx502 := `198.51.100.20 - - [21/Oct/2026:12:00:00 +0000] "GET /api/v1/service HTTP/1.1" 502 120 "-" "Mozilla/5.0"`
+	ev3 := store.ParseAndIngest(nginx502, "nginx-agent")
+	if ev3 == nil {
+		t.Fatalf("expected non-nil event for nginx 502")
+	}
+	if ev3.Verdict != "FAILED" || ev3.Rule != "HTTP 502" || ev3.Status != 502 {
+		t.Errorf("expected FAILED/HTTP 502, got %+v", ev3)
+	}
+
+	// 4. Benign 200 OK access log receives ALLOW
+	caddy200 := `{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"198.51.100.1","uri":"/home","method":"GET"},"status":200}`
+	ev4 := store.ParseAndIngest(caddy200, "caddy-agent")
+	if ev4 == nil {
+		t.Fatalf("expected non-nil event for caddy 200")
+	}
+	if ev4.Verdict != "ALLOW" {
+		t.Errorf("expected ALLOW for 200 OK, got %+v", ev4)
+	}
+}
+
 func TestEventStore_Subscription(t *testing.T) {
 	store := observability.NewEventStore()
 	ch, unsub := store.Subscribe()
