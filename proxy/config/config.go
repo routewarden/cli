@@ -607,16 +607,18 @@ func (c *Config) IsPluginEnabled(pluginName string) bool {
 
 // GlobalConfig contains daemon-wide defaults.
 type GlobalConfig struct {
-	MaxConnections     int            `yaml:"max_connections"`
-	BanDuration        Duration       `yaml:"ban_duration"`
-	BanAfterFailures   int            `yaml:"ban_after_failures"`
-	TarpitMs           int            `yaml:"tarpit_ms"`
-	LogLevel           string         `yaml:"log_level"`
-	LogFile            string         `yaml:"log_file"`
-	GeoIPDB            string         `yaml:"geoip_db"`
-	DataDir            string         `yaml:"data_dir"` // directory for persistent state (bans.db SQLite, etc.)
-	IPFilter           IPFilterConfig `yaml:"ip_filter"`
-	GeoBlock           GeoBlockConfig `yaml:"geo_block"`
+	ASNDB            string         `yaml:"asn_db"`
+	AllowedASNs      []string       `yaml:"allowed_asns"`
+	MaxConnections   int            `yaml:"max_connections"`
+	BanDuration      Duration       `yaml:"ban_duration"`
+	BanAfterFailures int            `yaml:"ban_after_failures"`
+	TarpitMs         int            `yaml:"tarpit_ms"`
+	LogLevel         string         `yaml:"log_level"`
+	LogFile          string         `yaml:"log_file"`
+	GeoIPDB          string         `yaml:"geoip_db"`
+	DataDir          string         `yaml:"data_dir"` // directory for persistent state (bans.db SQLite, etc.)
+	IPFilter         IPFilterConfig `yaml:"ip_filter"`
+	GeoBlock         GeoBlockConfig `yaml:"geo_block"`
 }
 
 // APIConfig controls the management REST & SSE API.
@@ -756,10 +758,11 @@ type UDPConfig struct {
 
 // ServiceConfig defines a single proxy service (TCP, UDP, or both).
 type ServiceConfig struct {
-	Name             string                 `yaml:"-"` // injected from map key
-	Enabled          *bool                  `yaml:"enabled"`
-	Listen           string                 `yaml:"listen"`
-	Upstream         string                 `yaml:"upstream"`
+	AllowedASNs []string `yaml:"allowed_asns"`
+	Name        string   `yaml:"-"` // injected from map key
+	Enabled     *bool    `yaml:"enabled"`
+	Listen      string   `yaml:"listen"`
+	Upstream    string   `yaml:"upstream"`
 	// Transport selects the network transport: "tcp" (default) | "udp" | "both".
 	// "both" binds listeners on both TCP and UDP for the same port (e.g. DNS on :53).
 	Transport        string                 `yaml:"transport"`
@@ -867,13 +870,14 @@ func (s *ServiceConfig) IsEnabled() bool {
 
 // ParsePortRange parses addresses with single ports or port ranges.
 // Supported formats:
-//   ":8080"               -> host: "", start: 8080, end: 8080
-//   ":8000-8005"          -> host: "", start: 8000, end: 8005
-//   "127.0.0.1:8080"      -> host: "127.0.0.1", start: 8080, end: 8080
-//   "127.0.0.1:8000-8005" -> host: "127.0.0.1", start: 8000, end: 8005
-//   "[::1]:8000-8005"     -> host: "::1", start: 8000, end: 8005
-//   "8080"                -> host: "", start: 8080, end: 8080
-//   "8000-8005"           -> host: "", start: 8000, end: 8005
+//
+//	":8080"               -> host: "", start: 8080, end: 8080
+//	":8000-8005"          -> host: "", start: 8000, end: 8005
+//	"127.0.0.1:8080"      -> host: "127.0.0.1", start: 8080, end: 8080
+//	"127.0.0.1:8000-8005" -> host: "127.0.0.1", start: 8000, end: 8005
+//	"[::1]:8000-8005"     -> host: "::1", start: 8000, end: 8005
+//	"8080"                -> host: "", start: 8080, end: 8080
+//	"8000-8005"           -> host: "", start: 8000, end: 8005
 func ParsePortRange(addr string) (host string, startPort, endPort int, err error) {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
@@ -967,7 +971,8 @@ func (s *ServiceConfig) ListenPorts() (host string, ports []int, err error) {
 // ResolveUpstream calculates the target upstream address (host:port) for an incoming connection.
 // For many-to-one mapping (e.g. listen: ":8000-8005", upstream: "127.0.0.1:8080"), it routes all connections to the single upstream port.
 // For 1:1 port range mapping (e.g. listen: ":8000-8005", upstream: "10.0.0.1:9000-9005"), it offsets the incoming port:
-//   upstreamPort = uStart + (clientLocalPort - lStart).
+//
+//	upstreamPort = uStart + (clientLocalPort - lStart).
 func (s *ServiceConfig) ResolveUpstream(localAddr net.Addr) (string, error) {
 	_, lStart, lEnd, err := ParsePortRange(s.Listen)
 	if err != nil {
@@ -1116,6 +1121,9 @@ func applyDefaults(cfg *Config) {
 
 // Validate checks configuration for syntactic and semantic correctness.
 func (c *Config) Validate() error {
+	if err := validateASNConfig(c.Global.AllowedASNs, c.Global.ASNDB); err != nil {
+		return fmt.Errorf("global: %w", err)
+	}
 	if len(c.Services) == 0 {
 		return fmt.Errorf("no services defined in configuration")
 	}
@@ -1125,6 +1133,9 @@ func (c *Config) Validate() error {
 	for name, svc := range c.Services {
 		if !svc.IsEnabled() {
 			continue
+		}
+		if err := validateASNConfig(svc.AllowedASNs, c.Global.ASNDB); err != nil {
+			return fmt.Errorf("service %q: %w", name, err)
 		}
 		if svc.Listen == "" {
 			return fmt.Errorf("service %q: listen address cannot be empty", name)
@@ -1256,3 +1267,30 @@ func isValidIPOrCIDR(s string) bool {
 	return net.ParseIP(s) != nil
 }
 
+func validateASNConfig(allowed []string, path string) error {
+	if len(allowed) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("asn_db is required with allowed_asns")
+	}
+	for _, value := range allowed {
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(strings.ToUpper(value), "AS") {
+			value = value[2:]
+		}
+		if value == "" {
+			return fmt.Errorf("empty ASN")
+		}
+		for _, digit := range value {
+			if digit < '0' || digit > '9' {
+				return fmt.Errorf("invalid ASN %q", value)
+			}
+		}
+		n, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || n == 0 {
+			return fmt.Errorf("invalid ASN %q", value)
+		}
+	}
+	return nil
+}

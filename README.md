@@ -846,3 +846,7 @@ docker run -d --name tcp-warden \
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+
+## ASN allowlisting
+
+See [ASN allowlisting](ASN_ALLOWLIST.md) for configuration, routing snapshot generation, and security behavior.

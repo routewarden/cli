@@ -17,6 +17,7 @@ import (
 
 // Pipeline processes a single accepted TCP connection through all policy stages.
 type Pipeline struct {
+	asn      *ASNFilter
 	cfg      *config.Config
 	banlist  *BanList
 	failures *FailureTracker
@@ -97,6 +98,13 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *config.Servic
 		st.AddBlocked()
 		p.emitEvent(svc, clientIP, geo, "blocked", "ip_denied", 0, 0, start)
 		p.applyResponse(conn, svc, "ip_denied")
+		return
+	}
+
+	if p.isASNDenied(clientIP, svc) {
+		st.AddBlocked()
+		p.emitEvent(svc, clientIP, geo, "blocked", "asn_denied", 0, 0, start)
+		p.applyResponse(conn, svc, "asn_denied")
 		return
 	}
 
@@ -473,4 +481,29 @@ func matchIP(ip net.IP, pattern string) bool {
 		return false
 	}
 	return ip.Equal(parsed)
+}
+
+// A service allowlist overrides the global list, as with IP allowlists.
+func (p *Pipeline) isASNDenied(ip string, svc *config.ServiceConfig) bool {
+	allowed := svc.AllowedASNs
+	if len(allowed) == 0 {
+		allowed = p.cfg.Global.AllowedASNs
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	if p.asn == nil {
+		return true
+	}
+	number := p.asn.Lookup(ip)
+	if number == 0 {
+		return true
+	}
+	for _, value := range allowed {
+		n, err := parseASN(value)
+		if err == nil && n == number {
+			return false
+		}
+	}
+	return true
 }

@@ -915,6 +915,9 @@ func handleValidate(args []string) {
 	if len(cfg.AllowPatterns) > 0 {
 		fmt.Printf("  - Custom allow patterns: %d\n", len(cfg.AllowPatterns))
 	}
+	if len(cfg.AllowedASNs) > 0 {
+		fmt.Printf("  - Allowed ASNs: %v (database: %s)\n", cfg.AllowedASNs, cfg.ASNDB)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Printf("  - Allowed IPs/CIDRs: %v\n", cfg.AllowedIPs)
 	}
