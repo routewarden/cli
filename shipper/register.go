@@ -2,6 +2,7 @@ package shipper
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -130,37 +131,98 @@ func RegisterAgent(dashboardURL, agentToken, configPath string, client *http.Cli
 	return cfg, nil
 }
 
-func HandleRegister(args []string) {
-	fs := flag.NewFlagSet("register", flag.ExitOnError)
-	dashboardURL := fs.String("url", "", "RouteWarden Central Dashboard URL (e.g. http://dashboard.internal:7890)")
-	fs.StringVar(dashboardURL, "u", "", "Alias for --url")
-	agentToken := fs.String("key", "", "Remote agent authentication key (rw_sec_...)")
-	fs.StringVar(agentToken, "k", "", "Alias for --key")
-	configPath := fs.String("config", "", "Custom path to store agent configuration (default: ~/.routewarden/agent.json)")
-	statusCodesFlag := fs.String("status", "", "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
-	fs.StringVar(statusCodesFlag, "s", "", "Alias for --status")
-	fs.StringVar(statusCodesFlag, "status-codes", "", "Alias for --status")
-	fs.StringVar(statusCodesFlag, "include-status", "", "Alias for --status")
-	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
-	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
-	allTraffic := fs.Bool("all-traffic", false, "Always ship all HTTP access traffic (including 200 OK)")
-	allLogs := fs.Bool("all-logs", false, "Always ship all raw container lines without filtering")
-	_ = ParseFlagsLenient(fs, args)
+// RegisterOptions represents parsed flags and environment variables for register.
+type RegisterOptions struct {
+	DashboardURL    string
+	AgentToken      string
+	ConfigPath      string
+	StatusCodesFlag string
+	IncludeFailed   bool
+	AllTraffic      bool
+	AllLogs         bool
+	PositionalArgs  []string
+}
 
-	if *dashboardURL == "" {
-		if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
-			*dashboardURL = envURL
-		} else if envURL := os.Getenv("RW_URL"); envURL != "" {
-			*dashboardURL = envURL
+// ParseRegisterOptions parses command-line flags and environment variables for the register command.
+func ParseRegisterOptions(args []string) (*RegisterOptions, error) {
+	opts := &RegisterOptions{}
+
+	if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
+		opts.DashboardURL = envURL
+	} else if envURL := os.Getenv("RW_URL"); envURL != "" {
+		opts.DashboardURL = envURL
+	}
+	if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
+		opts.AgentToken = envKey
+	} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
+		opts.AgentToken = envKey
+	}
+	if env := os.Getenv("RW_CONFIG"); env != "" {
+		opts.ConfigPath = env
+	}
+	if env := os.Getenv("RW_STATUS"); env != "" {
+		opts.StatusCodesFlag = env
+	} else if env := os.Getenv("RW_STATUS_CODES"); env != "" {
+		opts.StatusCodesFlag = env
+	} else if env := os.Getenv("RW_INCLUDE_STATUS"); env != "" {
+		opts.StatusCodesFlag = env
+	}
+	if env := os.Getenv("RW_INCLUDE_FAILED"); env == "1" || strings.EqualFold(env, "true") {
+		opts.IncludeFailed = true
+		if opts.StatusCodesFlag == "" {
+			opts.StatusCodesFlag = "400-599"
 		}
 	}
-	if *agentToken == "" {
-		if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
-			*agentToken = envKey
-		} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
-			*agentToken = envKey
-		}
+	if env := os.Getenv("RW_ALL_TRAFFIC"); env == "1" || strings.EqualFold(env, "true") {
+		opts.AllTraffic = true
 	}
+	if env := os.Getenv("RW_ALL_LOGS"); env == "1" || strings.EqualFold(env, "true") {
+		opts.AllLogs = true
+	}
+
+	fs := flag.NewFlagSet("register", flag.ContinueOnError)
+	fs.StringVar(&opts.DashboardURL, "url", opts.DashboardURL, "RouteWarden Central Dashboard URL (e.g. http://dashboard.internal:7890)")
+	fs.StringVar(&opts.DashboardURL, "u", opts.DashboardURL, "Alias for --url")
+	fs.StringVar(&opts.AgentToken, "key", opts.AgentToken, "Remote agent authentication key (rw_sec_...)")
+	fs.StringVar(&opts.AgentToken, "k", opts.AgentToken, "Alias for --key")
+	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Custom path to store agent configuration (default: ~/.routewarden/agent.json)")
+	fs.StringVar(&opts.StatusCodesFlag, "status", opts.StatusCodesFlag, "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
+	fs.StringVar(&opts.StatusCodesFlag, "s", opts.StatusCodesFlag, "Alias for --status")
+	fs.StringVar(&opts.StatusCodesFlag, "status-codes", opts.StatusCodesFlag, "Alias for --status")
+	fs.StringVar(&opts.StatusCodesFlag, "include-status", opts.StatusCodesFlag, "Alias for --status")
+	fs.BoolVar(&opts.IncludeFailed, "include-failed", opts.IncludeFailed, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
+	fs.BoolVar(&opts.IncludeFailed, "F", opts.IncludeFailed, "Alias for --include-failed")
+	fs.BoolVar(&opts.AllTraffic, "all-traffic", opts.AllTraffic, "Always ship all HTTP access traffic (including 200 OK)")
+	fs.BoolVar(&opts.AllLogs, "all-logs", opts.AllLogs, "Always ship all raw container lines without filtering")
+
+	if err := ParseFlagsLenient(fs, args); err != nil {
+		return nil, err
+	}
+	if opts.IncludeFailed && opts.StatusCodesFlag == "" {
+		opts.StatusCodesFlag = "400-599"
+	}
+	opts.PositionalArgs = fs.Args()
+
+	return opts, nil
+}
+
+func HandleRegister(args []string) {
+	opts, err := ParseRegisterOptions(args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
+
+	dashboardURL := &opts.DashboardURL
+	agentToken := &opts.AgentToken
+	configPath := &opts.ConfigPath
+	statusCodesFlag := &opts.StatusCodesFlag
+	includeFailed := &opts.IncludeFailed
+	allTraffic := &opts.AllTraffic
+	allLogs := &opts.AllLogs
 
 	if *dashboardURL == "" || *agentToken == "" {
 		fmt.Fprintln(os.Stderr, "Error: Both --url and --key are required for registration (or set RW_DASHBOARD_URL and RW_AGENT_KEY).")

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,6 +29,183 @@ type pushPayload struct {
 	AgentID  string   `json:"agent_id"`
 	Hostname string   `json:"hostname"`
 	Events   []string `json:"events"`
+}
+
+// PushOptions represents parsed flags and resolved environment variables for push.
+type PushOptions struct {
+	URL               string
+	Key               string
+	ConfigPath        string
+	DockerMode        bool
+	DetachMode        bool
+	ContainerFlags    []string
+	FileFlags         []string
+	EventFlags        []string
+	StdinMode         bool
+	StatusCodesFlag   string
+	IncludeFailed     bool
+	AllTraffic        bool
+	CustomLabel       string
+	TailLines         string
+	BatchSize         int
+	FlushInterval     time.Duration
+	MaxQueueSize      int
+	DisconnectTimeout time.Duration
+	PingInterval      time.Duration
+	Verbose           bool
+	AllLogs           bool
+	PositionalArgs    []string
+}
+
+func parsePushOptions(args []string) (*PushOptions, error) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch strings.ToLower(args[0]) {
+		case "up", "start", "run":
+			args = args[1:]
+		}
+	}
+
+	opts := &PushOptions{
+		TailLines:         "50",
+		BatchSize:         50,
+		FlushInterval:     1 * time.Second,
+		MaxQueueSize:      10000,
+		DisconnectTimeout: 5 * time.Minute,
+		PingInterval:      10 * time.Second,
+	}
+
+	// Environment variable defaults
+	if env := os.Getenv("RW_CONFIG"); env != "" {
+		opts.ConfigPath = env
+	}
+	if env := os.Getenv("RW_DOCKER"); env == "1" || strings.EqualFold(env, "true") {
+		opts.DockerMode = true
+	}
+	if env := os.Getenv("RW_LABEL"); env != "" {
+		opts.CustomLabel = env
+	}
+	if env := os.Getenv("RW_TAIL"); env != "" {
+		opts.TailLines = env
+	}
+	if env := os.Getenv("RW_BATCH_SIZE"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v > 0 {
+			opts.BatchSize = v
+		}
+	}
+	if env := os.Getenv("RW_FLUSH_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			opts.FlushInterval = d
+		}
+	}
+	if env := os.Getenv("RW_QUEUE_SIZE"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v > 0 {
+			opts.MaxQueueSize = v
+		}
+	}
+	if env := os.Getenv("RW_DISCONNECT_TIMEOUT"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			opts.DisconnectTimeout = d
+		}
+	}
+	if env := os.Getenv("RW_PING_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			opts.PingInterval = d
+		}
+	}
+	if env := os.Getenv("RW_VERBOSE"); env == "1" || strings.EqualFold(env, "true") {
+		opts.Verbose = true
+	} else if env := os.Getenv("RW_DEBUG"); env == "1" || strings.EqualFold(env, "true") {
+		opts.Verbose = true
+	}
+	if env := os.Getenv("RW_DETACH"); env == "1" || strings.EqualFold(env, "true") {
+		opts.DetachMode = true
+	}
+	if envURL := os.Getenv("RW_DASHBOARD_URL"); envURL != "" {
+		opts.URL = envURL
+	} else if envURL := os.Getenv("RW_URL"); envURL != "" {
+		opts.URL = envURL
+	}
+	if envKey := os.Getenv("RW_AGENT_KEY"); envKey != "" {
+		opts.Key = envKey
+	} else if envKey := os.Getenv("RW_KEY"); envKey != "" {
+		opts.Key = envKey
+	}
+	if env := os.Getenv("RW_STATUS"); env != "" {
+		opts.StatusCodesFlag = env
+	} else if env := os.Getenv("RW_STATUS_CODES"); env != "" {
+		opts.StatusCodesFlag = env
+	} else if env := os.Getenv("RW_INCLUDE_STATUS"); env != "" {
+		opts.StatusCodesFlag = env
+	}
+	if env := os.Getenv("RW_INCLUDE_FAILED"); env == "1" || strings.EqualFold(env, "true") {
+		opts.IncludeFailed = true
+		if opts.StatusCodesFlag == "" {
+			opts.StatusCodesFlag = "400-599"
+		}
+	}
+	if env := os.Getenv("RW_ALL_TRAFFIC"); env == "1" || strings.EqualFold(env, "true") {
+		opts.AllTraffic = true
+	}
+	if env := os.Getenv("RW_ALL_LOGS"); env == "1" || strings.EqualFold(env, "true") {
+		opts.AllLogs = true
+	}
+
+	fs := flag.NewFlagSet("push", flag.ContinueOnError)
+	fs.StringVar(&opts.URL, "url", opts.URL, "RouteWarden dashboard URL (overrides registered config)")
+	fs.StringVar(&opts.URL, "u", opts.URL, "Alias for --url")
+	fs.StringVar(&opts.Key, "key", opts.Key, "Remote agent authentication key (overrides registered config)")
+	fs.StringVar(&opts.Key, "k", opts.Key, "Alias for --key")
+	fs.StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Custom path to agent configuration (default: ~/.routewarden/agent.json)")
+	fs.BoolVar(&opts.DockerMode, "docker", opts.DockerMode, "Auto-discover and tail Docker containers with label 'routewarden=true'")
+	fs.BoolVar(&opts.DetachMode, "detach", opts.DetachMode, "Run remote shipper in background (detached) mode")
+	fs.BoolVar(&opts.DetachMode, "d", opts.DetachMode, "Alias for --detach")
+
+	var containerFlags stringSlice
+	fs.Var(&containerFlags, "container", "Tail specific Docker container(s) by name or ID (repeatable or comma-separated)")
+	fs.Var(&containerFlags, "c", "Alias for --container")
+
+	var fileFlags stringSlice
+	fs.Var(&fileFlags, "file", "Log file(s) to monitor and push (repeatable, comma-separated, or glob pattern)")
+	fs.Var(&fileFlags, "f", "Alias for --file")
+
+	var eventFlags stringSlice
+	fs.Var(&eventFlags, "event", "Push one or more specific event strings directly (repeatable)")
+	fs.Var(&eventFlags, "e", "Alias for --event")
+
+	fs.BoolVar(&opts.StdinMode, "stdin", false, "Read and push events line-by-line from STDIN")
+	fs.StringVar(&opts.StatusCodesFlag, "status", opts.StatusCodesFlag, "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
+	fs.StringVar(&opts.StatusCodesFlag, "s", opts.StatusCodesFlag, "Alias for --status")
+	fs.StringVar(&opts.StatusCodesFlag, "status-codes", opts.StatusCodesFlag, "Alias for --status")
+	fs.StringVar(&opts.StatusCodesFlag, "include-status", opts.StatusCodesFlag, "Alias for --status")
+	fs.BoolVar(&opts.IncludeFailed, "include-failed", opts.IncludeFailed, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
+	fs.BoolVar(&opts.IncludeFailed, "F", opts.IncludeFailed, "Alias for --include-failed")
+	fs.BoolVar(&opts.AllTraffic, "all-traffic", opts.AllTraffic, "Include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)")
+	fs.StringVar(&opts.CustomLabel, "label", opts.CustomLabel, "Docker label to filter containers (default: routewarden=true)")
+	fs.StringVar(&opts.CustomLabel, "l", opts.CustomLabel, "Alias for --label")
+	fs.StringVar(&opts.TailLines, "tail", opts.TailLines, "Initial lines to tail from Docker container(s) and log file(s)")
+	fs.IntVar(&opts.BatchSize, "batch-size", opts.BatchSize, "Maximum events to buffer before flushing")
+	fs.DurationVar(&opts.FlushInterval, "flush-interval", opts.FlushInterval, "Maximum duration to buffer events before flushing")
+	fs.IntVar(&opts.MaxQueueSize, "queue-size", opts.MaxQueueSize, "Maximum events to buffer in memory while disconnected or waiting to flush")
+	fs.DurationVar(&opts.DisconnectTimeout, "disconnect-timeout", opts.DisconnectTimeout, "Duration disconnected from dashboard before dropping stale events to protect memory")
+	fs.DurationVar(&opts.PingInterval, "ping-interval", opts.PingInterval, "Interval between connection health pings when connected")
+	fs.BoolVar(&opts.Verbose, "verbose", opts.Verbose, "Enable verbose event-level logging")
+	fs.BoolVar(&opts.Verbose, "v", opts.Verbose, "Alias for --verbose")
+	fs.BoolVar(&opts.AllLogs, "all-logs", opts.AllLogs, "Ship all container lines without filtering for RouteWarden logs")
+
+	if err := parseFlagsLenient(fs, args); err != nil {
+		return nil, err
+	}
+
+	if opts.IncludeFailed && opts.StatusCodesFlag == "" {
+		opts.StatusCodesFlag = "400-599"
+	}
+
+	opts.ContainerFlags = []string(containerFlags)
+	opts.FileFlags = []string(fileFlags)
+	opts.EventFlags = []string(eventFlags)
+	opts.PositionalArgs = fs.Args()
+
+	return opts, nil
 }
 
 func handlePush(args []string) {
@@ -61,107 +239,44 @@ Flags:
   --all-traffic        Include all HTTP reverse proxy traffic (including 200 OK)
   --detach, -d         Run remote shipper in background (detached) mode
   --verbose, -v        Enable verbose event-level logging`)
+			return
 		case "up", "start", "run":
 			args = args[1:]
 		}
 	}
 
-	fs := flag.NewFlagSet("push", flag.ExitOnError)
-	urlFlag := fs.String("url", "", "RouteWarden dashboard URL (overrides registered config)")
-	fs.StringVar(urlFlag, "u", "", "Alias for --url")
-	keyFlag := fs.String("key", "", "Remote agent authentication key (overrides registered config)")
-	fs.StringVar(keyFlag, "k", "", "Alias for --key")
-	configPath := fs.String("config", "", "Custom path to agent configuration (default: ~/.routewarden/agent.json)")
-	dockerMode := fs.Bool("docker", false, "Auto-discover and tail Docker containers with label 'routewarden=true'")
-	detachMode := fs.Bool("detach", false, "Run remote shipper in background (detached) mode")
-	fs.BoolVar(detachMode, "d", false, "Alias for --detach")
-	var containerFlags stringSlice
-	fs.Var(&containerFlags, "container", "Tail specific Docker container(s) by name or ID (repeatable or comma-separated)")
-	fs.Var(&containerFlags, "c", "Alias for --container")
-	var fileFlags stringSlice
-	fs.Var(&fileFlags, "file", "Log file(s) to monitor and push (repeatable, comma-separated, or glob pattern)")
-	fs.Var(&fileFlags, "f", "Alias for --file")
-	var eventFlags stringSlice
-	fs.Var(&eventFlags, "event", "Push one or more specific event strings directly (repeatable)")
-	fs.Var(&eventFlags, "e", "Alias for --event")
-	stdinMode := fs.Bool("stdin", false, "Read and push events line-by-line from STDIN")
-	statusCodesFlag := fs.String("status", "", "Forward HTTP requests matching status codes or ranges (e.g. '400-599, 301', '4xx, 5xx')")
-	fs.StringVar(statusCodesFlag, "s", "", "Alias for --status")
-	fs.StringVar(statusCodesFlag, "status-codes", "", "Alias for --status")
-	fs.StringVar(statusCodesFlag, "include-status", "", "Alias for --status")
-	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
-	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
-	allTraffic := fs.Bool("all-traffic", false, "Include all HTTP traffic (both successful 2xx/3xx and failed 4xx/5xx)")
-	customLabel := fs.String("label", "", "Docker label to filter containers (default: routewarden=true)")
-	fs.StringVar(customLabel, "l", "", "Alias for --label")
-	tailLines := fs.String("tail", "50", "Initial lines to tail from Docker container(s) and log file(s)")
-	batchSize := fs.Int("batch-size", 50, "Maximum events to buffer before flushing")
-	flushInterval := fs.Duration("flush-interval", 1*time.Second, "Maximum duration to buffer events before flushing")
-	maxQueueSize := fs.Int("queue-size", 10000, "Maximum events to buffer in memory while disconnected or waiting to flush")
-	disconnectTimeout := fs.Duration("disconnect-timeout", 5*time.Minute, "Duration disconnected from dashboard before dropping stale events to protect memory")
-	pingInterval := fs.Duration("ping-interval", 10*time.Second, "Interval between connection health pings when connected")
-	verbose := fs.Bool("verbose", false, "Enable verbose event-level logging")
-	fs.BoolVar(verbose, "v", false, "Alias for --verbose")
-	allLogs := fs.Bool("all-logs", false, "Ship all container lines without filtering for RouteWarden logs")
-	_ = parseFlagsLenient(fs, args)
-
-	if *configPath == "" {
-		if env := os.Getenv("RW_CONFIG"); env != "" {
-			*configPath = env
+	opts, err := parsePushOptions(args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
 		}
-	}
-	if !*dockerMode {
-		if env := os.Getenv("RW_DOCKER"); env == "1" || strings.EqualFold(env, "true") {
-			*dockerMode = true
-		}
-	}
-	if *customLabel == "" {
-		if env := os.Getenv("RW_LABEL"); env != "" {
-			*customLabel = env
-		}
-	}
-	if env := os.Getenv("RW_TAIL"); env != "" {
-		*tailLines = env
-	}
-	if env := os.Getenv("RW_BATCH_SIZE"); env != "" {
-		if v, err := strconv.Atoi(env); err == nil && v > 0 {
-			*batchSize = v
-		}
-	}
-	if env := os.Getenv("RW_FLUSH_INTERVAL"); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*flushInterval = d
-		}
-	}
-	if env := os.Getenv("RW_QUEUE_SIZE"); env != "" {
-		if v, err := strconv.Atoi(env); err == nil && v > 0 {
-			*maxQueueSize = v
-		}
-	}
-	if env := os.Getenv("RW_DISCONNECT_TIMEOUT"); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*disconnectTimeout = d
-		}
-	}
-	if env := os.Getenv("RW_PING_INTERVAL"); env != "" {
-		if d, err := time.ParseDuration(env); err == nil {
-			*pingInterval = d
-		}
-	}
-	if !*verbose {
-		if env := os.Getenv("RW_VERBOSE"); env == "1" || strings.EqualFold(env, "true") {
-			*verbose = true
-		} else if env := os.Getenv("RW_DEBUG"); env == "1" || strings.EqualFold(env, "true") {
-			*verbose = true
-		}
-	}
-	if !*detachMode {
-		if env := os.Getenv("RW_DETACH"); env == "1" || strings.EqualFold(env, "true") {
-			*detachMode = true
-		}
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		os.Exit(1)
 	}
 
-	filesToMonitor := resolveFileList(fileFlags, fs.Args())
+	urlFlag := &opts.URL
+	keyFlag := &opts.Key
+	configPath := &opts.ConfigPath
+	dockerMode := &opts.DockerMode
+	detachMode := &opts.DetachMode
+	stdinMode := &opts.StdinMode
+	statusCodesFlag := &opts.StatusCodesFlag
+	includeFailed := &opts.IncludeFailed
+	allTraffic := &opts.AllTraffic
+	customLabel := &opts.CustomLabel
+	tailLines := &opts.TailLines
+	batchSize := &opts.BatchSize
+	flushInterval := &opts.FlushInterval
+	maxQueueSize := &opts.MaxQueueSize
+	disconnectTimeout := &opts.DisconnectTimeout
+	pingInterval := &opts.PingInterval
+	verbose := &opts.Verbose
+	allLogs := &opts.AllLogs
+	fileFlags := stringSlice(opts.FileFlags)
+	containerFlags := stringSlice(opts.ContainerFlags)
+	eventFlags := stringSlice(opts.EventFlags)
+
+	filesToMonitor := resolveFileList(fileFlags, opts.PositionalArgs)
 	containersToTail := resolveContainerList(containerFlags)
 
 	hasStdin := *stdinMode
@@ -505,7 +620,7 @@ Flags:
 
 	// Dynamic observer: continuously watch for new log files matching glob patterns or directories
 	var hasGlobOrDir bool
-	for _, flagVal := range append(append([]string{}, fileFlags...), fs.Args()...) {
+	for _, flagVal := range append(append([]string{}, fileFlags...), opts.PositionalArgs...) {
 		for part := range strings.SplitSeq(flagVal, ",") {
 			part = strings.TrimSpace(part)
 			if strings.ContainsAny(part, "*?[]") {
@@ -531,7 +646,7 @@ Flags:
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					current := resolveFileList(fileFlags, fs.Args())
+					current := resolveFileList(fileFlags, opts.PositionalArgs)
 					for _, f := range current {
 						if f == "-" {
 							continue

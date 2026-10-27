@@ -468,3 +468,65 @@ func TestCLI_Push_Logging_FailureLoggedToStderr(t *testing.T) {
 		t.Errorf("expected descriptive failure log on stderr, got:\n%s", stderr)
 	}
 }
+
+func TestCLI_Push_FlagsAndEnvVars_Blackbox(t *testing.T) {
+	// 1. push --help contains all flags and documentation
+	stdout, stderr, code := runCLI(t, "push", "--help")
+	out := stdout + stderr
+	if code != 0 {
+		t.Fatalf("expected push --help to return code 0, got %d, out: %s", code, out)
+	}
+	expectedPushFlags := []string{
+		"-url",
+		"-key",
+		"-config",
+		"-docker",
+		"-container",
+		"-file",
+		"-event",
+		"-status",
+		"-all-traffic",
+		"-all-logs",
+		"-detach",
+		"-verbose",
+		"-batch-size",
+		"-flush-interval",
+		"-queue-size",
+		"-disconnect-timeout",
+		"-ping-interval",
+	}
+	for _, f := range expectedPushFlags {
+		if !strings.Contains(out, f) {
+			t.Errorf("expected push --help to mention flag %s, got output:\n%s", f, out)
+		}
+	}
+
+	// 2. register --help contains all flags
+	stdout, stderr, code = runCLI(t, "register", "--help")
+	regOut := stdout + stderr
+	if code != 0 {
+		t.Fatalf("expected register --help to return code 0, got %d, out: %s", code, regOut)
+	}
+	expectedRegisterFlags := []string{
+		"-url",
+		"-key",
+		"-config",
+		"-status",
+		"-all-traffic",
+		"-all-logs",
+		"-include-failed",
+	}
+	for _, f := range expectedRegisterFlags {
+		if !strings.Contains(regOut, f) {
+			t.Errorf("expected register --help to mention flag %s, got output:\n%s", f, regOut)
+		}
+	}
+
+	// 3. combined flag directly without subcommand: `rwarden -docker --all-traffic`
+	// It routes directly to push and exits with code 1 indicating not registered if no agent.json/url/key
+	_, stderr, code = runCLI(t, "-docker --all-traffic")
+	if code != 1 || !strings.Contains(stderr, "RouteWarden is not registered on this node") {
+		t.Errorf("expected registration error for direct flags, got code %d, stderr: %s", code, stderr)
+	}
+}
+
