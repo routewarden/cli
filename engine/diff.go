@@ -29,14 +29,15 @@ type ScalarDiff struct {
 
 // PolicyDiff represents the structural and security difference between two policies.
 type PolicyDiff struct {
-	BaseFile       string                `json:"baseFile"`
-	CandidateFile  string                `json:"candidateFile"`
-	Impact         DiffImpact            `json:"impact"`
-	ImpactReasons  []string              `json:"impactReasons"`
-	BlockPatterns  SliceDiff             `json:"blockPatterns"`
-	AllowPatterns  SliceDiff             `json:"allowPatterns"`
-	AllowedIPs     SliceDiff             `json:"allowedIps"`
-	TrustedProxies SliceDiff             `json:"trustedProxies"`
+	AllowedASNs       SliceDiff             `json:"allowedASNs"`
+	BaseFile          string                `json:"baseFile"`
+	CandidateFile     string                `json:"candidateFile"`
+	Impact            DiffImpact            `json:"impact"`
+	ImpactReasons     []string              `json:"impactReasons"`
+	BlockPatterns     SliceDiff             `json:"blockPatterns"`
+	AllowPatterns     SliceDiff             `json:"allowPatterns"`
+	AllowedIPs        SliceDiff             `json:"allowedIps"`
+	TrustedProxies    SliceDiff             `json:"trustedProxies"`
 	Methods           SliceDiff             `json:"methods"`
 	CheckHeaders      SliceDiff             `json:"checkHeaders"`
 	CheckBodyPatterns SliceDiff             `json:"checkBodyPatterns"`
@@ -54,6 +55,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		Properties:        make(map[string]ScalarDiff),
 		BlockPatterns:     diffStringSlices(base.BlockPatterns, candidate.BlockPatterns),
 		AllowPatterns:     diffStringSlices(base.AllowPatterns, candidate.AllowPatterns),
+		AllowedASNs:       diffStringSlices(base.AllowedASNs, candidate.AllowedASNs),
 		AllowedIPs:        diffStringSlices(base.AllowedIPs, candidate.AllowedIPs),
 		TrustedProxies:    diffStringSlices(base.TrustedProxies, candidate.TrustedProxies),
 		Methods:           diffStringSlices(base.Methods, candidate.Methods),
@@ -61,6 +63,16 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		CheckBodyPatterns: diffStringSlices(base.CheckBodyPatterns, candidate.CheckBodyPatterns),
 	}
 
+	if base.ASNDB != candidate.ASNDB {
+		diff.Properties["asnDB"] = ScalarDiff{Old: base.ASNDB, New: candidate.ASNDB}
+		diff.ImpactReasons = append(diff.ImpactReasons, "ASN database path changed; review routing data for bypass changes.")
+	}
+	if len(diff.AllowedASNs.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, "ASN allowlist bypasses were added.")
+	}
+	if len(diff.AllowedASNs.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, "ASN allowlist bypasses were removed.")
+	}
 	// ── Compare Scalar Properties ───────────────────────────────────────────
 	if base.Enabled != candidate.Enabled {
 		diff.Properties["enabled"] = ScalarDiff{Old: base.Enabled, New: candidate.Enabled}
@@ -157,7 +169,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	}
 
 	// ── Determine Overall Impact ────────────────────────────────────────────
-	diff.HasDifferences = len(diff.BlockPatterns.Added) > 0 ||
+	diff.HasDifferences = len(diff.AllowedASNs.Added) > 0 || len(diff.AllowedASNs.Removed) > 0 || len(diff.BlockPatterns.Added) > 0 ||
 		len(diff.BlockPatterns.Removed) > 0 ||
 		len(diff.AllowPatterns.Added) > 0 ||
 		len(diff.AllowPatterns.Removed) > 0 ||
@@ -196,6 +208,12 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		hasHardening = true
 	}
 
+	if len(diff.AllowedASNs.Added) > 0 || base.ASNDB != candidate.ASNDB {
+		hasRelaxing = true
+	}
+	if len(diff.AllowedASNs.Removed) > 0 {
+		hasHardening = true
+	}
 	if hasRelaxing {
 		diff.Impact = DiffImpactRelaxed
 	} else if hasHardening {

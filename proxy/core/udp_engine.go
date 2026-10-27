@@ -149,6 +149,11 @@ func (d *Daemon) handleUDPPacket(
 		return
 	}
 
+	if d.pipeline.isASNDenied(clientIP, &svc) {
+		block("asn_denied")
+		return
+	}
+
 	// ── Stage 4: Geo-block ────────────────────────────────────────────────
 	if d.pipeline.isCountryBlocked(geo.CountryCode, &svc) {
 		block(fmt.Sprintf("country_blocked: %s", geo.CountryCode))

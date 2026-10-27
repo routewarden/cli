@@ -80,6 +80,8 @@ type Config struct {
 	EnableDefaultAllowPatterns bool            `json:"enableDefaultAllowPatterns,omitempty"`
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
+	AllowedASNs                []string        `json:"allowedASNs,omitempty"`
+	ASNDB                      string          `json:"asnDB,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
 	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
 	Methods                    []string        `json:"methods,omitempty"`
@@ -248,6 +250,10 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		BlockPatternsSnake              []string        `json:"block_patterns"`
 		AllowPatterns                   []string        `json:"allowPatterns"`
 		AllowPatternsSnake              []string        `json:"allow_patterns"`
+		AllowedASNs                     []string        `json:"allowedASNs"`
+		AllowedASNsSnake                []string        `json:"allowed_asns"`
+		ASNDB                           string          `json:"asnDB"`
+		ASNDBSnake                      string          `json:"asn_db"`
 		AllowedIPs                      []string        `json:"allowedIps"`
 		AllowedIPsSnake                 []string        `json:"allowed_ips"`
 		TrustedProxies                  []string        `json:"trustedProxies"`
@@ -336,6 +342,14 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		cfg.AllowPatterns = []string{}
 	}
 
+	cfg.AllowedASNs = raw.AllowedASNs
+	if raw.AllowedASNsSnake != nil {
+		cfg.AllowedASNs = raw.AllowedASNsSnake
+	}
+	cfg.ASNDB = raw.ASNDB
+	if raw.ASNDBSnake != "" {
+		cfg.ASNDB = raw.ASNDBSnake
+	}
 	if raw.AllowedIPs != nil {
 		cfg.AllowedIPs = raw.AllowedIPs
 	} else if raw.AllowedIPsSnake != nil {
@@ -553,6 +567,7 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 
 // Engine represents a compiled inspection engine.
 type Engine struct {
+	ASN              *ASNFilter
 	Config           *Config
 	Methods          map[string]struct{}
 	BlockRegexes     []*regexp.Regexp
@@ -601,6 +616,12 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 		if len(cfg.AllowPatterns) > 0 {
 			fileCfg.AllowPatterns = cfg.AllowPatterns
+		}
+		if cfg.AllowedASNs != nil {
+			fileCfg.AllowedASNs = cfg.AllowedASNs
+		}
+		if cfg.ASNDB != "" {
+			fileCfg.ASNDB = cfg.ASNDB
 		}
 		if len(cfg.AllowedIPs) > 0 {
 			fileCfg.AllowedIPs = cfg.AllowedIPs
@@ -754,6 +775,10 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		compiledBody = append(compiledBody, re)
 	}
 
+	asn, err := NewASNFilter(cfg.AllowedASNs, cfg.ASNDB)
+	if err != nil {
+		return nil, err
+	}
 	var ips []net.IP
 	var nets []*net.IPNet
 	for _, ipStr := range cfg.AllowedIPs {
@@ -881,6 +906,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		BlockRegexes:     compiledBlock,
 		AllowRegexes:     compiledAllow,
 		BodyRegexes:      compiledBody,
+		ASN:              asn,
 		AllowedIPs:       ips,
 		AllowedNets:      nets,
 		TrustedProxyIPs:  proxyIPs,
@@ -996,6 +1022,16 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	if _, ok := e.Methods[method]; !ok {
 		result.Bypassed = true
 		result.Reason = fmt.Sprintf("method_%s_not_inspected", method)
+		return result
+	}
+
+	asnIP := cleanIP(clientIPStr)
+	if len(e.TrustedProxyIPs) > 0 || len(e.TrustedProxyNets) > 0 {
+		asnIP = e.ExtractClientIP(headers, clientIPStr)
+	}
+	if e.ASN.IsAllowed(asnIP) {
+		result.Allowed = true
+		result.Reason = "asn_whitelisted"
 		return result
 	}
 
@@ -1254,6 +1290,19 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			fmt.Fprintf(&b, "            - '%s'\n", strings.ReplaceAll(a, "'", "''"))
 		}
 	}
+	if cfg.AllowedASNs != nil {
+		if len(cfg.AllowedASNs) == 0 {
+			b.WriteString("          allowedASNs: []\n")
+		} else {
+			b.WriteString("          allowedASNs:\n")
+		}
+		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "            - %q\n", asn)
+		}
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "          asnDB: %q\n", cfg.ASNDB)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("          allowedIps:\n")
 		for _, ip := range cfg.AllowedIPs {
@@ -1397,6 +1446,19 @@ func (cfg *Config) GenerateTraefikTOML() string {
 			fmt.Fprintf(&b, "%q", a)
 		}
 		b.WriteString("]\n")
+	}
+	if cfg.AllowedASNs != nil {
+		b.WriteString("  allowedASNs = [")
+		for i, asn := range cfg.AllowedASNs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", asn)
+		}
+		b.WriteString("]\n")
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "  asnDB = %q\n", cfg.ASNDB)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("  allowedIps = [")
@@ -1550,6 +1612,12 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if len(cfg.AllowPatterns) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowPatterns=%s\"\n", strings.Join(cfg.AllowPatterns, ","))
 	}
+	if cfg.AllowedASNs != nil {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.allowedASNs="+strings.Join(cfg.AllowedASNs, ","))
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.asnDB="+cfg.ASNDB)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
 	}
@@ -1686,6 +1754,12 @@ func (cfg *Config) GenerateCaddyfile() string {
 	for _, a := range cfg.AllowPatterns {
 		fmt.Fprintf(&b, "    allow_patterns %q\n", a)
 	}
+	if cfg.AllowedASNs != nil {
+		fmt.Fprintf(&b, "    allowed_asns %s\n", strings.Join(cfg.AllowedASNs, " "))
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "    asn_db %q\n", cfg.ASNDB)
+	}
 	for _, ip := range cfg.AllowedIPs {
 		fmt.Fprintf(&b, "    allowed_ips %s\n", ip)
 	}
@@ -1795,6 +1869,16 @@ func (cfg *Config) GenerateNginxLua() string {
 			fmt.Fprintf(&b, "        %q,\n", a)
 		}
 		b.WriteString("    },\n")
+	}
+	if cfg.AllowedASNs != nil {
+		b.WriteString("    allowed_asns = { ")
+		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "%q, ", asn)
+		}
+		b.WriteString("},\n")
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "    asn_db = %q,\n", cfg.ASNDB)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allowed_ips = {\n")
@@ -1926,6 +2010,19 @@ func (cfg *Config) GenerateTCPWardenYAML() string {
 	b.WriteString("  ban_after_failures: 5\n")
 	b.WriteString("  tarpit_ms: 1000\n")
 	b.WriteString("  log_file: \"/var/log/routewarden/tcp-warden.jsonl\"\n")
+	if cfg.AllowedASNs != nil {
+		if len(cfg.AllowedASNs) == 0 {
+			b.WriteString("  allowed_asns: []\n")
+		} else {
+			b.WriteString("  allowed_asns:\n")
+		}
+		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "    - %q\n", asn)
+		}
+	}
+	if cfg.ASNDB != "" {
+		fmt.Fprintf(&b, "  asn_db: %q\n", cfg.ASNDB)
+	}
 	b.WriteString("  ip_filter:\n")
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allow:\n")
