@@ -208,6 +208,76 @@ func parsePushOptions(args []string) (*PushOptions, error) {
 	return opts, nil
 }
 
+// resolvedPushConfig holds configuration values after resolving precedence across
+// CLI flags, environment variables, registered agent configuration, and defaults.
+type resolvedPushConfig struct {
+	DashboardURL    string
+	AgentToken      string
+	AgentID         string
+	AgentName       string
+	ServerPubKeyStr string
+	StatusCodesFlag string
+	IncludeFailed   bool
+	AllTraffic      bool
+	AllLogs         bool
+	FilterOpts      FilterOptions
+}
+
+// resolvePushConfig resolves configuration following strict precedence:
+// 1. CLI Flags (Highest)
+// 2. Environment Variables
+// 3. Agent Configuration File (agent.json)
+// 4. Default Fallbacks (Lowest)
+func resolvePushConfig(opts *PushOptions, agentCfg *AgentConfig) resolvedPushConfig {
+	res := resolvedPushConfig{
+		StatusCodesFlag: opts.StatusCodesFlag,
+		IncludeFailed:   opts.IncludeFailed,
+		AllTraffic:      opts.AllTraffic,
+		AllLogs:         opts.AllLogs,
+	}
+
+	if agentCfg != nil {
+		res.DashboardURL = agentCfg.DashboardURL
+		res.AgentToken = agentCfg.AgentToken
+		res.AgentID = agentCfg.AgentID
+		res.AgentName = agentCfg.AgentName
+		res.ServerPubKeyStr = agentCfg.ServerPublicKey
+		if res.StatusCodesFlag == "" {
+			res.StatusCodesFlag = agentCfg.StatusCodes
+		}
+		if !res.IncludeFailed && agentCfg.IncludeFailed {
+			res.IncludeFailed = true
+		}
+		if !res.AllTraffic && agentCfg.AllTraffic {
+			res.AllTraffic = true
+		}
+		if !res.AllLogs && agentCfg.AllLogs {
+			res.AllLogs = true
+		}
+	}
+
+	if opts.URL != "" {
+		res.DashboardURL = strings.TrimRight(opts.URL, "/")
+	}
+	if opts.Key != "" {
+		res.AgentToken = opts.Key
+	}
+
+	if res.StatusCodesFlag == "" && res.IncludeFailed {
+		res.StatusCodesFlag = "400-599"
+	}
+
+	statusFilter := ParseStatusCodeFilter(res.StatusCodesFlag)
+	res.FilterOpts = FilterOptions{
+		StatusCodes:   statusFilter,
+		IncludeFailed: res.IncludeFailed || len(statusFilter) > 0,
+		AllTraffic:    res.AllTraffic,
+		AllLogs:       res.AllLogs,
+	}
+
+	return res
+}
+
 func handlePush(args []string) {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		switch strings.ToLower(args[0]) {
@@ -336,56 +406,25 @@ Flags:
 		}
 	}
 
-	dashboardURL := ""
-	agentToken := ""
-	agentID := ""
-	agentName := ""
-	serverPubKeyStr := ""
-
-	if agentCfg != nil {
-		dashboardURL = agentCfg.DashboardURL
-		agentToken = agentCfg.AgentToken
-		agentID = agentCfg.AgentID
-		agentName = agentCfg.AgentName
-		serverPubKeyStr = agentCfg.ServerPublicKey
+	resolvedCfg := resolvePushConfig(opts, agentCfg)
+	if resolvedCfg.DashboardURL == "" || resolvedCfg.AgentToken == "" {
+		fmt.Fprintln(os.Stderr, "❌ RouteWarden is not registered on this node, and --url / --key were not provided.")
+		fmt.Fprintln(os.Stderr, "\nTo register this server, run:")
+		fmt.Fprintln(os.Stderr, "  rwarden register --url http://<dashboard-ip>:7890 --key <agent-token>")
+		fmt.Fprintln(os.Stderr, "\nOr push directly with flags (or RW_DASHBOARD_URL and RW_AGENT_KEY):")
+		fmt.Fprintln(os.Stderr, "  rwarden push --url http://<dashboard-ip>:7890 --key <agent-token> --docker")
+		os.Exit(1)
 	}
 
-	if *urlFlag != "" {
-		dashboardURL = strings.TrimRight(*urlFlag, "/")
-	}
-	if *keyFlag != "" {
-		agentToken = *keyFlag
-	}
-
-	if *statusCodesFlag == "" {
-		if env := os.Getenv("RW_STATUS"); env != "" {
-			*statusCodesFlag = env
-		} else if env := os.Getenv("RW_STATUS_CODES"); env != "" {
-			*statusCodesFlag = env
-		} else if env := os.Getenv("RW_INCLUDE_STATUS"); env != "" {
-			*statusCodesFlag = env
-		} else if agentCfg != nil && agentCfg.StatusCodes != "" {
-			*statusCodesFlag = agentCfg.StatusCodes
-		}
-	}
-	if *statusCodesFlag == "" && (*includeFailed || (agentCfg != nil && agentCfg.IncludeFailed) || os.Getenv("RW_INCLUDE_FAILED") == "1" || strings.EqualFold(os.Getenv("RW_INCLUDE_FAILED"), "true")) {
-		*statusCodesFlag = "400-599"
-		*includeFailed = true
-	}
-	if !*allTraffic {
-		if env := os.Getenv("RW_ALL_TRAFFIC"); env == "1" || strings.EqualFold(env, "true") {
-			*allTraffic = true
-		} else if agentCfg != nil && agentCfg.AllTraffic {
-			*allTraffic = true
-		}
-	}
-	if !*allLogs {
-		if env := os.Getenv("RW_ALL_LOGS"); env == "1" || strings.EqualFold(env, "true") {
-			*allLogs = true
-		} else if agentCfg != nil && agentCfg.AllLogs {
-			*allLogs = true
-		}
-	}
+	dashboardURL := resolvedCfg.DashboardURL
+	agentToken := resolvedCfg.AgentToken
+	agentID := resolvedCfg.AgentID
+	agentName := resolvedCfg.AgentName
+	serverPubKeyStr := resolvedCfg.ServerPubKeyStr
+	*statusCodesFlag = resolvedCfg.StatusCodesFlag
+	*includeFailed = resolvedCfg.IncludeFailed
+	*allTraffic = resolvedCfg.AllTraffic
+	*allLogs = resolvedCfg.AllLogs
 
 	hostname, _ := os.Hostname()
 	if agentName == "" {
@@ -556,13 +595,8 @@ Flags:
 	}
 	fmt.Printf("  Batch Settings:  Size=%d, Interval=%s\n", *batchSize, *flushInterval)
 	fmt.Printf("  Offline Queue:   Max=%d, Timeout=%s\n", *maxQueueSize, *disconnectTimeout)
-	statusFilter := ParseStatusCodeFilter(*statusCodesFlag)
-	filterOpts := FilterOptions{
-		StatusCodes:   statusFilter,
-		IncludeFailed: *includeFailed || len(statusFilter) > 0,
-		AllTraffic:    *allTraffic,
-		AllLogs:       *allLogs,
-	}
+	filterOpts := resolvedCfg.FilterOpts
+	statusFilter := filterOpts.StatusCodes
 
 	if *allLogs {
 		fmt.Println("  Filter:          Disabled (--all-logs: shipping all raw lines)")

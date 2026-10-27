@@ -607,3 +607,515 @@ func TestShipperRegisterOptions_AllFlagsAndEnvVars(t *testing.T) {
 		}
 	})
 }
+
+func TestShipperPush_Precedence_Hierarchy(t *testing.T) {
+	t.Run("CLI Flag overrides Env Var, AgentConfig, and Defaults", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://env-url:7890")
+		t.Setenv("RW_AGENT_KEY", "rw_env_key")
+		t.Setenv("RW_STATUS", "301")
+		t.Setenv("RW_ALL_TRAFFIC", "false")
+		t.Setenv("RW_ALL_LOGS", "false")
+		t.Setenv("RW_TAIL", "10")
+		t.Setenv("RW_BATCH_SIZE", "20")
+
+		agentCfg := &AgentConfig{
+			DashboardURL: "http://cfg-url:7890",
+			AgentToken:   "rw_cfg_key",
+			StatusCodes:  "400-404",
+			AllTraffic:   false,
+			AllLogs:      false,
+		}
+
+		args := []string{
+			"--url", "http://cli-url:7890",
+			"--key", "rw_cli_key",
+			"--status", "500-504",
+			"--all-traffic",
+			"--all-logs",
+			"--tail", "999",
+			"--batch-size", "500",
+		}
+
+		opts, err := ParsePushOptions(args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		resolved := ResolvePushConfig(opts, agentCfg)
+
+		if resolved.DashboardURL != "http://cli-url:7890" {
+			t.Errorf("expected CLI URL to override env and config, got %s", resolved.DashboardURL)
+		}
+		if resolved.AgentToken != "rw_cli_key" {
+			t.Errorf("expected CLI Key to override env and config, got %s", resolved.AgentToken)
+		}
+		if resolved.StatusCodesFlag != "500-504" {
+			t.Errorf("expected CLI StatusCodes to override env and config, got %s", resolved.StatusCodesFlag)
+		}
+		if !resolved.AllTraffic {
+			t.Errorf("expected CLI AllTraffic=true to override env and config")
+		}
+		if !resolved.AllLogs {
+			t.Errorf("expected CLI AllLogs=true to override env and config")
+		}
+		if opts.TailLines != "999" || opts.BatchSize != 500 {
+			t.Errorf("expected CLI flags for tail and batch size: tail=%s, batch=%d", opts.TailLines, opts.BatchSize)
+		}
+	})
+
+	t.Run("Env Var overrides AgentConfig and Defaults when CLI Flag omitted", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://env-url:7890")
+		t.Setenv("RW_AGENT_KEY", "rw_env_key")
+		t.Setenv("RW_STATUS", "5xx")
+		t.Setenv("RW_ALL_TRAFFIC", "true")
+		t.Setenv("RW_ALL_LOGS", "1")
+
+		agentCfg := &AgentConfig{
+			DashboardURL: "http://cfg-url:7890",
+			AgentToken:   "rw_cfg_key",
+			StatusCodes:  "400-404",
+			AllTraffic:   false,
+			AllLogs:      false,
+		}
+
+		opts, err := ParsePushOptions([]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		resolved := ResolvePushConfig(opts, agentCfg)
+
+		if resolved.DashboardURL != "http://env-url:7890" {
+			t.Errorf("expected Env URL to override config, got %s", resolved.DashboardURL)
+		}
+		if resolved.AgentToken != "rw_env_key" {
+			t.Errorf("expected Env Key to override config, got %s", resolved.AgentToken)
+		}
+		if resolved.StatusCodesFlag != "5xx" {
+			t.Errorf("expected Env Status to override config, got %s", resolved.StatusCodesFlag)
+		}
+		if !resolved.AllTraffic {
+			t.Errorf("expected Env AllTraffic to override config")
+		}
+		if !resolved.AllLogs {
+			t.Errorf("expected Env AllLogs to override config")
+		}
+	})
+
+	t.Run("AgentConfig overrides Defaults when CLI Flag and Env Var omitted", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "")
+		t.Setenv("RW_URL", "")
+		t.Setenv("RW_AGENT_KEY", "")
+		t.Setenv("RW_KEY", "")
+		t.Setenv("RW_STATUS", "")
+		t.Setenv("RW_STATUS_CODES", "")
+		t.Setenv("RW_INCLUDE_STATUS", "")
+		t.Setenv("RW_ALL_TRAFFIC", "")
+		t.Setenv("RW_ALL_LOGS", "")
+
+		agentCfg := &AgentConfig{
+			DashboardURL: "http://cfg-url:7890",
+			AgentToken:   "rw_cfg_key",
+			StatusCodes:  "400-499",
+			AllTraffic:   true,
+			AllLogs:      false,
+		}
+
+		opts, err := ParsePushOptions([]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		resolved := ResolvePushConfig(opts, agentCfg)
+
+		if resolved.DashboardURL != "http://cfg-url:7890" {
+			t.Errorf("expected Config URL, got %s", resolved.DashboardURL)
+		}
+		if resolved.AgentToken != "rw_cfg_key" {
+			t.Errorf("expected Config Key, got %s", resolved.AgentToken)
+		}
+		if resolved.StatusCodesFlag != "400-499" {
+			t.Errorf("expected Config StatusCodes, got %s", resolved.StatusCodesFlag)
+		}
+		if !resolved.AllTraffic {
+			t.Errorf("expected Config AllTraffic=true")
+		}
+		if resolved.AllLogs {
+			t.Errorf("expected Config AllLogs=false")
+		}
+	})
+
+	t.Run("AgentConfig IncludeFailed defaults StatusCodes to 400-599 when StatusCodes empty", func(t *testing.T) {
+		t.Setenv("RW_STATUS", "")
+		t.Setenv("RW_STATUS_CODES", "")
+		t.Setenv("RW_INCLUDE_STATUS", "")
+		t.Setenv("RW_INCLUDE_FAILED", "")
+
+		agentCfg := &AgentConfig{
+			DashboardURL:  "http://cfg-url:7890",
+			AgentToken:    "rw_cfg_key",
+			IncludeFailed: true,
+			StatusCodes:   "",
+		}
+
+		opts, err := ParsePushOptions([]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		resolved := ResolvePushConfig(opts, agentCfg)
+
+		if !resolved.IncludeFailed {
+			t.Errorf("expected IncludeFailed=true from config")
+		}
+		if resolved.StatusCodesFlag != "400-599" {
+			t.Errorf("expected default StatusCodes 400-599 for IncludeFailed, got %s", resolved.StatusCodesFlag)
+		}
+	})
+
+	t.Run("Defaults apply when Flag, Env, and Config are omitted", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "")
+		t.Setenv("RW_URL", "")
+		t.Setenv("RW_AGENT_KEY", "")
+		t.Setenv("RW_KEY", "")
+		t.Setenv("RW_STATUS", "")
+		t.Setenv("RW_ALL_TRAFFIC", "")
+		t.Setenv("RW_ALL_LOGS", "")
+
+		opts, err := ParsePushOptions([]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		resolved := ResolvePushConfig(opts, nil)
+
+		if resolved.DashboardURL != "" || resolved.AgentToken != "" {
+			t.Errorf("expected empty URL and Token on unconfigured agent: url=%s, key=%s", resolved.DashboardURL, resolved.AgentToken)
+		}
+		if resolved.AllTraffic || resolved.AllLogs || resolved.IncludeFailed {
+			t.Errorf("expected false for boolean filter flags")
+		}
+		if opts.BatchSize != 50 || opts.FlushInterval != 1*time.Second || opts.MaxQueueSize != 10000 {
+			t.Errorf("expected standard defaults for queue and batching")
+		}
+	})
+
+	t.Run("Config file path precedence: CLI Flag > RW_CONFIG > Default", func(t *testing.T) {
+		// 1. CLI flag overrides RW_CONFIG
+		t.Setenv("RW_CONFIG", "/env/agent.json")
+		opts1, _ := ParsePushOptions([]string{"--config", "/cli/agent.json"})
+		if opts1.ConfigPath != "/cli/agent.json" {
+			t.Errorf("expected CLI --config to override RW_CONFIG, got %s", opts1.ConfigPath)
+		}
+
+		// 2. RW_CONFIG takes effect when flag omitted
+		opts2, _ := ParsePushOptions([]string{})
+		if opts2.ConfigPath != "/env/agent.json" {
+			t.Errorf("expected RW_CONFIG to take effect, got %s", opts2.ConfigPath)
+		}
+
+		// 3. Default path when neither specified
+		t.Setenv("RW_CONFIG", "")
+		opts3, _ := ParsePushOptions([]string{})
+		if opts3.ConfigPath != "" {
+			t.Errorf("expected empty ConfigPath for default resolution, got %s", opts3.ConfigPath)
+		}
+	})
+}
+
+func TestShipperPush_EnvironmentVariable_FallbackPrecedence(t *testing.T) {
+	t.Run("RW_DASHBOARD_URL takes precedence over RW_URL", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://primary:7890")
+		t.Setenv("RW_URL", "http://fallback:7890")
+		opts, _ := ParsePushOptions([]string{})
+		if opts.URL != "http://primary:7890" {
+			t.Errorf("expected primary RW_DASHBOARD_URL, got %s", opts.URL)
+		}
+	})
+
+	t.Run("RW_AGENT_KEY takes precedence over RW_KEY", func(t *testing.T) {
+		t.Setenv("RW_AGENT_KEY", "primary_key")
+		t.Setenv("RW_KEY", "fallback_key")
+		opts, _ := ParsePushOptions([]string{})
+		if opts.Key != "primary_key" {
+			t.Errorf("expected primary RW_AGENT_KEY, got %s", opts.Key)
+		}
+	})
+
+	t.Run("RW_STATUS takes precedence over RW_STATUS_CODES and RW_INCLUDE_STATUS", func(t *testing.T) {
+		t.Setenv("RW_STATUS", "400-404")
+		t.Setenv("RW_STATUS_CODES", "500-504")
+		t.Setenv("RW_INCLUDE_STATUS", "301")
+		opts, _ := ParsePushOptions([]string{})
+		if opts.StatusCodesFlag != "400-404" {
+			t.Errorf("expected RW_STATUS precedence, got %s", opts.StatusCodesFlag)
+		}
+
+		t.Setenv("RW_STATUS", "")
+		optsFallback1, _ := ParsePushOptions([]string{})
+		if optsFallback1.StatusCodesFlag != "500-504" {
+			t.Errorf("expected RW_STATUS_CODES precedence over RW_INCLUDE_STATUS, got %s", optsFallback1.StatusCodesFlag)
+		}
+
+		t.Setenv("RW_STATUS_CODES", "")
+		optsFallback2, _ := ParsePushOptions([]string{})
+		if optsFallback2.StatusCodesFlag != "301" {
+			t.Errorf("expected RW_INCLUDE_STATUS fallback, got %s", optsFallback2.StatusCodesFlag)
+		}
+	})
+
+	t.Run("RW_VERBOSE takes precedence over RW_DEBUG", func(t *testing.T) {
+		t.Setenv("RW_VERBOSE", "1")
+		t.Setenv("RW_DEBUG", "false")
+		opts, _ := ParsePushOptions([]string{})
+		if !opts.Verbose {
+			t.Errorf("expected RW_VERBOSE=1 to set Verbose=true")
+		}
+	})
+}
+
+func TestShipperPush_FlagAliases_Equivalence(t *testing.T) {
+	pairs := []struct {
+		name      string
+		longFlag  []string
+		shortFlag []string
+		assertFn  func(t *testing.T, longOpts, shortOpts *PushOptions)
+	}{
+		{
+			name:      "url: --url vs -u",
+			longFlag:  []string{"--url", "http://soc.test:7890"},
+			shortFlag: []string{"-u", "http://soc.test:7890"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.URL != s.URL || l.URL != "http://soc.test:7890" {
+					t.Errorf("mismatch: long=%s, short=%s", l.URL, s.URL)
+				}
+			},
+		},
+		{
+			name:      "key: --key vs -k",
+			longFlag:  []string{"--key", "sec_token_123"},
+			shortFlag: []string{"-k", "sec_token_123"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.Key != s.Key || l.Key != "sec_token_123" {
+					t.Errorf("mismatch: long=%s, short=%s", l.Key, s.Key)
+				}
+			},
+		},
+		{
+			name:      "status: --status vs -s",
+			longFlag:  []string{"--status", "4xx, 5xx"},
+			shortFlag: []string{"-s", "4xx, 5xx"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.StatusCodesFlag != s.StatusCodesFlag || l.StatusCodesFlag != "4xx, 5xx" {
+					t.Errorf("mismatch: long=%s, short=%s", l.StatusCodesFlag, s.StatusCodesFlag)
+				}
+			},
+		},
+		{
+			name:      "include-failed: --include-failed vs -F",
+			longFlag:  []string{"--include-failed"},
+			shortFlag: []string{"-F"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.IncludeFailed != s.IncludeFailed || !l.IncludeFailed {
+					t.Errorf("mismatch: long=%v, short=%v", l.IncludeFailed, s.IncludeFailed)
+				}
+			},
+		},
+		{
+			name:      "detach: --detach vs -d",
+			longFlag:  []string{"--detach"},
+			shortFlag: []string{"-d"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.DetachMode != s.DetachMode || !l.DetachMode {
+					t.Errorf("mismatch: long=%v, short=%v", l.DetachMode, s.DetachMode)
+				}
+			},
+		},
+		{
+			name:      "verbose: --verbose vs -v",
+			longFlag:  []string{"--verbose"},
+			shortFlag: []string{"-v"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.Verbose != s.Verbose || !l.Verbose {
+					t.Errorf("mismatch: long=%v, short=%v", l.Verbose, s.Verbose)
+				}
+			},
+		},
+		{
+			name:      "label: --label vs -l",
+			longFlag:  []string{"--label", "app=prod"},
+			shortFlag: []string{"-l", "app=prod"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if l.CustomLabel != s.CustomLabel || l.CustomLabel != "app=prod" {
+					t.Errorf("mismatch: long=%s, short=%s", l.CustomLabel, s.CustomLabel)
+				}
+			},
+		},
+		{
+			name:      "container: --container vs -c",
+			longFlag:  []string{"--container", "caddy,traefik"},
+			shortFlag: []string{"-c", "caddy,traefik"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if !reflect.DeepEqual(l.ContainerFlags, s.ContainerFlags) {
+					t.Errorf("mismatch: long=%v, short=%v", l.ContainerFlags, s.ContainerFlags)
+				}
+			},
+		},
+		{
+			name:      "file: --file vs -f",
+			longFlag:  []string{"--file", "/var/log/app.log"},
+			shortFlag: []string{"-f", "/var/log/app.log"},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if !reflect.DeepEqual(l.FileFlags, s.FileFlags) {
+					t.Errorf("mismatch: long=%v, short=%v", l.FileFlags, s.FileFlags)
+				}
+			},
+		},
+		{
+			name:      "event: --event vs -e",
+			longFlag:  []string{"--event", `{"attack":"sqli"}`},
+			shortFlag: []string{"-e", `{"attack":"sqli"}`},
+			assertFn: func(t *testing.T, l, s *PushOptions) {
+				if !reflect.DeepEqual(l.EventFlags, s.EventFlags) {
+					t.Errorf("mismatch: long=%v, short=%v", l.EventFlags, s.EventFlags)
+				}
+			},
+		},
+	}
+
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			lOpts, errL := ParsePushOptions(p.longFlag)
+			sOpts, errS := ParsePushOptions(p.shortFlag)
+			if errL != nil || errS != nil {
+				t.Fatalf("unexpected error: longErr=%v, shortErr=%v", errL, errS)
+			}
+			p.assertFn(t, lOpts, sOpts)
+		})
+	}
+}
+
+func TestShipperPush_Filtering_FlagPreference(t *testing.T) {
+	rawSysLog := `Feb 12 10:00:00 server systemd[1]: Started nginx service.`
+	rawErrorLog := `ERROR 2026-10-27T10:00:00 database pool connection timed out`
+	secEventJSON := `{"event":"waf_block","rule":"sqli","status":403,"client_ip":"198.51.100.1"}`
+	secEventString := `[RouteWarden WAF] BLOCKED IP 198.51.100.1 - SQL injection detected`
+	http200JSON := `{"status":200,"method":"GET","path":"/index.html","remote_addr":"10.0.0.1"}`
+	http301JSON := `{"status":301,"method":"GET","path":"/old","remote_addr":"10.0.0.1"}`
+	http404JSON := `{"status":404,"method":"GET","path":"/not-found","remote_addr":"10.0.0.1"}`
+	http500JSON := `{"status":500,"method":"POST","path":"/api/checkout","remote_addr":"10.0.0.1"}`
+	http502JSON := `{"status":502,"method":"GET","path":"/upstream","remote_addr":"10.0.0.1"}`
+
+	t.Run("Preference 1: AllLogs passes all raw lines overriding other filters", func(t *testing.T) {
+		opts := FilterOptions{
+			AllLogs:       true,
+			AllTraffic:    false,
+			IncludeFailed: false,
+		}
+		for _, line := range []string{rawSysLog, rawErrorLog, http200JSON, http404JSON, http500JSON, secEventJSON} {
+			_, ok := FilterRouteWardenLogOpts(line, opts)
+			if !ok {
+				t.Errorf("expected line to pass when AllLogs=true: %s", line)
+			}
+		}
+
+		optsNoAllLogs := FilterOptions{
+			AllLogs:    false,
+			AllTraffic: true,
+		}
+		if _, ok := FilterRouteWardenLogOpts(rawSysLog, optsNoAllLogs); ok {
+			t.Errorf("expected rawSysLog to be dropped when AllLogs=false")
+		}
+		if _, ok := FilterRouteWardenLogOpts(rawErrorLog, optsNoAllLogs); ok {
+			t.Errorf("expected rawErrorLog to be dropped when AllLogs=false")
+		}
+	})
+
+	t.Run("Preference 2: Security Events pass regardless of HTTP traffic or status code filters", func(t *testing.T) {
+		opts := FilterOptions{
+			StatusCodes:   ParseStatusCodeFilter("500-504"),
+			AllTraffic:    false,
+			IncludeFailed: false,
+		}
+		if _, ok := FilterRouteWardenLogOpts(secEventJSON, opts); !ok {
+			t.Errorf("expected security event JSON to pass even when status filter is 500-504")
+		}
+		if _, ok := FilterRouteWardenLogOpts(secEventString, opts); !ok {
+			t.Errorf("expected security event string to pass even when status filter is 500-504")
+		}
+	})
+
+	t.Run("Preference 3: AllTraffic overrides status code restrictions for HTTP requests", func(t *testing.T) {
+		opts := FilterOptions{
+			AllTraffic:    true,
+			StatusCodes:   ParseStatusCodeFilter("500-504"),
+			IncludeFailed: true,
+		}
+		if _, ok := FilterRouteWardenLogOpts(http200JSON, opts); !ok {
+			t.Errorf("expected 200 OK to pass when AllTraffic=true")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http301JSON, opts); !ok {
+			t.Errorf("expected 301 Redirect to pass when AllTraffic=true")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http404JSON, opts); !ok {
+			t.Errorf("expected 404 to pass when AllTraffic=true")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http500JSON, opts); !ok {
+			t.Errorf("expected 500 to pass when AllTraffic=true")
+		}
+	})
+
+	t.Run("Preference 4: Explicit StatusCodes takes precedence over IncludeFailed", func(t *testing.T) {
+		opts := FilterOptions{
+			StatusCodes:   ParseStatusCodeFilter("500-504"),
+			IncludeFailed: true,
+		}
+		if _, ok := FilterRouteWardenLogOpts(http500JSON, opts); !ok {
+			t.Errorf("expected 500 to match StatusCodes 500-504")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http502JSON, opts); !ok {
+			t.Errorf("expected 502 to match StatusCodes 500-504")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http404JSON, opts); ok {
+			t.Errorf("expected 404 to be dropped because explicit StatusCodes 500-504 takes preference over IncludeFailed")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http200JSON, opts); ok {
+			t.Errorf("expected 200 to be dropped")
+		}
+	})
+
+	t.Run("Preference 5: IncludeFailed fallback passes all 4xx/5xx and drops 2xx/3xx", func(t *testing.T) {
+		opts := FilterOptions{
+			IncludeFailed: true,
+		}
+		if _, ok := FilterRouteWardenLogOpts(http404JSON, opts); !ok {
+			t.Errorf("expected 404 to pass on IncludeFailed")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http500JSON, opts); !ok {
+			t.Errorf("expected 500 to pass on IncludeFailed")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http200JSON, opts); ok {
+			t.Errorf("expected 200 to be dropped on IncludeFailed")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http301JSON, opts); ok {
+			t.Errorf("expected 301 to be dropped on IncludeFailed")
+		}
+	})
+
+	t.Run("Preference 6: Default (no flags) drops non-security HTTP traffic", func(t *testing.T) {
+		opts := FilterOptions{}
+		if _, ok := FilterRouteWardenLogOpts(http200JSON, opts); ok {
+			t.Errorf("expected 200 to be dropped by default")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http404JSON, opts); ok {
+			t.Errorf("expected 404 to be dropped by default")
+		}
+		if _, ok := FilterRouteWardenLogOpts(http500JSON, opts); ok {
+			t.Errorf("expected 500 to be dropped by default")
+		}
+		if _, ok := FilterRouteWardenLogOpts(secEventJSON, opts); !ok {
+			t.Errorf("expected security event to pass by default")
+		}
+	})
+}
+

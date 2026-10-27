@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -529,4 +530,66 @@ func TestCLI_Push_FlagsAndEnvVars_Blackbox(t *testing.T) {
 		t.Errorf("expected registration error for direct flags, got code %d, stderr: %s", code, stderr)
 	}
 }
+
+func TestCLI_Push_FlagPreference_Blackbox(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "agent.json")
+
+	cfgData := map[string]interface{}{
+		"dashboard_url": "http://saved.dashboard.local:7890",
+		"agent_token":   "stored_agent_secret",
+		"status_codes":  "400-404",
+	}
+	raw, err := json.MarshalIndent(cfgData, "", "  ")
+	if err != nil {
+		t.Fatalf("failed to marshal json: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0600); err != nil {
+		t.Fatalf("failed to write agent.json: %v", err)
+	}
+
+	t.Run("CLI flag takes precedence over stored config and env var", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "http://env.dashboard.local:7890")
+		t.Setenv("RW_AGENT_KEY", "env_agent_key")
+
+		_, stderr, code := runCLI(t, "push", "--config", cfgPath, "--url", "http://cli.dashboard.local:7890", "--key", "cli_agent_key", "-e", `{"event":"test"}`)
+		if code != 1 {
+			t.Fatalf("expected exit code 1 on connection failure, got %d", code)
+		}
+		if !strings.Contains(stderr, "Failed to push event") {
+			t.Errorf("expected push attempt with failed connection, got stderr: %s", stderr)
+		}
+	})
+
+	t.Run("Stored config provides url and key when CLI flags and env vars are absent", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "")
+		t.Setenv("RW_URL", "")
+		t.Setenv("RW_AGENT_KEY", "")
+		t.Setenv("RW_KEY", "")
+
+		_, stderr, code := runCLI(t, "push", "--config", cfgPath, "-e", `{"event":"test"}`)
+		if code != 1 {
+			t.Fatalf("expected exit code 1 on connection failure, got %d", code)
+		}
+		if !strings.Contains(stderr, "Failed to push event") {
+			t.Errorf("expected push attempt with failed connection using stored config, got stderr: %s", stderr)
+		}
+	})
+
+	t.Run("Direct flags without subcommand respects config file", func(t *testing.T) {
+		t.Setenv("RW_DASHBOARD_URL", "")
+		t.Setenv("RW_URL", "")
+		t.Setenv("RW_AGENT_KEY", "")
+		t.Setenv("RW_KEY", "")
+
+		_, stderr, code := runCLI(t, "--config", cfgPath, "-e", `{"event":"test"}`)
+		if code != 1 {
+			t.Fatalf("expected exit code 1 on connection failure, got %d", code)
+		}
+		if !strings.Contains(stderr, "Failed to push event") {
+			t.Errorf("expected push attempt with failed connection using stored config, got stderr: %s", stderr)
+		}
+	})
+}
+
 
