@@ -505,7 +505,7 @@ func (r *AuditReport) ToSARIF() ([]byte, error) {
 				Tool: sarifTool{
 					Driver: sarifDriver{
 						Name:           "RouteWarden Security Linter",
-						Version:        "5.3.3", // tool version
+						Version:        "5.4.0", // tool version
 						InformationURI: "https://routewarden.github.io",
 						Rules:          rules,
 					},

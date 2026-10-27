@@ -10,7 +10,7 @@ The canonical release version of `rwarden` is stored in [`version.json`](version
 
 ```json
 {
-  "version": "v5.3.3"
+  "version": "v5.4.0"
 }
 ```
 
