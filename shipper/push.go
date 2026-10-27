@@ -107,6 +107,62 @@ Flags:
 	allLogs := fs.Bool("all-logs", false, "Ship all container lines without filtering for RouteWarden logs")
 	_ = ParseFlagsLenient(fs, args)
 
+	if *configPath == "" {
+		if env := os.Getenv("RW_CONFIG"); env != "" {
+			*configPath = env
+		}
+	}
+	if !*dockerMode {
+		if env := os.Getenv("RW_DOCKER"); env == "1" || strings.EqualFold(env, "true") {
+			*dockerMode = true
+		}
+	}
+	if *customLabel == "" {
+		if env := os.Getenv("RW_LABEL"); env != "" {
+			*customLabel = env
+		}
+	}
+	if env := os.Getenv("RW_TAIL"); env != "" {
+		*tailLines = env
+	}
+	if env := os.Getenv("RW_BATCH_SIZE"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v > 0 {
+			*batchSize = v
+		}
+	}
+	if env := os.Getenv("RW_FLUSH_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*flushInterval = d
+		}
+	}
+	if env := os.Getenv("RW_QUEUE_SIZE"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v > 0 {
+			*maxQueueSize = v
+		}
+	}
+	if env := os.Getenv("RW_DISCONNECT_TIMEOUT"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*disconnectTimeout = d
+		}
+	}
+	if env := os.Getenv("RW_PING_INTERVAL"); env != "" {
+		if d, err := time.ParseDuration(env); err == nil {
+			*pingInterval = d
+		}
+	}
+	if !*verbose {
+		if env := os.Getenv("RW_VERBOSE"); env == "1" || strings.EqualFold(env, "true") {
+			*verbose = true
+		} else if env := os.Getenv("RW_DEBUG"); env == "1" || strings.EqualFold(env, "true") {
+			*verbose = true
+		}
+	}
+	if !*detachMode {
+		if env := os.Getenv("RW_DETACH"); env == "1" || strings.EqualFold(env, "true") {
+			*detachMode = true
+		}
+	}
+
 	filesToMonitor := ResolveFileList(fileFlags, fs.Args())
 	containersToTail := ResolveContainerList(containerFlags)
 
@@ -208,6 +264,13 @@ Flags:
 			*allTraffic = true
 		} else if agentCfg != nil && agentCfg.AllTraffic {
 			*allTraffic = true
+		}
+	}
+	if !*allLogs {
+		if env := os.Getenv("RW_ALL_LOGS"); env == "1" || strings.EqualFold(env, "true") {
+			*allLogs = true
+		} else if agentCfg != nil && agentCfg.AllLogs {
+			*allLogs = true
 		}
 	}
 

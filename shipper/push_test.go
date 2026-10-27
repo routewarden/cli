@@ -339,6 +339,23 @@ func TestShipper_ParseFlagsLenient_Verbose(t *testing.T) {
 	}
 }
 
+func TestShipper_ParseFlagsLenient_CombinedFlags(t *testing.T) {
+	fs := flag.NewFlagSet("test_combined", flag.ContinueOnError)
+	docker := fs.Bool("docker", false, "docker mode")
+	allTraffic := fs.Bool("all-traffic", false, "all traffic mode")
+
+	args := []string{"-docker --all-traffic"}
+	if err := ParseFlagsLenient(fs, args); err != nil {
+		t.Fatalf("ParseFlagsLenient failed on combined flags: %v", err)
+	}
+	if !*docker {
+		t.Error("expected docker to be true")
+	}
+	if !*allTraffic {
+		t.Error("expected allTraffic to be true")
+	}
+}
+
 func TestShipper_IsRouteWardenLog_FilterValidation(t *testing.T) {
 	tests := []struct {
 		name     string

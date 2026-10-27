@@ -198,6 +198,10 @@ func main() {
 		printUsage()
 
 	default:
+		if strings.HasPrefix(command, "-") {
+			handlePush(os.Args[1:])
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", command)
 		printUsage()
 		os.Exit(1)
@@ -397,8 +401,50 @@ func handleCleanup(args []string) {
 	}
 }
 
+// splitArgs splits a string by whitespace while preserving single- and double-quoted blocks.
+func splitArgs(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+
+	for i := 0; i < len(s); i++ {
+		r := s[i]
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble {
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteByte(r)
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
 // parseFlagsLenient rearranges arguments so flags can appear before or after positional arguments.
 func parseFlagsLenient(fs *flag.FlagSet, args []string) error {
+	var expandedArgs []string
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") && (strings.Contains(arg, " -") || strings.Contains(arg, "\t-")) {
+			expandedArgs = append(expandedArgs, splitArgs(arg)...)
+		} else {
+			expandedArgs = append(expandedArgs, arg)
+		}
+	}
+	args = expandedArgs
+
 	var flags []string
 	var posArgs []string
 	for i := 0; i < len(args); i++ {

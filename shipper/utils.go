@@ -16,7 +16,49 @@ func (s *StringSlice) Set(val string) error {
 	return nil
 }
 
+// splitArgs splits a string by whitespace while preserving single- and double-quoted blocks.
+func splitArgs(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+
+	for i := 0; i < len(s); i++ {
+		r := s[i]
+		if r == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if r == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble {
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteByte(r)
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
 func ParseFlagsLenient(fs *flag.FlagSet, args []string) error {
+	var expandedArgs []string
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") && (strings.Contains(arg, " -") || strings.Contains(arg, "\t-")) {
+			expandedArgs = append(expandedArgs, splitArgs(arg)...)
+		} else {
+			expandedArgs = append(expandedArgs, arg)
+		}
+	}
+	args = expandedArgs
+
 	var flagArgs []string
 	var posArgs []string
 

@@ -23,6 +23,7 @@ type AgentConfig struct {
 	StatusCodes     string `json:"status_codes,omitempty"`
 	IncludeFailed   bool   `json:"include_failed,omitempty"`
 	AllTraffic      bool   `json:"all_traffic,omitempty"`
+	AllLogs         bool   `json:"all_logs,omitempty"`
 }
 
 func DefaultAgentConfigPath() string {
@@ -143,6 +144,7 @@ func HandleRegister(args []string) {
 	includeFailed := fs.Bool("include-failed", false, "Legacy alias: forward all failed HTTP requests (status >= 400, equivalent to --status 400-599)")
 	fs.BoolVar(includeFailed, "F", false, "Alias for --include-failed")
 	allTraffic := fs.Bool("all-traffic", false, "Always ship all HTTP access traffic (including 200 OK)")
+	allLogs := fs.Bool("all-logs", false, "Always ship all raw container lines without filtering")
 	_ = ParseFlagsLenient(fs, args)
 
 	if *dashboardURL == "" {
@@ -190,10 +192,13 @@ func HandleRegister(args []string) {
 	if *includeFailed {
 		cfg.IncludeFailed = true
 	}
-	if *allTraffic {
+	if *allTraffic || os.Getenv("RW_ALL_TRAFFIC") == "1" || strings.EqualFold(os.Getenv("RW_ALL_TRAFFIC"), "true") {
 		cfg.AllTraffic = true
 	}
-	if *statusCodesFlag != "" || *includeFailed || *allTraffic {
+	if *allLogs || os.Getenv("RW_ALL_LOGS") == "1" || strings.EqualFold(os.Getenv("RW_ALL_LOGS"), "true") {
+		cfg.AllLogs = true
+	}
+	if *statusCodesFlag != "" || *includeFailed || cfg.AllTraffic || cfg.AllLogs {
 		_ = SaveAgentConfig(destPath, cfg)
 	}
 
@@ -205,7 +210,9 @@ func HandleRegister(args []string) {
 	if len(cfg.ServerPublicKey) > 20 {
 		fmt.Printf("  Server Public Key: %s...\n", cfg.ServerPublicKey[:20])
 	}
-	if cfg.AllTraffic {
+	if cfg.AllLogs {
+		fmt.Println("  Telemetry Filter:  All raw container lines (--all-logs)")
+	} else if cfg.AllTraffic {
 		fmt.Println("  Telemetry Filter:  All HTTP access traffic (--all-traffic)")
 	} else if cfg.StatusCodes != "" {
 		fmt.Printf("  Telemetry Filter:  Security events + HTTP status [%s]\n", cfg.StatusCodes)
