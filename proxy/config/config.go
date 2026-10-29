@@ -107,9 +107,10 @@ func (p *PluginsConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode(&listNodes); err == nil && len(listNodes) > 0 {
 		p.Entries = make(map[string]PluginStateConfig)
 		for _, itemNode := range listNodes {
-			if itemNode.Kind == yaml.ScalarNode {
+			switch itemNode.Kind {
+			case yaml.ScalarNode:
 				p.Enabled = append(p.Enabled, itemNode.Value)
-			} else if itemNode.Kind == yaml.MappingNode {
+			case yaml.MappingNode:
 				var itemMap map[string]any
 				if err := itemNode.Decode(&itemMap); err == nil {
 					name, _ := itemMap["name"].(string)
@@ -1261,9 +1262,12 @@ func isValidIPOrCIDR(s string) bool {
 		s = s[:idx]
 	}
 	if strings.Contains(s, "/") {
-		_, _, err := net.ParseCIDR(s)
+		parts := strings.SplitN(s, "/", 2)
+		cleanIP := strings.Trim(strings.TrimSpace(parts[0]), "[]")
+		_, _, err := net.ParseCIDR(cleanIP + "/" + strings.TrimSpace(parts[1]))
 		return err == nil
 	}
+	s = strings.Trim(s, "[]")
 	return net.ParseIP(s) != nil
 }
 

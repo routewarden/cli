@@ -68,7 +68,7 @@ func (l Level) String() string {
 // It is distinct from core.LogWriter, which handles structured SecurityEvent JSONL.
 // Logger handles human-readable startup/operational messages.
 type Logger struct {
-	level  Level
+	level  atomic.Int32
 	logger *log.Logger
 }
 
@@ -78,46 +78,47 @@ func New(level Level, out io.Writer) *Logger {
 	if out == nil {
 		out = os.Stderr
 	}
-	return &Logger{
-		level:  level,
+	l := &Logger{
 		logger: log.New(out, "", log.LstdFlags),
 	}
+	l.level.Store(int32(level))
+	return l
 }
 
-// SetLevel updates the minimum log level.
+// SetLevel updates the minimum log level atomically.
 func (l *Logger) SetLevel(level Level) {
-	l.level = level
+	l.level.Store(int32(level))
 }
 
-// Level returns the current minimum log level.
+// Level returns the current minimum log level atomically.
 func (l *Logger) Level() Level {
-	return l.level
+	return Level(l.level.Load())
 }
 
 // Debug emits a message at DEBUG level.
 func (l *Logger) Debug(format string, args ...any) {
-	if l.level <= LevelDebug {
+	if l.Level() <= LevelDebug {
 		_ = l.logger.Output(2, fmt.Sprintf("[DEBUG] "+format, args...))
 	}
 }
 
 // Info emits a message at INFO level.
 func (l *Logger) Info(format string, args ...any) {
-	if l.level <= LevelInfo {
+	if l.Level() <= LevelInfo {
 		_ = l.logger.Output(2, fmt.Sprintf(format, args...))
 	}
 }
 
 // Warn emits a message at WARN level.
 func (l *Logger) Warn(format string, args ...any) {
-	if l.level <= LevelWarn {
+	if l.Level() <= LevelWarn {
 		_ = l.logger.Output(2, fmt.Sprintf("⚠️  "+format, args...))
 	}
 }
 
 // Error emits a message at ERROR level.
 func (l *Logger) Error(format string, args ...any) {
-	if l.level <= LevelError {
+	if l.Level() <= LevelError {
 		_ = l.logger.Output(2, fmt.Sprintf("❌ "+format, args...))
 	}
 }

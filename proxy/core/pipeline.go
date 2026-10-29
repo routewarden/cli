@@ -147,6 +147,7 @@ func (p *Pipeline) Handle(ctx context.Context, conn net.Conn, svc *config.Servic
 	if err != nil {
 		st.AddBlocked()
 		p.emitEvent(svc, clientIP, geo, "blocked", "upstream_connect_failed", 0, 0, start)
+		p.applyResponse(conn, svc, "upstream_connect_failed")
 		return
 	}
 	defer upstream.Close()
@@ -381,18 +382,16 @@ func (p *Pipeline) applyResponse(conn net.Conn, svc *config.ServiceConfig, reaso
 		if delay > 0 {
 			time.Sleep(delay)
 		}
-		conn.Close()
 	case "reject":
 		msg := svc.Response.RejectMessage
 		if msg == "" {
 			msg = "Connection rejected by RouteWarden"
 		}
 		conn.Write([]byte(msg + "\r\n"))
-		conn.Close()
 	case "silent", "drop":
-		fallthrough
+		// silent drop — nothing to write; deferred close in Handle owns connection cleanup
 	default:
-		conn.Close()
+		// default silent drop
 	}
 }
 
@@ -445,7 +444,8 @@ func parseClientIP(remoteAddr string) string {
 	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		remoteAddr = host
 	}
-	remoteAddr = strings.Trim(remoteAddr, "[]")
+	remoteAddr = strings.ReplaceAll(remoteAddr, "[", "")
+	remoteAddr = strings.ReplaceAll(remoteAddr, "]", "")
 	if idx := strings.IndexByte(remoteAddr, '%'); idx != -1 {
 		remoteAddr = remoteAddr[:idx]
 	}
@@ -460,9 +460,21 @@ func parseClientIP(remoteAddr string) string {
 
 func matchIP(ip net.IP, pattern string) bool {
 	pattern = strings.TrimSpace(pattern)
-	pattern = strings.Trim(pattern, "[]")
-	if idx := strings.IndexByte(pattern, '%'); idx != -1 {
-		pattern = pattern[:idx]
+	if slash := strings.IndexByte(pattern, '/'); slash != -1 {
+		ipPart := pattern[:slash]
+		maskPart := strings.TrimSpace(pattern[slash+1:])
+		ipPart = strings.ReplaceAll(ipPart, "[", "")
+		ipPart = strings.ReplaceAll(ipPart, "]", "")
+		if idx := strings.IndexByte(ipPart, '%'); idx != -1 {
+			ipPart = ipPart[:idx]
+		}
+		pattern = ipPart + "/" + maskPart
+	} else {
+		pattern = strings.ReplaceAll(pattern, "[", "")
+		pattern = strings.ReplaceAll(pattern, "]", "")
+		if idx := strings.IndexByte(pattern, '%'); idx != -1 {
+			pattern = pattern[:idx]
+		}
 	}
 	if strings.Contains(pattern, "/") {
 		_, ipNet, err := net.ParseCIDR(pattern)
@@ -470,8 +482,13 @@ func matchIP(ip net.IP, pattern string) bool {
 			if ipNet.Contains(ip) {
 				return true
 			}
-			if v4 := ip.To4(); v4 != nil && ipNet.Contains(v4) {
-				return true
+			if v4 := ip.To4(); v4 != nil {
+				if ipNet.Contains(v4) {
+					return true
+				}
+				if ipNet.Contains(ip.To16()) {
+					return true
+				}
 			}
 		}
 		return false

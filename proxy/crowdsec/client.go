@@ -240,12 +240,28 @@ func (c *Client) sync(startup bool) error {
 	// Remove deleted decisions
 	for _, del := range streamResp.Deleted {
 		val := strings.TrimSpace(del.Value)
-		val = strings.Trim(val, "[]")
-		if parsed := net.ParseIP(val); parsed != nil {
-			if v4 := parsed.To4(); v4 != nil {
-				val = v4.String()
+		if strings.Contains(val, "/") {
+			parts := strings.SplitN(val, "/", 2)
+			ipPart := strings.Trim(strings.TrimSpace(parts[0]), "[]")
+			if idx := strings.IndexByte(ipPart, '%'); idx != -1 {
+				ipPart = ipPart[:idx]
+			}
+			if _, ipNet, err := net.ParseCIDR(ipPart + "/" + parts[1]); err == nil {
+				val = ipNet.String()
 			} else {
-				val = parsed.String()
+				val = ipPart + "/" + parts[1]
+			}
+		} else {
+			val = strings.Trim(val, "[]")
+			if idx := strings.IndexByte(val, '%'); idx != -1 {
+				val = val[:idx]
+			}
+			if parsed := net.ParseIP(val); parsed != nil {
+				if v4 := parsed.To4(); v4 != nil {
+					val = v4.String()
+				} else {
+					val = parsed.String()
+				}
 			}
 		}
 		if strings.EqualFold(del.Scope, "Ip") || !strings.Contains(val, "/") {
@@ -258,12 +274,31 @@ func (c *Client) sync(startup bool) error {
 	// Add new decisions
 	for _, it := range streamResp.New {
 		val := strings.TrimSpace(it.Value)
-		val = strings.Trim(val, "[]")
-		if parsed := net.ParseIP(val); parsed != nil {
-			if v4 := parsed.To4(); v4 != nil {
-				val = v4.String()
+		var ipNet *net.IPNet
+		if strings.Contains(val, "/") {
+			parts := strings.SplitN(val, "/", 2)
+			ipPart := strings.Trim(strings.TrimSpace(parts[0]), "[]")
+			if idx := strings.IndexByte(ipPart, '%'); idx != -1 {
+				ipPart = ipPart[:idx]
+			}
+			var err error
+			_, ipNet, err = net.ParseCIDR(ipPart + "/" + parts[1])
+			if err == nil {
+				val = ipNet.String()
 			} else {
-				val = parsed.String()
+				val = ipPart + "/" + parts[1]
+			}
+		} else {
+			val = strings.Trim(val, "[]")
+			if idx := strings.IndexByte(val, '%'); idx != -1 {
+				val = val[:idx]
+			}
+			if parsed := net.ParseIP(val); parsed != nil {
+				if v4 := parsed.To4(); v4 != nil {
+					val = v4.String()
+				} else {
+					val = parsed.String()
+				}
 			}
 		}
 		dec := DecisionResult{
@@ -275,13 +310,10 @@ func (c *Client) sync(startup bool) error {
 		}
 		if strings.EqualFold(it.Scope, "Ip") || !strings.Contains(val, "/") {
 			c.ipDecisions[val] = dec
-		} else {
-			_, ipNet, err := net.ParseCIDR(val)
-			if err == nil {
-				c.rangeDecisions[val] = rangeItem{
-					net:      ipNet,
-					decision: dec,
-				}
+		} else if ipNet != nil {
+			c.rangeDecisions[val] = rangeItem{
+				net:      ipNet,
+				decision: dec,
 			}
 		}
 	}

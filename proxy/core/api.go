@@ -63,11 +63,18 @@ func NewAPIServer(
 	// Auth middleware
 	requireAuth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Api-Key")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			if api.cfg.API.AuthToken != "" {
 				token := ""
 				authHeader := r.Header.Get("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					token = strings.TrimPrefix(authHeader, "Bearer ")
+				if after, ok :=strings.CutPrefix(authHeader, "Bearer "); ok  {
+					token = after
 				} else if authHeader != "" {
 					token = authHeader
 				} else {
