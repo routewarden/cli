@@ -147,9 +147,38 @@
       },
       "description": "ASNs whose client addresses bypass HTTP inspection; requires asnDB."
     },
+    "blockedASNs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(AS|as)?[0-9]+$"
+      },
+      "description": "ASNs whose client addresses are strictly blocked from accessing any endpoints; requires asnDB."
+    },
     "asnDB": {
       "type": "string",
       "description": "Path to local JSON ASN-to-CIDR routing snapshot."
+    },
+    "blockAIBots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block known AI training scrapers and automated LLM data harvesters."
+    },
+    "aiBotProfile": {
+      "type": "string",
+      "enum": ["all", "train_only", "aggressive", "custom"],
+      "default": "train_only",
+      "description": "AI bot blocking profile: train_only (allows citation search bots), all (blocks all AI bots), or aggressive (e.g. Bytespider)."
+    },
+    "blockUserAgents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Custom regular expressions of User-Agent headers to block."
+    },
+    "allowUserAgents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Whitelisted User-Agent regular expressions that take precedence over blockUserAgents and AI bot rules."
     }
   },
   "$defs": {

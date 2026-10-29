@@ -120,3 +120,21 @@ func TestASNGeneratorPreservesOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestASNBlockedMatching(t *testing.T) {
+	path := asnTestDB(t)
+	f, err := NewASNFilterEx([]string{"as64500"}, []string{"64501"}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocked, asn := f.IsBlocked("8.8.8.8")
+	if !blocked || asn != 64501 {
+		t.Errorf("expected 8.8.8.8 to be blocked with ASN 64501, got %v (%d)", blocked, asn)
+	}
+
+	blocked, _ = f.IsBlocked("8.1.2.3")
+	if blocked {
+		t.Errorf("expected 8.1.2.3 to not be blocked")
+	}
+}
