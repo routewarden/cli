@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -76,5 +77,33 @@ func TestLoggerOutputGating(t *testing.T) {
 	l.Error("test error")
 	if !strings.Contains(buf.String(), "test error") {
 		t.Errorf("expected error output, got: %s", buf.String())
+	}
+}
+
+func TestLogger_ConcurrentSetLevelAndLogging(t *testing.T) {
+	l := New(LevelInfo, io.Discard)
+	done := make(chan struct{})
+
+	go func() {
+		for i := 0; i < 500; i++ {
+			if i%2 == 0 {
+				l.SetLevel(LevelDebug)
+			} else {
+				l.SetLevel(LevelError)
+			}
+		}
+		close(done)
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			l.Debug("concurrent debug")
+			l.Info("concurrent info")
+			l.Warn("concurrent warn")
+			l.Error("concurrent error")
+		}
 	}
 }

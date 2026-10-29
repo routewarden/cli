@@ -368,6 +368,11 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 }
 
 func isValidIPOrCIDR(v string) bool {
+	v = strings.TrimSpace(v)
+	v = strings.Trim(v, "[]")
+	if idx := strings.IndexByte(v, '%'); idx != -1 {
+		v = v[:idx]
+	}
 	if _, _, err := net.ParseCIDR(v); err == nil {
 		return true
 	}

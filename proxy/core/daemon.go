@@ -378,5 +378,11 @@ func (d *Daemon) Reload(newCfg *config.Config) error {
 	if d.logger != nil {
 		d.logger.SetLevel(lvl)
 	}
+	if d.pipeline != nil {
+		d.pipeline.cfg = newCfg
+	}
+	if d.apiServer != nil {
+		d.apiServer.cfg = newCfg
+	}
 	return nil
 }

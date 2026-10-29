@@ -47,6 +47,12 @@ type PolicyDiff struct {
 
 // DiffConfigs compares two RouteWarden configurations and evaluates the security impact.
 func DiffConfigs(base, candidate *Config, baseName, candidateName string) *PolicyDiff {
+	if base == nil {
+		base = CreateConfig()
+	}
+	if candidate == nil {
+		candidate = CreateConfig()
+	}
 	diff := &PolicyDiff{
 		BaseFile:          baseName,
 		CandidateFile:     candidateName,
@@ -237,17 +243,21 @@ func diffStringSlices(oldList, newList []string) SliceDiff {
 	}
 
 	var added []string
+	seenAdded := make(map[string]bool)
 	for _, s := range newList {
 		sTrimmed := strings.TrimSpace(s)
-		if sTrimmed != "" && !oldMap[sTrimmed] {
+		if sTrimmed != "" && !oldMap[sTrimmed] && !seenAdded[sTrimmed] {
+			seenAdded[sTrimmed] = true
 			added = append(added, sTrimmed)
 		}
 	}
 
 	var removed []string
+	seenRemoved := make(map[string]bool)
 	for _, s := range oldList {
 		sTrimmed := strings.TrimSpace(s)
-		if sTrimmed != "" && !newMap[sTrimmed] {
+		if sTrimmed != "" && !newMap[sTrimmed] && !seenRemoved[sTrimmed] {
+			seenRemoved[sTrimmed] = true
 			removed = append(removed, sTrimmed)
 		}
 	}

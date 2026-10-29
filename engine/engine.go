@@ -485,8 +485,11 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	pathsToCheck := []string{path.Clean(pathStr)}
 
 	rawURIPath := requestURI
-	if idx := strings.IndexByte(rawURIPath, '?'); idx != -1 {
-		rawURIPath = rawURIPath[:idx]
+	if before, _, found := strings.Cut(rawURIPath, "#"); found {
+		rawURIPath = before
+	}
+	if before, _, found := strings.Cut(rawURIPath, "?"); found {
+		rawURIPath = before
 	}
 	if rawURIPath != "" {
 		pathsToCheck = append(pathsToCheck, path.Clean(rawURIPath))
@@ -517,23 +520,15 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 		if strings.ContainsRune(p, ';') {
 			parts := strings.Split(p, "/")
 			cleanedSegments := make([]string, len(parts))
-			paramSegments := make([]string, 0)
 			for i, seg := range parts {
 				if semiIdx := strings.IndexByte(seg, ';'); semiIdx != -1 {
 					cleanedSegments[i] = seg[:semiIdx]
-					paramSegments = append(paramSegments, seg[semiIdx+1:])
 				} else {
 					cleanedSegments[i] = seg
 				}
 			}
 			matrixStripped := strings.Join(cleanedSegments, "/")
 			pathsToCheck = append(pathsToCheck, path.Clean(matrixStripped))
-
-			for _, param := range paramSegments {
-				if param != "" {
-					pathsToCheck = append(pathsToCheck, "/"+param, path.Clean("/"+param))
-				}
-			}
 
 			semiAsSlash := strings.ReplaceAll(p, ";", "/")
 			pathsToCheck = append(pathsToCheck, path.Clean(semiAsSlash))
@@ -543,6 +538,12 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	for _, p := range append([]string{}, pathsToCheck...) {
 		if strings.ContainsRune(p, '\x00') {
 			pathsToCheck = append(pathsToCheck, path.Clean(strings.ReplaceAll(p, "\x00", "")))
+		}
+	}
+
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if before, _, found := strings.Cut(p, "#"); found {
+			pathsToCheck = append(pathsToCheck, path.Clean(before))
 		}
 	}
 
@@ -714,7 +715,17 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 	methodsMap := make(map[string]struct{})
 	if len(cfg.Methods) == 0 {
-		methodsMap["GET"] = struct{}{}
+		if cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0 {
+			for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+				methodsMap[m] = struct{}{}
+			}
+		} else {
+			methodsMap["GET"] = struct{}{}
+		}
+	} else if len(cfg.Methods) == 1 && strings.EqualFold(cfg.Methods[0], "GET") && (cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0) {
+		for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+			methodsMap[m] = struct{}{}
+		}
 	} else {
 		for _, m := range cfg.Methods {
 			m = strings.ToUpper(strings.TrimSpace(m))
@@ -723,7 +734,13 @@ func NewEngine(cfg *Config) (*Engine, error) {
 			}
 		}
 		if len(methodsMap) == 0 {
-			methodsMap["GET"] = struct{}{}
+			if cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0 {
+				for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+					methodsMap[m] = struct{}{}
+				}
+			} else {
+				methodsMap["GET"] = struct{}{}
+			}
 		}
 	}
 
@@ -951,10 +968,19 @@ func (e *Engine) isTrustedProxy(ip net.IP) bool {
 
 func cleanIP(raw string) string {
 	raw = strings.TrimSpace(raw)
+	if slash := strings.IndexByte(raw, '/'); slash != -1 {
+		ipPart := cleanIP(raw[:slash])
+		maskPart := strings.TrimSpace(raw[slash+1:])
+		if ipPart == "" {
+			return ""
+		}
+		return ipPart + "/" + maskPart
+	}
 	if host, _, err := net.SplitHostPort(raw); err == nil {
 		raw = host
 	}
-	raw = strings.Trim(raw, "[]")
+	raw = strings.ReplaceAll(raw, "[", "")
+	raw = strings.ReplaceAll(raw, "]", "")
 	if idx := strings.IndexByte(raw, '%'); idx != -1 {
 		raw = raw[:idx]
 	}
@@ -1019,7 +1045,9 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	if method == "" {
 		method = "GET"
 	}
-	if _, ok := e.Methods[method]; !ok {
+	_, hasWildcard := e.Methods["*"]
+	_, hasAll := e.Methods["ALL"]
+	if _, ok := e.Methods[method]; !ok && !hasWildcard && !hasAll {
 		result.Bypassed = true
 		result.Reason = fmt.Sprintf("method_%s_not_inspected", method)
 		return result
@@ -1093,12 +1121,24 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		}
 
 		queryCandidates := []string{queryString, unescapedQuery}
-		if parsed, err := url.ParseQuery(queryString); err == nil {
-			for _, vals := range parsed {
-				for _, v := range vals {
-					queryCandidates = append(queryCandidates, v)
-					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
-				}
+		parsed, _ := url.ParseQuery(queryString)
+		for key, vals := range parsed {
+			queryCandidates = append(queryCandidates, key)
+			queryCandidates = append(queryCandidates, ExtractCandidatePaths("", key, key)...)
+			for _, v := range vals {
+				queryCandidates = append(queryCandidates, v)
+				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
+			}
+		}
+		// Also split raw query string on '&' and ';' to catch keys/values even when malformed encodings cause ParseQuery to error
+		for _, pair := range strings.FieldsFunc(queryString, func(r rune) bool { return r == '&' || r == ';' }) {
+			if k, v, ok := strings.Cut(pair, "="); ok {
+				queryCandidates = append(queryCandidates, k, v)
+				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", k, k)...)
+				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
+			} else if pair != "" {
+				queryCandidates = append(queryCandidates, pair)
+				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", pair, pair)...)
 			}
 		}
 
@@ -1120,15 +1160,26 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, hdrName := range e.Config.CheckHeaders {
 			for k, v := range headers {
 				if strings.EqualFold(k, hdrName) && strings.TrimSpace(v) != "" {
-					hdrCandidates := append([]string{v}, ExtractCandidatePaths("", v, v)...)
-					for _, hc := range hdrCandidates {
-						for _, re := range e.BlockRegexes {
-							if re.MatchString(hc) {
-								result.Blocked = true
-								result.MatchedPattern = re.String()
-								result.MatchedTarget = hc
-								result.Reason = "header_blocked"
-								return result
+					rawVals := []string{v}
+					if strings.Contains(v, ",") {
+						for _, part := range strings.Split(v, ",") {
+							part = strings.TrimSpace(part)
+							if part != "" && part != v {
+								rawVals = append(rawVals, part)
+							}
+						}
+					}
+					for _, val := range rawVals {
+						hdrCandidates := append([]string{val}, ExtractCandidatePaths("", val, val)...)
+						for _, hc := range hdrCandidates {
+							for _, re := range e.BlockRegexes {
+								if re.MatchString(hc) {
+									result.Blocked = true
+									result.MatchedPattern = re.String()
+									result.MatchedTarget = hc
+									result.Reason = "header_blocked"
+									return result
+								}
 							}
 						}
 					}
