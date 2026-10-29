@@ -149,6 +149,11 @@ func (d *Daemon) handleUDPPacket(
 		return
 	}
 
+	if d.pipeline.isASNDenied(clientIP, &svc) {
+		block("asn_denied")
+		return
+	}
+
 	// ── Stage 4: Geo-block ────────────────────────────────────────────────
 	if d.pipeline.isCountryBlocked(geo.CountryCode, &svc) {
 		block(fmt.Sprintf("country_blocked: %s", geo.CountryCode))
@@ -217,7 +222,7 @@ func (d *Daemon) handleUDPPacket(
 	if isNew {
 		// Wire the stats callback now that this session has won the race and
 		// is officially owned. ConnAccepted() is called immediately after.
-		session.onClose = func() { st.ConnClosed() }
+		session.SetOnClose(func() { st.ConnClosed() })
 		st.ConnAccepted()
 
 		readBufSize := defaultUDPReadBufSize
@@ -279,6 +284,9 @@ func (d *Daemon) forwardUDPReplies(
 ) {
 	buf := make([]byte, bufSize)
 	clientIP := session.ClientAddr.IP.String()
+	if v4 := session.ClientAddr.IP.To4(); v4 != nil {
+		clientIP = v4.String()
+	}
 	geo := geoip.LookupIP(clientIP)
 
 	defer func() {

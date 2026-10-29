@@ -172,6 +172,24 @@ func TestParseFlagsLenient(t *testing.T) {
 			t.Errorf("expected error for unknown flag")
 		}
 	})
+
+	t.Run("combined space-separated flags in single argument", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		docker := fs.Bool("docker", false, "docker mode")
+		allTraffic := fs.Bool("all-traffic", false, "all traffic mode")
+
+		args := []string{"-docker --all-traffic"}
+		err := parseFlagsLenient(fs, args)
+		if err != nil {
+			t.Fatalf("unexpected error parsing combined flags: %v", err)
+		}
+		if !*docker {
+			t.Errorf("expected docker=true")
+		}
+		if !*allTraffic {
+			t.Errorf("expected allTraffic=true")
+		}
+	})
 }
 
 type dummyWriter struct{}

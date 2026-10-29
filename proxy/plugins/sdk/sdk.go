@@ -54,7 +54,7 @@ type DefaultServiceConfig struct {
 const ManifestVersion = "1.0.0"
 
 // Version is the current release version of the RouteWarden Plugin SDK (synchronized with RouteWarden releases).
-const Version = "5.3.3"
+const Version = "5.4.0"
 
 // Manifest defines identity, version, and capabilities of a plugin.
 type Manifest struct {

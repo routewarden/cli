@@ -70,6 +70,11 @@ func TestLookupIP(t *testing.T) {
 	if resPublic.IsPrivate {
 		t.Errorf("Expected IsPrivate=false for 8.8.8.8")
 	}
+
+	resBracketed := LookupIP("[::1]")
+	if resBracketed.CountryCode != "LAN" || !resBracketed.IsPrivate {
+		t.Errorf("Expected LAN and IsPrivate=true for [::1], got %+v", resBracketed)
+	}
 }
 
 func TestMMDBReader_ResolveDataBoundary(t *testing.T) {

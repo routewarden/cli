@@ -27,7 +27,7 @@ import (
 var defaultConfigFile []byte
 
 var (
-	version = "5.3.3"
+	version = "5.4.0"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -393,7 +393,7 @@ func handleUnban(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: tcp-warden unban <ip> [--token <token>] [--api <url>]")
 		os.Exit(1)
 	}
-	ip := fs.Args()[0]
+	ip := strings.Trim(strings.TrimSpace(fs.Args()[0]), "[]")
 
 	url := strings.TrimRight(*apiAddr, "/") + "/api/unban"
 	bodyBytes, _ := json.Marshal(map[string]string{"ip": ip})
@@ -437,7 +437,7 @@ func handleBan(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: tcp-warden ban <ip> [--duration 1h] [--reason \"...\"] [--token <token>] [--api <url>]")
 		os.Exit(1)
 	}
-	ip := fs.Args()[0]
+	ip := strings.Trim(strings.TrimSpace(fs.Args()[0]), "[]")
 
 	url := strings.TrimRight(*apiAddr, "/") + "/api/ban"
 	bodyBytes, _ := json.Marshal(map[string]string{
@@ -455,7 +455,8 @@ func handleBan(args []string) {
 	if resp.StatusCode == http.StatusOK {
 		fmt.Printf("✓ Successfully banned %s for %s (%s)\n", ip, *duration, *reason)
 	} else {
-		fmt.Fprintf(os.Stderr, "❌ Ban failed with status %d\n", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "❌ Ban failed with status %d: %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
 		os.Exit(1)
 	}
 }

@@ -1021,6 +1021,17 @@ func TestAPIServer_AuthToken_Enforcement(t *testing.T) {
 	if recQueryAuth.Code != http.StatusOK {
 		t.Errorf("expected 200 OK with query token, got %d", recQueryAuth.Code)
 	}
+
+	// 6. OPTIONS preflight request without auth token should return 204 No Content with CORS headers
+	reqOptions := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	recOptions := httptest.NewRecorder()
+	api.srv.Handler.ServeHTTP(recOptions, reqOptions)
+	if recOptions.Code != http.StatusNoContent {
+		t.Errorf("expected 204 No Content from OPTIONS preflight, got %d", recOptions.Code)
+	}
+	if recOptions.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected Access-Control-Allow-Origin: *, got %q", recOptions.Header().Get("Access-Control-Allow-Origin"))
+	}
 }
 
 // ── Round 3 Bug #3: Pipeline.Handle must recover from panics gracefully ──
@@ -1391,6 +1402,12 @@ func TestPipeline_IPFilter_IPv6AndCIDR(t *testing.T) {
 	if !matchIP(net.ParseIP("10.0.0.1"), "10.0.0.1") {
 		t.Errorf("expected exact IP match for 10.0.0.1")
 	}
+	if !matchIP(net.ParseIP("2001:db8::cafe"), "[2001:db8::]/32") {
+		t.Errorf("expected matchIP to match bracketed CIDR [2001:db8::]/32")
+	}
+	if !matchIP(net.ParseIP("2001:db8::cafe"), "[2001:db8::cafe]") {
+		t.Errorf("expected matchIP to match bracketed IP [2001:db8::cafe]")
+	}
 }
 
 func TestCore_IPFilter_BoundaryCases(t *testing.T) {
@@ -1580,6 +1597,276 @@ func TestFailureTracker_ZeroWindow(t *testing.T) {
 	}
 }
 
+func TestUDPSession_SetOnClose_Concurrent(t *testing.T) {
+	c, cleanup := udpTestConn()
+	defer cleanup()
 
+	sess := &UDPSession{
+		ClientAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53},
+		Upstream:   c,
+	}
 
+	var closed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			sess.SetOnClose(func() {
+				closed.Add(1)
+			})
+			if id%2 == 0 {
+				sess.close()
+			}
+		}(i)
+	}
+	wg.Wait()
+	sess.close()
+
+	if closed.Load() > 1 {
+		t.Errorf("expected onClose to be called at most once, got %d", closed.Load())
+	}
+}
+
+func TestDaemon_Reload_PropagatesConfig(t *testing.T) {
+	cfg1 := &config.Config{
+		Global: config.GlobalConfig{
+			LogLevel: "info",
+		},
+	}
+	d, err := NewDaemon(cfg1)
+	if err != nil {
+		t.Fatalf("failed to create daemon: %v", err)
+	}
+	defer d.Stop()
+
+	cfg2 := &config.Config{
+		Global: config.GlobalConfig{
+			LogLevel: "debug",
+		},
+	}
+	if err := d.Reload(cfg2); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+
+	if d.pipeline.cfg != cfg2 {
+		t.Errorf("expected pipeline.cfg to be updated to cfg2, got %v", d.pipeline.cfg)
+	}
+}
+
+func TestPipeline_UpstreamConnectFailure_AppliesResponse(t *testing.T) {
+	cfg := &config.Config{
+		Version: "1.0",
+		Services: map[string]config.ServiceConfig{
+			"test_unreachable": {
+				Name:     "test_unreachable",
+				Protocol: "tcp",
+				Listen:   ":19091",
+				Upstream: "127.0.0.1:59999", // closed/unreachable port
+				Response: config.ResponseConfig{
+					Mode:          "reject",
+					RejectMessage: "Target backend is offline",
+				},
+			},
+		},
+	}
+
+	pipe := NewPipeline(cfg, NewBanList(""), NewFailureTracker(), NewRateLimiter(), NewEventBus(), NewStatsRegistry(), nil, nil)
+
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+
+	svc := cfg.Services["test_unreachable"]
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pipe.Handle(context.Background(), c2, &svc)
+	}()
+
+	buf := make([]byte, 128)
+	n, _ := c1.Read(buf)
+	got := string(buf[:n])
+
+	<-done
+
+	if !strings.Contains(got, "Target backend is offline") {
+		t.Errorf("expected reject message 'Target backend is offline', got %q", got)
+	}
+}
+
+func TestParseClientIP(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		// Plain IPv4
+		{"1.2.3.4", "1.2.3.4"},
+		// IPv4 with port
+		{"1.2.3.4:5678", "1.2.3.4"},
+		// IPv6 bare
+		{"::1", "::1"},
+		// IPv6 with port (bracketed)
+		{"[::1]:9000", "::1"},
+		// IPv4-mapped IPv6 should be normalised to IPv4
+		{"::ffff:192.0.2.1", "192.0.2.1"},
+		// IPv6 with zone ID stripped
+		{"fe80::1%eth0", "fe80::1"},
+		{"[fe80::1%eth0]:80", "fe80::1"},
+		// Extra whitespace
+		{" 10.0.0.1 ", "10.0.0.1"},
+	}
+	for _, tc := range cases {
+		got := parseClientIP(tc.input)
+		if got != tc.want {
+			t.Errorf("parseClientIP(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestMatchIP(t *testing.T) {
+	cases := []struct {
+		ipStr   string
+		pattern string
+		want    bool
+	}{
+		// Exact IPv4 match
+		{"192.168.1.1", "192.168.1.1", true},
+		{"192.168.1.2", "192.168.1.1", false},
+		// CIDR IPv4 match
+		{"10.0.0.5", "10.0.0.0/24", true},
+		{"10.0.1.1", "10.0.0.0/24", false},
+		// IPv6 exact
+		{"::1", "::1", true},
+		{"::2", "::1", false},
+		// IPv6 CIDR
+		{"2001:db8::1", "2001:db8::/32", true},
+		{"2001:db9::1", "2001:db8::/32", false},
+		// IPv4-mapped IPv6 vs IPv4 CIDR
+		{"::ffff:192.168.1.5", "192.168.1.0/24", true},
+		// Invalid pattern returns false (not a panic)
+		{"1.2.3.4", "not-an-ip-or-cidr", false},
+		// Pattern with brackets (e.g. from config copy-paste)
+		{"192.168.1.1", "[192.168.1.1]", true},
+	}
+	for _, tc := range cases {
+		ip := net.ParseIP(tc.ipStr)
+		if ip == nil {
+			// Normalise IPv4-mapped
+			if v4 := net.ParseIP(tc.ipStr).To4(); v4 != nil {
+				ip = v4
+			}
+		}
+		if ip == nil {
+			t.Fatalf("test setup: cannot parse IP %q", tc.ipStr)
+		}
+		got := matchIP(ip, tc.pattern)
+		if got != tc.want {
+			t.Errorf("matchIP(%q, %q) = %v, want %v", tc.ipStr, tc.pattern, got, tc.want)
+		}
+	}
+}
+
+func TestIsCountryBlocked(t *testing.T) {
+	cfg := &config.Config{
+		Version: "1.0",
+		Global:  config.GlobalConfig{},
+		Services: map[string]config.ServiceConfig{
+			"svc": {Name: "svc", Protocol: "tcp"},
+		},
+	}
+	pipe := NewPipeline(cfg, NewBanList(""), NewFailureTracker(), NewRateLimiter(), NewEventBus(), NewStatsRegistry(), nil, nil)
+
+	svc := cfg.Services["svc"]
+
+	// 1. Empty country code → never blocked
+	if pipe.isCountryBlocked("", &svc) {
+		t.Error("empty country code should not be blocked")
+	}
+	// 2. LAN → never blocked
+	if pipe.isCountryBlocked("LAN", &svc) {
+		t.Error("LAN should not be blocked")
+	}
+
+	// 3. Service-level DenyCountries
+	svcWithDeny := config.ServiceConfig{
+		Name:     "deny-svc",
+		Protocol: "tcp",
+		GeoBlock: config.GeoBlockConfig{
+			DenyCountries: []string{"RU", "CN"},
+		},
+	}
+	if !pipe.isCountryBlocked("RU", &svcWithDeny) {
+		t.Error("RU should be blocked via service DenyCountries")
+	}
+	if pipe.isCountryBlocked("US", &svcWithDeny) {
+		t.Error("US should not be blocked when only RU,CN denied")
+	}
+
+	// 4. Service-level AllowCountries (allowlist mode)
+	svcWithAllow := config.ServiceConfig{
+		Name:     "allow-svc",
+		Protocol: "tcp",
+		GeoBlock: config.GeoBlockConfig{
+			AllowCountries: []string{"US", "GB"},
+		},
+	}
+	if pipe.isCountryBlocked("US", &svcWithAllow) {
+		t.Error("US should be allowed via service AllowCountries")
+	}
+	if !pipe.isCountryBlocked("DE", &svcWithAllow) {
+		t.Error("DE should be blocked when allowlist is US,GB")
+	}
+
+	// 5. Case insensitivity
+	if !pipe.isCountryBlocked("ru", &svcWithDeny) {
+		t.Error("lowercase 'ru' should match blocked 'RU'")
+	}
+}
+
+func TestIsIPDenied(t *testing.T) {
+	cfg := &config.Config{
+		Version: "1.0",
+		Global: config.GlobalConfig{
+			IPFilter: config.IPFilterConfig{
+				Deny: []string{"203.0.113.0/24"},
+			},
+		},
+		Services: map[string]config.ServiceConfig{
+			"svc": {Name: "svc", Protocol: "tcp"},
+		},
+	}
+	pipe := NewPipeline(cfg, NewBanList(""), NewFailureTracker(), NewRateLimiter(), NewEventBus(), NewStatsRegistry(), nil, nil)
+	svc := cfg.Services["svc"]
+
+	// Global deny should apply
+	if !pipe.isIPDenied("203.0.113.5", &svc) {
+		t.Error("expected 203.0.113.5 to be denied by global denylist")
+	}
+	// IPs outside global deny should be allowed
+	if pipe.isIPDenied("8.8.8.8", &svc) {
+		t.Error("expected 8.8.8.8 to be allowed")
+	}
+
+	// Service-level allowlist overrides global deny
+	svcWithAllow := config.ServiceConfig{
+		Name:     "allow-svc",
+		Protocol: "tcp",
+		IPFilter: config.IPFilterConfig{
+			Allow: []string{"203.0.113.5"},
+		},
+	}
+	if pipe.isIPDenied("203.0.113.5", &svcWithAllow) {
+		t.Error("expected 203.0.113.5 to be allowed by service-level allowlist")
+	}
+	// Non-allowed IP should be denied when service has an allowlist
+	if !pipe.isIPDenied("1.2.3.4", &svcWithAllow) {
+		t.Error("expected 1.2.3.4 to be denied because it's not in service allowlist")
+	}
+
+	// Invalid IP always denied
+	if !pipe.isIPDenied("not-an-ip", &svc) {
+		t.Error("expected invalid IP to be denied")
+	}
+}
 

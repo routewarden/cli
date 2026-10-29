@@ -30,28 +30,40 @@
     },
     "blockPatterns": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Custom regular expressions for paths to block."
     },
     "allowPatterns": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Whitelisted regular expressions that take precedence over block patterns."
     },
     "allowedIps": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "List of client IP addresses or CIDR blocks exempted from all security rules."
     },
     "trustedProxies": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "List of trusted upstream reverse proxies or CIDRs whose X-Forwarded-For headers are honoured."
     },
     "methods": {
       "type": "array",
-      "items": { "type": "string" },
-      "default": ["GET"],
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "GET"
+      ],
       "description": "HTTP request methods to inspect (e.g. GET, POST, HEAD, PUT, DELETE)."
     },
     "checkQuery": {
@@ -61,7 +73,9 @@
     },
     "checkHeaders": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Optional list of HTTP request headers to inspect for path smuggling (e.g. X-Forwarded-Uri, X-Rewrite-URL, X-Original-URL)."
     },
     "checkBody": {
@@ -77,7 +91,9 @@
     },
     "checkBodyPatterns": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Optional list of regular expression patterns to match specifically against request body payloads."
     },
     "statusCode": {
@@ -122,6 +138,18 @@
     },
     "response": {
       "$ref": "#/$defs/ResponseConfig"
+    },
+    "allowedASNs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(AS|as)?[0-9]+$"
+      },
+      "description": "ASNs whose client addresses bypass HTTP inspection; requires asnDB."
+    },
+    "asnDB": {
+      "type": "string",
+      "description": "Path to local JSON ASN-to-CIDR routing snapshot."
     }
   },
   "$defs": {
@@ -164,7 +192,9 @@
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Custom key-value HTTP headers sent with the blocked response."
         },
         "redirectUrl": {
@@ -215,7 +245,12 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["turnstile", "hcaptcha", "recaptcha", "custom"],
+          "enum": [
+            "turnstile",
+            "hcaptcha",
+            "recaptcha",
+            "custom"
+          ],
           "default": "turnstile",
           "description": "Captcha challenge provider."
         },

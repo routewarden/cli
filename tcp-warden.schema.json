@@ -19,6 +19,8 @@
         "log_level": { "type": "string", "enum": ["debug", "info", "warn", "error", "off"], "default": "warn" },
         "log_file": { "type": "string" },
         "geoip_db": { "type": "string" },
+        "asn_db": { "type": "string", "description": "Path to local JSON ASN-to-CIDR routing snapshot" },
+        "allowed_asns": { "type": "array", "items": { "type": "string" }, "description": "Global list of allowed Autonomous System Numbers (e.g. ['64500', 'AS64501'])" },
         "ip_filter": {
           "type": "object",
           "properties": {
@@ -93,6 +95,7 @@
         "required": ["listen", "upstream"],
         "properties": {
           "enabled": { "type": "boolean", "default": true },
+          "allowed_asns": { "type": "array", "items": { "type": "string" }, "description": "Per-service list of allowed Autonomous System Numbers; replaces global allowed_asns when non-empty" },
           "listen": { "type": "string", "description": "Listen address and port, e.g. ':8080', '127.0.0.1:8080', or port range ':8000-8005'" },
           "upstream": { "type": "string", "description": "Upstream target address and port, e.g. '127.0.0.1:8080', 1:1 range '10.0.0.1:8000-8005', or single port for many-to-one" },
           "protocol": { "type": "string" },

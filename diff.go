@@ -144,6 +144,15 @@ func printDiffTextReport(diff *engine.PolicyDiff) {
 	}
 
 	// Allowed IPs
+	if len(diff.AllowedASNs.Added) > 0 || len(diff.AllowedASNs.Removed) > 0 {
+		fmt.Println("\nAllowed ASNs:")
+		for _, asn := range diff.AllowedASNs.Removed {
+			fmt.Printf("  - %s\n", asn)
+		}
+		for _, asn := range diff.AllowedASNs.Added {
+			fmt.Printf("  + %s\n", asn)
+		}
+	}
 	if len(diff.AllowedIPs.Added) > 0 || len(diff.AllowedIPs.Removed) > 0 {
 		fmt.Println("\nAllowed IPs / CIDRs:")
 		for _, ip := range diff.AllowedIPs.Removed {

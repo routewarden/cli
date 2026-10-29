@@ -368,6 +368,11 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 }
 
 func isValidIPOrCIDR(v string) bool {
+	v = strings.TrimSpace(v)
+	v = strings.Trim(v, "[]")
+	if idx := strings.IndexByte(v, '%'); idx != -1 {
+		v = v[:idx]
+	}
 	if _, _, err := net.ParseCIDR(v); err == nil {
 		return true
 	}
@@ -505,7 +510,7 @@ func (r *AuditReport) ToSARIF() ([]byte, error) {
 				Tool: sarifTool{
 					Driver: sarifDriver{
 						Name:           "RouteWarden Security Linter",
-						Version:        "5.3.3", // tool version
+						Version:        "5.4.0", // tool version
 						InformationURI: "https://routewarden.github.io",
 						Rules:          rules,
 					},

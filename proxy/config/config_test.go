@@ -170,6 +170,56 @@ services:
 `,
 			wantErr: "invalid allowed IP/CIDR",
 		},
+		{
+			name: "invalid service deny CIDR",
+			yaml: `
+services:
+  svc1:
+    listen: ":2222"
+    upstream: "127.0.0.1:22"
+    ip_filter:
+      deny: ["999.999.999.999/24"]
+`,
+			wantErr: "invalid denied IP/CIDR",
+		},
+		{
+			name: "invalid global allow CIDR",
+			yaml: `
+global:
+  ip_filter:
+    allow: ["192.168.1.1/33"]
+services:
+  svc1:
+    listen: ":2222"
+    upstream: "127.0.0.1:22"
+`,
+			wantErr: "global: invalid allowed IP/CIDR",
+		},
+		{
+			name: "invalid global deny CIDR",
+			yaml: `
+global:
+  ip_filter:
+    deny: ["bad-cidr"]
+services:
+  svc1:
+    listen: ":2222"
+    upstream: "127.0.0.1:22"
+`,
+			wantErr: "global: invalid denied IP/CIDR",
+		},
+		{
+			name: "unsupported response mode",
+			yaml: `
+services:
+  svc1:
+    listen: ":2222"
+    upstream: "127.0.0.1:22"
+    response:
+      mode: "destroy"
+`,
+			wantErr: "unsupported response mode",
+		},
 	}
 
 	for _, tt := range tests {
@@ -798,7 +848,11 @@ func TestIsValidIPOrCIDR_ZoneIndex(t *testing.T) {
 		"2001:db8::1",
 		"fe80::1%eth0",
 		"fe80::1%1",
+		"[2001:db8::1]",
+		"[fe80::1%eth0]",
 		"2001:db8::/32",
+		"[2001:db8::]/32",
+		"[2001:db8::1]/64",
 	}
 	for _, s := range valid {
 		if !isValidIPOrCIDR(s) {

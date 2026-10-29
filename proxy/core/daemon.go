@@ -38,6 +38,16 @@ type Daemon struct {
 
 // NewDaemon initializes a Daemon instance from configuration.
 func NewDaemon(cfg *config.Config) (*Daemon, error) {
+	allowedASNs := append([]string(nil), cfg.Global.AllowedASNs...)
+	for _, svc := range cfg.Services {
+		if svc.IsEnabled() {
+			allowedASNs = append(allowedASNs, svc.AllowedASNs...)
+		}
+	}
+	asn, err := NewASNFilter(allowedASNs, cfg.Global.ASNDB)
+	if err != nil {
+		return nil, fmt.Errorf("ASN allowlist: %w", err)
+	}
 	// Wire operational logger immediately so all init steps below can use it.
 	oplog := NewLogger(ParseLevel(cfg.Global.LogLevel), nil)
 	SetDefaultLogger(oplog)
@@ -153,6 +163,7 @@ func NewDaemon(cfg *config.Config) (*Daemon, error) {
 	}
 
 	pipe := NewPipeline(cfg, bl, ft, rl, bus, stats, logger, cs)
+	pipe.asn = asn
 
 	var apiSrv *APIServer
 	if cfg.API.Enabled {
@@ -367,6 +378,11 @@ func (d *Daemon) Reload(newCfg *config.Config) error {
 	if d.logger != nil {
 		d.logger.SetLevel(lvl)
 	}
+	if d.pipeline != nil {
+		d.pipeline.cfg = newCfg
+	}
+	if d.apiServer != nil {
+		d.apiServer.cfg = newCfg
+	}
 	return nil
 }
-

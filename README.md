@@ -80,7 +80,7 @@ Verify installation:
 
 ```bash
 rwarden version
-# rwarden version 5.3.3
+# rwarden version 5.4.0
 ```
 
 ---
@@ -794,7 +794,7 @@ docker run --rm ghcr.io/routewarden/cli:latest version
 
 **Example Output:**
 ```text
-rwarden version 5.3.3
+rwarden version 5.4.0
 ```
 
 ---
@@ -846,3 +846,7 @@ docker run -d --name tcp-warden \
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+
+## ASN allowlisting
+
+See [ASN allowlisting](ASN_ALLOWLIST.md) for configuration, routing snapshot generation, and security behavior.

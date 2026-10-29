@@ -541,4 +541,39 @@ func TestUDPSessionTable_ConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestUDPSessionTable_ClosedSessionReplaced(t *testing.T) {
+	table := NewUDPSessionTable(5 * time.Second)
+	defer table.Close()
+
+	key := "192.0.2.1:5000"
+	addr := &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 5000}
+
+	s1, isNew1, err1 := table.GetOrCreate(key, func() (*UDPSession, error) {
+		return &UDPSession{ClientAddr: addr}, nil
+	})
+	if err1 != nil || !isNew1 || s1 == nil {
+		t.Fatalf("failed creating initial session: %v", err1)
+	}
+
+	// Manually close s1 as if reaped or deleted
+	s1.close()
+	if !s1.isClosed() {
+		t.Fatal("expected s1.isClosed() to be true")
+	}
+
+	// GetOrCreate should detect closed session and return a fresh new session
+	s2, _, err2 := table.GetOrCreate(key, func() (*UDPSession, error) {
+		return &UDPSession{ClientAddr: addr}, nil
+	})
+	if err2 != nil {
+		t.Fatalf("unexpected error: %v", err2)
+	}
+	if s2 == s1 {
+		t.Fatal("GetOrCreate returned dead/closed session s1 instead of creating new session")
+	}
+	if s2.isClosed() {
+		t.Fatal("expected new session s2 to not be closed")
+	}
+}
+
 

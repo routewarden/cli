@@ -170,3 +170,69 @@ func TestCrowdSecClient_IPv6ZoneStripping(t *testing.T) {
 	}
 }
 
+func TestCrowdSecClient_BracketedIPv6CIDR_AndDeletion(t *testing.T) {
+	mockNew := StreamResponse{
+		New: []DecisionItem{
+			{
+				ID:       1,
+				Origin:   "cscli",
+				Scenario: "manual_ban",
+				Scope:    "Range",
+				Type:     "ban",
+				Value:    "[2001:db8::]/64",
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(mockNew)
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) *http.Response {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(bodyBytes)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}
+		}),
+	}
+	client := NewClient(Config{
+		LAPIURL:    "http://mock-crowdsec",
+		HTTPClient: httpClient,
+	})
+	if err := client.sync(true); err != nil {
+		t.Fatalf("sync error: %v", err)
+	}
+
+	// 1. Should match IPv6 in bracketed CIDR
+	dec, ok := client.Check("2001:db8::1234")
+	if !ok {
+		t.Fatalf("expected decision for 2001:db8::1234 in [2001:db8::]/64")
+	}
+	if dec.Action != "ban" {
+		t.Errorf("expected ban action, got %q", dec.Action)
+	}
+
+	// 2. Test deletion with canonicalized CIDR
+	mockDel := StreamResponse{
+		Deleted: []DecisionItem{
+			{
+				Scope: "Range",
+				Value: "2001:0db8::/64", // expanded zeros
+			},
+		},
+	}
+	delBytes, _ := json.Marshal(mockDel)
+	httpClient.Transport = roundTripFunc(func(req *http.Request) *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(delBytes)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}
+	})
+	if err := client.sync(false); err != nil {
+		t.Fatalf("sync error on deletion: %v", err)
+	}
+
+	_, okAfterDel := client.Check("2001:db8::1234")
+	if okAfterDel {
+		t.Errorf("expected 2001:db8::1234 to be unbanned after deletion")
+	}
+}
