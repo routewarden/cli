@@ -122,7 +122,9 @@
         "rateLimitChallenge",
         "proxy",
         "infiniteStream",
-        "xml"
+        "xml",
+        "aiPoison",
+        "markovTarpit"
       ],
       "description": "Shorthand alias for response.mode action."
     },
@@ -201,7 +203,9 @@
             "rateLimitChallenge",
             "proxy",
             "infiniteStream",
-            "xml"
+            "xml",
+            "aiPoison",
+            "markovTarpit"
           ],
           "description": "Response action when a request is blocked."
         },

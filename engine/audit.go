@@ -313,6 +313,13 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		"infinite_stream":      true,
 		"garbagestream":        true,
 		"xml":                  true,
+		"aipoison":             true,
+		"ai_poison":            true,
+		"poison":               true,
+		"markovtarpit":         true,
+		"markov_tarpit":        true,
+		"markov":               true,
+		"tokenbleed":           true,
 		"custom":               true,
 		"default":              true,
 	}
@@ -327,7 +334,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 			Title:       "Unrecognized Response Mode",
 			Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", modeToCheck),
 			Field:       "mode",
-			Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', or 'xml'.",
+			Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', 'xml', 'aiPoison', or 'markovTarpit'.",
 		})
 	}
 

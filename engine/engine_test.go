@@ -249,6 +249,8 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			{mode: "infiniteStream"},
 			{mode: "garbagestream"},
 			{mode: "xml"},
+			{mode: "aiPoison"},
+			{mode: "markovTarpit"},
 		}
 
 		for _, vm := range validModes {
@@ -281,6 +283,9 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			{mode: "bomb", expectedStatus: 200},
 			{mode: "fakeSuccess", expectedStatus: 200},
 			{mode: "decoy", expectedStatus: 200},
+			{mode: "aiPoison", expectedStatus: 200},
+			{mode: "poison", expectedStatus: 200},
+			{mode: "markovTarpit", expectedStatus: 200},
 			{mode: "rateLimitChallenge", expectedStatus: 429},
 			{mode: "rateLimit", expectedStatus: 429},
 			{mode: "backoff", expectedStatus: 429},

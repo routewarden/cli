@@ -81,6 +81,7 @@ type Config struct {
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
 	AllowedASNs                []string        `json:"allowedASNs,omitempty"`
+	BlockedASNs                []string        `json:"blockedASNs,omitempty"`
 	ASNDB                      string          `json:"asnDB,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
 	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
@@ -252,6 +253,8 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		AllowPatternsSnake              []string        `json:"allow_patterns"`
 		AllowedASNs                     []string        `json:"allowedASNs"`
 		AllowedASNsSnake                []string        `json:"allowed_asns"`
+		BlockedASNs                     []string        `json:"blockedASNs"`
+		BlockedASNsSnake                []string        `json:"blocked_asns"`
 		ASNDB                           string          `json:"asnDB"`
 		ASNDBSnake                      string          `json:"asn_db"`
 		AllowedIPs                      []string        `json:"allowedIps"`
@@ -345,6 +348,10 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	cfg.AllowedASNs = raw.AllowedASNs
 	if raw.AllowedASNsSnake != nil {
 		cfg.AllowedASNs = raw.AllowedASNsSnake
+	}
+	cfg.BlockedASNs = raw.BlockedASNs
+	if raw.BlockedASNsSnake != nil {
+		cfg.BlockedASNs = raw.BlockedASNsSnake
 	}
 	cfg.ASNDB = raw.ASNDB
 	if raw.ASNDBSnake != "" {
@@ -621,6 +628,9 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		if cfg.AllowedASNs != nil {
 			fileCfg.AllowedASNs = cfg.AllowedASNs
 		}
+		if cfg.BlockedASNs != nil {
+			fileCfg.BlockedASNs = cfg.BlockedASNs
+		}
 		if cfg.ASNDB != "" {
 			fileCfg.ASNDB = cfg.ASNDB
 		}
@@ -792,7 +802,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		compiledBody = append(compiledBody, re)
 	}
 
-	asn, err := NewASNFilter(cfg.AllowedASNs, cfg.ASNDB)
+	asn, err := NewASNFilterEx(cfg.AllowedASNs, cfg.BlockedASNs, cfg.ASNDB)
 	if err != nil {
 		return nil, err
 	}
@@ -869,6 +879,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 				"redirect": {}, "silentdrop": {}, "drop": {}, "gzipbomb": {},
 				"tarpit": {}, "fakesuccess": {}, "ratelimit": {}, "ratelimitchallenge": {},
 				"proxy": {}, "infinitestream": {}, "garbagestream": {}, "xml": {},
+				"aipoison": {}, "poison": {}, "markovtarpit": {}, "markov": {}, "tokenbleed": {},
 			}
 			if _, ok := validModes[strings.ToLower(cfg.Response.Mode)]; !ok {
 				return nil, fmt.Errorf("unsupported response.mode %q", cfg.Response.Mode)
@@ -1060,6 +1071,13 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	if e.ASN.IsAllowed(asnIP) {
 		result.Allowed = true
 		result.Reason = "asn_whitelisted"
+		return result
+	}
+	if blocked, blockedASN := e.ASN.IsBlocked(asnIP); blocked {
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = "asn_blocked"
+		result.MatchedPattern = fmt.Sprintf("AS%d", blockedASN)
 		return result
 	}
 
@@ -1291,6 +1309,10 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 			status = 200
 		case "fakesuccess", "decoy":
 			status = 200
+		case "aipoison", "ai_poison", "poison":
+			status = 200
+		case "markovtarpit", "markov_tarpit", "markov", "tokenbleed":
+			status = 200
 		case "ratelimit", "ratelimitchallenge", "backoff":
 			status = 429
 		case "redirect":
@@ -1348,6 +1370,16 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			b.WriteString("          allowedASNs:\n")
 		}
 		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "            - %q\n", asn)
+		}
+	}
+	if cfg.BlockedASNs != nil {
+		if len(cfg.BlockedASNs) == 0 {
+			b.WriteString("          blockedASNs: []\n")
+		} else {
+			b.WriteString("          blockedASNs:\n")
+		}
+		for _, asn := range cfg.BlockedASNs {
 			fmt.Fprintf(&b, "            - %q\n", asn)
 		}
 	}
@@ -1501,6 +1533,16 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	if cfg.AllowedASNs != nil {
 		b.WriteString("  allowedASNs = [")
 		for i, asn := range cfg.AllowedASNs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", asn)
+		}
+		b.WriteString("]\n")
+	}
+	if cfg.BlockedASNs != nil {
+		b.WriteString("  blockedASNs = [")
+		for i, asn := range cfg.BlockedASNs {
 			if i > 0 {
 				b.WriteString(", ")
 			}
@@ -1666,6 +1708,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.AllowedASNs != nil {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.allowedASNs="+strings.Join(cfg.AllowedASNs, ","))
 	}
+	if cfg.BlockedASNs != nil {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockedASNs="+strings.Join(cfg.BlockedASNs, ","))
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.asnDB="+cfg.ASNDB)
 	}
@@ -1808,6 +1853,9 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.AllowedASNs != nil {
 		fmt.Fprintf(&b, "    allowed_asns %s\n", strings.Join(cfg.AllowedASNs, " "))
 	}
+	if cfg.BlockedASNs != nil {
+		fmt.Fprintf(&b, "    blocked_asns %s\n", strings.Join(cfg.BlockedASNs, " "))
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db %q\n", cfg.ASNDB)
 	}
@@ -1924,6 +1972,13 @@ func (cfg *Config) GenerateNginxLua() string {
 	if cfg.AllowedASNs != nil {
 		b.WriteString("    allowed_asns = { ")
 		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "%q, ", asn)
+		}
+		b.WriteString("},\n")
+	}
+	if cfg.BlockedASNs != nil {
+		b.WriteString("    blocked_asns = { ")
+		for _, asn := range cfg.BlockedASNs {
 			fmt.Fprintf(&b, "%q, ", asn)
 		}
 		b.WriteString("},\n")
@@ -2068,6 +2123,16 @@ func (cfg *Config) GenerateTCPWardenYAML() string {
 			b.WriteString("  allowed_asns:\n")
 		}
 		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "    - %q\n", asn)
+		}
+	}
+	if cfg.BlockedASNs != nil {
+		if len(cfg.BlockedASNs) == 0 {
+			b.WriteString("  blocked_asns: []\n")
+		} else {
+			b.WriteString("  blocked_asns:\n")
+		}
+		for _, asn := range cfg.BlockedASNs {
 			fmt.Fprintf(&b, "    - %q\n", asn)
 		}
 	}
