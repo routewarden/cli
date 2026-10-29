@@ -222,7 +222,7 @@ func (d *Daemon) handleUDPPacket(
 	if isNew {
 		// Wire the stats callback now that this session has won the race and
 		// is officially owned. ConnAccepted() is called immediately after.
-		session.onClose = func() { st.ConnClosed() }
+		session.SetOnClose(func() { st.ConnClosed() })
 		st.ConnAccepted()
 
 		readBufSize := defaultUDPReadBufSize
@@ -284,6 +284,9 @@ func (d *Daemon) forwardUDPReplies(
 ) {
 	buf := make([]byte, bufSize)
 	clientIP := session.ClientAddr.IP.String()
+	if v4 := session.ClientAddr.IP.To4(); v4 != nil {
+		clientIP = v4.String()
+	}
 	geo := geoip.LookupIP(clientIP)
 
 	defer func() {

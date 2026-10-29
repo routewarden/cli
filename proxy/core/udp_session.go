@@ -25,6 +25,7 @@ type UDPSession struct {
 	lastSeen  time.Time
 	mu        sync.Mutex
 	closeOnce sync.Once
+	closed    bool
 	onClose   func()
 }
 
@@ -42,17 +43,35 @@ func (s *UDPSession) isIdle(timeout time.Duration) bool {
 	return time.Since(s.lastSeen) > timeout
 }
 
+// isClosed reports whether close() has already been invoked on this session.
+func (s *UDPSession) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// SetOnClose registers a callback invoked when the session is closed.
+func (s *UDPSession) SetOnClose(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onClose = fn
+}
+
 // close releases upstream resources and notifies any attached inspector and callback.
 func (s *UDPSession) close() {
 	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		fn := s.onClose
+		s.mu.Unlock()
 		if s.Upstream != nil {
 			_ = s.Upstream.Close()
 		}
 		if s.Inspector != nil {
 			_ = s.Inspector.Close()
 		}
-		if s.onClose != nil {
-			s.onClose()
+		if fn != nil {
+			fn()
 		}
 	})
 }
@@ -88,8 +107,10 @@ func (t *UDPSessionTable) GetOrCreate(
 ) (session *UDPSession, isNew bool, err error) {
 	if v, ok := t.sessions.Load(key); ok {
 		s := v.(*UDPSession)
-		s.Touch()
-		return s, false, nil
+		if !s.isClosed() {
+			s.Touch()
+			return s, false, nil
+		}
 	}
 
 	s, err := create()
@@ -101,11 +122,16 @@ func (t *UDPSessionTable) GetOrCreate(
 	// Use LoadOrStore to handle the race where two goroutines create a session
 	// for the same key simultaneously — only one wins.
 	if actual, loaded := t.sessions.LoadOrStore(key, s); loaded {
-		// Our session lost the race; close ours and reuse the winner's.
-		s.close()
 		winner := actual.(*UDPSession)
-		winner.Touch()
-		return winner, false, nil
+		if !winner.isClosed() {
+			// Our session lost the race; close ours and reuse the winner's.
+			s.close()
+			winner.Touch()
+			return winner, false, nil
+		}
+		// The winner was closed concurrently; overwrite it with our active session.
+		t.sessions.Store(key, s)
+		return s, true, nil
 	}
 	return s, true, nil
 }

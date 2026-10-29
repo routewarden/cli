@@ -1537,3 +1537,195 @@ func TestGzipBombMB_FloatingValues(t *testing.T) {
 		t.Errorf("expected 'gzip_bomb_mb = 0.5,' in Nginx Lua, got:\n%s", nginxLua)
 	}
 }
+
+func TestEngine_MatrixParam_NoAllowlistBypass(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.EnableDefaultAllowPatterns = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	attackPaths := []string{
+		"/.env;robots.txt",
+		"/.env;sitemap.xml",
+		"/backup.sql;robots.txt",
+		"/.git/config;robots.txt",
+	}
+
+	for _, attack := range attackPaths {
+		res := eng.Evaluate("GET", attack, "", nil)
+		if res.Blocked == false {
+			t.Errorf("expected path %q to be blocked, but was not blocked (allowed: %v, reason: %s)",
+				attack, res.Allowed, res.Reason)
+		}
+	}
+}
+
+func TestEngine_URIFragmentAnchorBypassPrevented(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	attackPaths := []string{
+		"/server-status#admin",
+		"/server-status#section",
+		"/server.key#frag",
+		"/.env#local",
+		"/phpinfo.php#info",
+	}
+
+	for _, attack := range attackPaths {
+		res := eng.Evaluate("GET", attack, "", nil)
+		if res.Blocked == false {
+			t.Errorf("expected path %q with fragment to be blocked, got blocked=%v, reason=%s",
+				attack, res.Blocked, res.Reason)
+		}
+	}
+}
+
+func TestEngine_WildcardMethods(t *testing.T) {
+	cfgStar := engine.CreateConfig()
+	cfgStar.Methods = []string{"*"}
+	cfgStar.EnableDefaultPatterns = true
+
+	engStar, err := engine.NewEngine(cfgStar)
+	if err != nil {
+		t.Fatalf("failed to create engine with *: %v", err)
+	}
+	resStarPOST := engStar.Evaluate("POST", "/.env", "", nil)
+	if !resStarPOST.Blocked {
+		t.Errorf("expected POST /.env to be blocked with wildcard *, got bypassed: %v", resStarPOST.Bypassed)
+	}
+	resStarDELETE := engStar.Evaluate("DELETE", "/.env", "", nil)
+	if !resStarDELETE.Blocked {
+		t.Errorf("expected DELETE /.env to be blocked with wildcard *, got bypassed: %v", resStarDELETE.Bypassed)
+	}
+
+	cfgAll := engine.CreateConfig()
+	cfgAll.Methods = []string{"ALL"}
+	cfgAll.EnableDefaultPatterns = true
+
+	engAll, err := engine.NewEngine(cfgAll)
+	if err != nil {
+		t.Fatalf("failed to create engine with ALL: %v", err)
+	}
+	resAllPOST := engAll.Evaluate("POST", "/.env", "", nil)
+	if !resAllPOST.Blocked {
+		t.Errorf("expected POST /.env to be blocked with wildcard ALL, got bypassed: %v", resAllPOST.Bypassed)
+	}
+}
+
+func TestEngine_CheckBody_AutoExpandsMethods(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.CheckBody = true
+	cfg.CheckBodyPatterns = []string{"(?i)password_leak"}
+	cfg.EnableDefaultPatterns = false
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	res := eng.EvaluateWithBody("POST", "/api/login", "", nil, "", "user=admin&token=password_leak_123")
+	if !res.Blocked {
+		t.Errorf("expected POST with body violation to be blocked when methods is omitted, got: blocked=%v, bypassed=%v, reason=%s",
+			res.Blocked, res.Bypassed, res.Reason)
+	}
+}
+
+func TestEngine_CheckQuery_Keys(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.CheckQuery = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	// Sensitive endpoint in query key
+	res := eng.Evaluate("GET", "/", ".env=1", nil)
+	if !res.Blocked {
+		t.Errorf("expected query key .env to be blocked, got blocked=%v, reason=%s", res.Blocked, res.Reason)
+	}
+
+	// Sensitive endpoint in query key with slash
+	res2 := eng.Evaluate("GET", "/", "/server-status=true", nil)
+	if !res2.Blocked {
+		t.Errorf("expected query key /server-status to be blocked, got blocked=%v, reason=%s", res2.Blocked, res2.Reason)
+	}
+}
+
+func TestEngine_CheckHeaders_MultiValue(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.CheckHeaders = []string{"X-Rewrite-URL", "X-Custom-Path"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	headers := map[string]string{
+		"X-Custom-Path": "/safe/path, /.env",
+	}
+	res := eng.Evaluate("GET", "/index.html", "", headers)
+	if !res.Blocked {
+		t.Errorf("expected comma-separated header containing /.env to be blocked, got blocked=%v, reason=%s", res.Blocked, res.Reason)
+	}
+}
+
+func TestEngine_CheckQuery_MalformedPercentEncoding(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.CheckQuery = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	res := eng.Evaluate("GET", "/search", "target=/.env&broken=%zz", nil)
+	if !res.Blocked {
+		t.Errorf("expected query with target=/.env&broken=%%zz to be blocked, got blocked=%v, reason=%s", res.Blocked, res.Reason)
+	}
+}
+
+func TestEngine_BracketedIPv6CIDR_AllowedIPs(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = true
+	cfg.AllowedIPs = []string{"[2001:db8::]/32", "[2001:db9::cafe]"}
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine with bracketed IPv6 CIDR: %v", err)
+	}
+
+	headers := map[string]string{}
+	// Allowed via bracketed CIDR
+	res1 := eng.EvaluateWithClientIP("GET", "/.env", "", headers, "2001:db8::1")
+	if res1.Blocked {
+		t.Errorf("expected 2001:db8::1 to be allowed by [2001:db8::]/32, got blocked=%v", res1.Blocked)
+	}
+
+	// Allowed via bracketed exact IP
+	res2 := eng.EvaluateWithClientIP("GET", "/.env", "", headers, "2001:db9::cafe")
+	if res2.Blocked {
+		t.Errorf("expected 2001:db9::cafe to be allowed by [2001:db9::cafe], got blocked=%v", res2.Blocked)
+	}
+
+	// Not allowed -> should block sensitive file /.env
+	res3 := eng.EvaluateWithClientIP("GET", "/.env", "", headers, "2001:dba::1")
+	if !res3.Blocked {
+		t.Errorf("expected 2001:dba::1 accessing /.env to be blocked")
+	}
+}
+
+

@@ -143,6 +143,7 @@ func cleanIPString(ipStr string) string {
 	if host, _, err := net.SplitHostPort(ipStr); err == nil {
 		ipStr = host
 	}
+	ipStr = strings.Trim(ipStr, "[]")
 	if idx := strings.IndexByte(ipStr, '%'); idx != -1 {
 		ipStr = ipStr[:idx]
 	}

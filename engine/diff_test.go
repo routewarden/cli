@@ -109,3 +109,37 @@ func TestDiffConfigs_BodyPatternsAndResponse(t *testing.T) {
 	}
 }
 
+func TestDiffConfigs_NilSafety(t *testing.T) {
+	// Neither base nor candidate should panic when nil
+	diff1 := DiffConfigs(nil, nil, "nil1", "nil2")
+	if diff1 == nil {
+		t.Fatal("expected non-nil PolicyDiff for nil inputs")
+	}
+
+	cfg := CreateConfig()
+	diff2 := DiffConfigs(nil, cfg, "nil", "valid")
+	if diff2 == nil {
+		t.Fatal("expected non-nil PolicyDiff for nil base")
+	}
+
+	diff3 := DiffConfigs(cfg, nil, "valid", "nil")
+	if diff3 == nil {
+		t.Fatal("expected non-nil PolicyDiff for nil candidate")
+	}
+}
+
+func TestDiffConfigs_DeduplicateSlices(t *testing.T) {
+	base := CreateConfig()
+	base.BlockPatterns = []string{`(?i)\.env`, `(?i)\.env`}
+
+	candidate := CreateConfig()
+	candidate.BlockPatterns = []string{`(?i)\.git`, `(?i)\.git`, `(?i)\.git`}
+
+	diff := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if len(diff.BlockPatterns.Added) != 1 || diff.BlockPatterns.Added[0] != `(?i)\.git` {
+		t.Errorf("expected exactly 1 deduplicated added pattern, got %+v", diff.BlockPatterns.Added)
+	}
+	if len(diff.BlockPatterns.Removed) != 1 || diff.BlockPatterns.Removed[0] != `(?i)\.env` {
+		t.Errorf("expected exactly 1 deduplicated removed pattern, got %+v", diff.BlockPatterns.Removed)
+	}
+}
