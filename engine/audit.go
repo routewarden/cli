@@ -226,6 +226,23 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	checkRegexSyntax(cfg.BlockPatterns, "blockPatterns")
 	checkRegexSyntax(cfg.AllowPatterns, "allowPatterns")
 	checkRegexSyntax(cfg.CheckBodyPatterns, "checkBodyPatterns")
+	checkRegexSyntax(cfg.BlockUserAgents, "blockUserAgents")
+	checkRegexSyntax(cfg.AllowUserAgents, "allowUserAgents")
+
+	// ── Rule RW-A016: AI Bot Profile Validation ─────────────────────────────
+	if cfg.AIBotProfile != "" {
+		p := strings.ToLower(cfg.AIBotProfile)
+		if p != "train_only" && p != "all" && p != "aggressive" && p != "custom" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A016",
+				Severity:    SeverityWarning,
+				Title:       "Unrecognized AI Bot Profile",
+				Message:     fmt.Sprintf("AI bot profile %q is not recognized.", cfg.AIBotProfile),
+				Field:       "aiBotProfile",
+				Remediation: "Use one of: 'train_only' (default), 'all', 'aggressive', or 'custom'.",
+			})
+		}
+	}
 
 	// ── Rule RW-A009: Invalid IP / CIDR Notations ───────────────────────────
 	for _, ipStr := range cfg.AllowedIPs {

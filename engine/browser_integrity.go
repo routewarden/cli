@@ -143,3 +143,4 @@ func DetectScriptClient(ua string, headers map[string]string) (bool, string) {
 
 	return false, ""
 }
+

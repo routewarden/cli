@@ -993,6 +993,11 @@ func handleTest(args []string) {
 	fs.StringVar(configPath, "c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
 	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
+	blockAIBots := fs.Bool("block-ai-bots", false, "Enable AI bot blocking")
+	aiBotProfile := fs.String("ai-bot-profile", "", "AI bot profile (train_only, all, aggressive, custom)")
+	detectBrowser := fs.Bool("detect-browser-impersonation", false, "Enable browser impersonation detection")
+	blockScripts := fs.Bool("block-script-clients", false, "Enable script client and headless framework blocking")
+	verifySearch := fs.Bool("verify-search-engine-bots", false, "Enable search engine bot FCrDNS verification")
 
 	var headerList stringSlice
 	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
@@ -1053,6 +1058,21 @@ func handleTest(args []string) {
 			if f.Name == "check-body" {
 				bodyFlagPassed = true
 			}
+			if f.Name == "block-ai-bots" {
+				cfg.BlockAIBots = *blockAIBots
+			}
+			if f.Name == "ai-bot-profile" {
+				cfg.AIBotProfile = *aiBotProfile
+			}
+			if f.Name == "detect-browser-impersonation" {
+				cfg.DetectBrowserImpersonation = *detectBrowser
+			}
+			if f.Name == "block-script-clients" {
+				cfg.BlockScriptClients = *blockScripts
+			}
+			if f.Name == "verify-search-engine-bots" {
+				cfg.VerifySearchEngineBots = *verifySearch
+			}
 		})
 		if queryFlagPassed {
 			cfg.CheckQuery = *checkQuery
@@ -1063,6 +1083,21 @@ func handleTest(args []string) {
 	} else {
 		cfg.CheckQuery = *checkQuery
 		cfg.CheckBody = *checkBody
+		if *blockAIBots {
+			cfg.BlockAIBots = true
+		}
+		if *aiBotProfile != "" {
+			cfg.AIBotProfile = *aiBotProfile
+		}
+		if *detectBrowser {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if *blockScripts {
+			cfg.BlockScriptClients = true
+		}
+		if *verifySearch {
+			cfg.VerifySearchEngineBots = true
+		}
 	}
 
 	if *testBody != "" && !cfg.CheckBody && len(cfg.CheckBodyPatterns) == 0 {
