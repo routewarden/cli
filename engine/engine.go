@@ -88,6 +88,8 @@ type Config struct {
 	BlockAIBots                bool            `json:"blockAIBots,omitempty"`
 	AIBotProfile               string          `json:"aiBotProfile,omitempty"`
 	VerifySearchEngineBots     bool            `json:"verifySearchEngineBots,omitempty"`
+	DetectBrowserImpersonation bool            `json:"detectBrowserImpersonation,omitempty"`
+	BlockScriptClients         bool            `json:"blockScriptClients,omitempty"`
 	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
 	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
 	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
@@ -272,6 +274,10 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		AIBotProfileSnake               string          `json:"ai_bot_profile"`
 		VerifySearchEngineBots          *bool           `json:"verifySearchEngineBots"`
 		VerifySearchEngineBotsSnake     *bool           `json:"verify_search_engine_bots"`
+		DetectBrowserImpersonation      *bool           `json:"detectBrowserImpersonation"`
+		DetectBrowserImpersonationSnake *bool           `json:"detect_browser_impersonation"`
+		BlockScriptClients              *bool           `json:"blockScriptClients"`
+		BlockScriptClientsSnake         *bool           `json:"block_script_clients"`
 		BlockUserAgents                 []string        `json:"blockUserAgents"`
 		BlockUserAgentsSnake            []string        `json:"block_user_agents"`
 		AllowUserAgents                 []string        `json:"allowUserAgents"`
@@ -397,6 +403,18 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBots
 	} else if raw.VerifySearchEngineBotsSnake != nil {
 		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBotsSnake
+	}
+
+	if raw.DetectBrowserImpersonation != nil {
+		cfg.DetectBrowserImpersonation = *raw.DetectBrowserImpersonation
+	} else if raw.DetectBrowserImpersonationSnake != nil {
+		cfg.DetectBrowserImpersonation = *raw.DetectBrowserImpersonationSnake
+	}
+
+	if raw.BlockScriptClients != nil {
+		cfg.BlockScriptClients = *raw.BlockScriptClients
+	} else if raw.BlockScriptClientsSnake != nil {
+		cfg.BlockScriptClients = *raw.BlockScriptClientsSnake
 	}
 
 	if raw.BlockUserAgents != nil {
@@ -713,6 +731,12 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 		if cfg.VerifySearchEngineBots {
 			fileCfg.VerifySearchEngineBots = cfg.VerifySearchEngineBots
+		}
+		if cfg.DetectBrowserImpersonation {
+			fileCfg.DetectBrowserImpersonation = cfg.DetectBrowserImpersonation
+		}
+		if cfg.BlockScriptClients {
+			fileCfg.BlockScriptClients = cfg.BlockScriptClients
 		}
 		if len(cfg.BlockUserAgents) > 0 {
 			fileCfg.BlockUserAgents = cfg.BlockUserAgents
@@ -1308,6 +1332,28 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				return result
 			}
 		}
+
+		if e.Config.DetectBrowserImpersonation {
+			if isSpoofed, reason := DetectBrowserImpersonation(ua, headers); isSpoofed {
+				result.Allowed = false
+				result.Blocked = true
+				result.Reason = "browser_spoofed"
+				result.MatchedPattern = reason
+				result.MatchedTarget = ua
+				return result
+			}
+		}
+
+		if e.Config.BlockScriptClients {
+			if isScript, clientType := DetectScriptClient(ua, headers); isScript {
+				result.Allowed = false
+				result.Blocked = true
+				result.Reason = "script_client_blocked"
+				result.MatchedPattern = clientType
+				result.MatchedTarget = ua
+				return result
+			}
+		}
 	}
 
 	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
@@ -1623,6 +1669,12 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.VerifySearchEngineBots {
 		b.WriteString("          verifySearchEngineBots: true\n")
 	}
+	if cfg.DetectBrowserImpersonation {
+		b.WriteString("          detectBrowserImpersonation: true\n")
+	}
+	if cfg.BlockScriptClients {
+		b.WriteString("          blockScriptClients: true\n")
+	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("          blockUserAgents:\n")
 		for _, ua := range cfg.BlockUserAgents {
@@ -1819,6 +1871,12 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	}
 	if cfg.VerifySearchEngineBots {
 		b.WriteString("  verifySearchEngineBots = true\n")
+	}
+	if cfg.DetectBrowserImpersonation {
+		b.WriteString("  detectBrowserImpersonation = true\n")
+	}
+	if cfg.BlockScriptClients {
+		b.WriteString("  blockScriptClients = true\n")
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("  blockUserAgents = [")
@@ -2023,6 +2081,12 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.VerifySearchEngineBots {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=true\"\n")
 	}
+	if cfg.DetectBrowserImpersonation {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.detectBrowserImpersonation=true\"\n")
+	}
+	if cfg.BlockScriptClients {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=true\"\n")
+	}
 	if len(cfg.BlockUserAgents) > 0 {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockUserAgents="+strings.Join(cfg.BlockUserAgents, ","))
 	}
@@ -2189,6 +2253,12 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.VerifySearchEngineBots {
 		b.WriteString("    verify_search_engine_bots true\n")
 	}
+	if cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation true\n")
+	}
+	if cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients true\n")
+	}
 	for _, ua := range cfg.BlockUserAgents {
 		fmt.Fprintf(&b, "    block_user_agents %q\n", ua)
 	}
@@ -2336,6 +2406,12 @@ func (cfg *Config) GenerateNginxLua() string {
 	}
 	if cfg.VerifySearchEngineBots {
 		b.WriteString("    verify_search_engine_bots = true,\n")
+	}
+	if cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation = true,\n")
+	}
+	if cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients = true,\n")
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("    block_user_agents = {\n")

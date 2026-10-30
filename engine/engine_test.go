@@ -1843,6 +1843,88 @@ func TestEngine_VerifySearchEngineBots(t *testing.T) {
 	}
 }
 
+func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.DetectBrowserImpersonation = true
+	cfg.BlockScriptClients = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	chromeUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+	// 1. Spoofed Chrome (missing Accept-Language)
+	resSpoofed := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":      chromeUA,
+		"Accept-Encoding": "gzip, deflate, br",
+	})
+	if !resSpoofed.Blocked || resSpoofed.Reason != "browser_spoofed" || resSpoofed.MatchedPattern != "missing_accept_language" {
+		t.Errorf("expected missing_accept_language browser_spoofed, got blocked=%v, reason=%s, pattern=%s", resSpoofed.Blocked, resSpoofed.Reason, resSpoofed.MatchedPattern)
+	}
+
+	// 2. Legitimate Chrome with companion headers
+	resLegit := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	if resLegit.Blocked {
+		t.Errorf("expected genuine Chrome to be allowed, got blocked=%v, reason=%s", resLegit.Blocked, resLegit.Reason)
+	}
+
+	// 3. Script client (python-requests)
+	resScript := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resScript.Blocked || resScript.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked with script_client_blocked, got blocked=%v, reason=%s", resScript.Blocked, resScript.Reason)
+	}
+
+	// 4. Script client via headless header
+	resHeadless := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+		"X-Playwright":       "true",
+	})
+	if !resHeadless.Blocked || resHeadless.Reason != "script_client_blocked" || resHeadless.MatchedPattern != "playwright_headless" {
+		t.Errorf("expected playwright to be blocked with script_client_blocked, got blocked=%v, reason=%s, pattern=%s", resHeadless.Blocked, resHeadless.Reason, resHeadless.MatchedPattern)
+	}
+
+	// 5. Check generators
+	yamlOut := cfg.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, "detectBrowserImpersonation: true") || !strings.Contains(yamlOut, "blockScriptClients: true") {
+		t.Errorf("expected Traefik YAML to contain new fields, got:\n%s", yamlOut)
+	}
+	tomlOut := cfg.GenerateTraefikTOML()
+	if !strings.Contains(tomlOut, "detectBrowserImpersonation = true") || !strings.Contains(tomlOut, "blockScriptClients = true") {
+		t.Errorf("expected Traefik TOML to contain new fields, got:\n%s", tomlOut)
+	}
+	labelsOut := cfg.GenerateTraefikLabels()
+	if !strings.Contains(labelsOut, "detectBrowserImpersonation=true") || !strings.Contains(labelsOut, "blockScriptClients=true") {
+		t.Errorf("expected Traefik labels to contain new fields, got:\n%s", labelsOut)
+	}
+	caddyOut := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "detect_browser_impersonation true") || !strings.Contains(caddyOut, "block_script_clients true") {
+		t.Errorf("expected Caddyfile to contain new fields, got:\n%s", caddyOut)
+	}
+	nginxOut := cfg.GenerateNginxLua()
+	if !strings.Contains(nginxOut, "detect_browser_impersonation = true") || !strings.Contains(nginxOut, "block_script_clients = true") {
+		t.Errorf("expected Nginx Lua to contain new fields, got:\n%s", nginxOut)
+	}
+}
+
+
 
 
 

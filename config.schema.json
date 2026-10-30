@@ -211,6 +211,26 @@
       "type": "boolean",
       "default": false,
       "description": "Verify search engine crawlers via FCrDNS (snake_case alias)."
+    },
+    "detectBrowserImpersonation": {
+      "type": "boolean",
+      "default": false,
+      "description": "Detect and block automated bots impersonating modern desktop/mobile browsers by inspecting Client Hints and companion headers."
+    },
+    "detect_browser_impersonation": {
+      "type": "boolean",
+      "default": false,
+      "description": "Detect and block browser impersonators (snake_case alias)."
+    },
+    "blockScriptClients": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from automated HTTP client libraries (e.g. python-requests, axios, Go-http-client) and headless scraping frameworks."
+    },
+    "block_script_clients": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from script clients and headless frameworks (snake_case alias)."
     }
   },
   "$defs": {
