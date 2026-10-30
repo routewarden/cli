@@ -1733,4 +1733,59 @@ func TestEngine_BracketedIPv6CIDR_AllowedIPs(t *testing.T) {
 	}
 }
 
+func TestEngine_AIBotsAndHoneypotSpiderTrap(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = false
+	cfg.BlockAIBots = true
+	cfg.AIBotProfile = "train_only"
+	cfg.BlockUserAgents = []string{`(?i)CustomScraperBot`}
+	cfg.AllowUserAgents = []string{`(?i)PartnerBot`}
+	cfg.HoneypotTrapPaths = []string{"/secret-spider-trap", "/crawler-trap/"}
+	cfg.TrapBanDuration = "1h"
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	clientIP := "198.51.100.22"
+
+	// 1. Legitimate request passes
+	res1 := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if res1.Blocked {
+		t.Errorf("expected legitimate request to pass, got blocked: %s", res1.Reason)
+	}
+
+	// 2. GPTBot blocked under train_only profile
+	resGPT := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)"}, "203.0.113.1")
+	if !resGPT.Blocked || resGPT.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked with ai_bot_blocked, got blocked=%v, reason=%s", resGPT.Blocked, resGPT.Reason)
+	}
+
+	// 3. Allowed User-Agent bypasses AI bot block
+	resAllowed := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "PartnerBot GPTBot/1.0"}, "203.0.113.2")
+	if resAllowed.Blocked {
+		t.Errorf("expected PartnerBot to bypass bot blocking, got blocked: %s", resAllowed.Reason)
+	}
+
+	// 4. Custom blocked User-Agent
+	resCustom := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "CustomScraperBot/2.0"}, "203.0.113.3")
+	if !resCustom.Blocked || resCustom.Reason != "user_agent_blocked" {
+		t.Errorf("expected CustomScraperBot to be blocked with user_agent_blocked, got blocked=%v, reason=%s", resCustom.Blocked, resCustom.Reason)
+	}
+
+	// 5. Honeypot Spider Trap triggers ban
+	resTrap := eng.EvaluateWithClientIP("GET", "/secret-spider-trap", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if !resTrap.Blocked || resTrap.Reason != "honeypot_trap_triggered" {
+		t.Fatalf("expected trap to be blocked with honeypot_trap_triggered, got blocked=%v, reason=%s", resTrap.Blocked, resTrap.Reason)
+	}
+
+	// 6. Subsequent request from same IP is blocked via ban table
+	resBanned := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if !resBanned.Blocked || resBanned.Reason != "ip_banned" {
+		t.Errorf("expected banned client to be blocked with ip_banned, got blocked=%v, reason=%s", resBanned.Blocked, resBanned.Reason)
+	}
+}
+
+
 

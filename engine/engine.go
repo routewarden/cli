@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultBlockPatterns contains well-known sensitive endpoints and file extensions.
@@ -83,6 +84,12 @@ type Config struct {
 	AllowedASNs                []string        `json:"allowedASNs,omitempty"`
 	BlockedASNs                []string        `json:"blockedASNs,omitempty"`
 	ASNDB                      string          `json:"asnDB,omitempty"`
+	BlockAIBots                bool            `json:"blockAIBots,omitempty"`
+	AIBotProfile               string          `json:"aiBotProfile,omitempty"`
+	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
+	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
+	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
+	TrapBanDuration            string          `json:"trapBanDuration,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
 	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
 	Methods                    []string        `json:"methods,omitempty"`
@@ -257,6 +264,18 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		BlockedASNsSnake                []string        `json:"blocked_asns"`
 		ASNDB                           string          `json:"asnDB"`
 		ASNDBSnake                      string          `json:"asn_db"`
+		BlockAIBots                     *bool           `json:"blockAIBots"`
+		BlockAIBotsSnake                *bool           `json:"block_ai_bots"`
+		AIBotProfile                    string          `json:"aiBotProfile"`
+		AIBotProfileSnake               string          `json:"ai_bot_profile"`
+		BlockUserAgents                 []string        `json:"blockUserAgents"`
+		BlockUserAgentsSnake            []string        `json:"block_user_agents"`
+		AllowUserAgents                 []string        `json:"allowUserAgents"`
+		AllowUserAgentsSnake            []string        `json:"allow_user_agents"`
+		HoneypotTrapPaths               []string        `json:"honeypotTrapPaths"`
+		HoneypotTrapPathsSnake          []string        `json:"honeypot_trap_paths"`
+		TrapBanDuration                 string          `json:"trapBanDuration"`
+		TrapBanDurationSnake            string          `json:"trap_ban_duration"`
 		AllowedIPs                      []string        `json:"allowedIps"`
 		AllowedIPsSnake                 []string        `json:"allowed_ips"`
 		TrustedProxies                  []string        `json:"trustedProxies"`
@@ -357,6 +376,43 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	if raw.ASNDBSnake != "" {
 		cfg.ASNDB = raw.ASNDBSnake
 	}
+
+	if raw.BlockAIBots != nil {
+		cfg.BlockAIBots = *raw.BlockAIBots
+	} else if raw.BlockAIBotsSnake != nil {
+		cfg.BlockAIBots = *raw.BlockAIBotsSnake
+	}
+
+	if raw.AIBotProfile != "" {
+		cfg.AIBotProfile = raw.AIBotProfile
+	} else if raw.AIBotProfileSnake != "" {
+		cfg.AIBotProfile = raw.AIBotProfileSnake
+	}
+
+	if raw.BlockUserAgents != nil {
+		cfg.BlockUserAgents = raw.BlockUserAgents
+	} else if raw.BlockUserAgentsSnake != nil {
+		cfg.BlockUserAgents = raw.BlockUserAgentsSnake
+	}
+
+	if raw.AllowUserAgents != nil {
+		cfg.AllowUserAgents = raw.AllowUserAgents
+	} else if raw.AllowUserAgentsSnake != nil {
+		cfg.AllowUserAgents = raw.AllowUserAgentsSnake
+	}
+
+	if raw.HoneypotTrapPaths != nil {
+		cfg.HoneypotTrapPaths = raw.HoneypotTrapPaths
+	} else if raw.HoneypotTrapPathsSnake != nil {
+		cfg.HoneypotTrapPaths = raw.HoneypotTrapPathsSnake
+	}
+
+	if raw.TrapBanDuration != "" {
+		cfg.TrapBanDuration = raw.TrapBanDuration
+	} else if raw.TrapBanDurationSnake != "" {
+		cfg.TrapBanDuration = raw.TrapBanDurationSnake
+	}
+
 	if raw.AllowedIPs != nil {
 		cfg.AllowedIPs = raw.AllowedIPs
 	} else if raw.AllowedIPsSnake != nil {
@@ -581,6 +637,10 @@ type Engine struct {
 	BlockRegexes     []*regexp.Regexp
 	AllowRegexes     []*regexp.Regexp
 	BodyRegexes      []*regexp.Regexp
+	BlockUARegexes   []*regexp.Regexp
+	AllowUARegexes   []*regexp.Regexp
+	BanTable         *BanTable
+	TrapBanDuration  time.Duration
 	AllowedIPs       []net.IP
 	AllowedNets      []*net.IPNet
 	TrustedProxyIPs  []net.IP
@@ -633,6 +693,24 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 		if cfg.ASNDB != "" {
 			fileCfg.ASNDB = cfg.ASNDB
+		}
+		if cfg.BlockAIBots {
+			fileCfg.BlockAIBots = cfg.BlockAIBots
+		}
+		if cfg.AIBotProfile != "" {
+			fileCfg.AIBotProfile = cfg.AIBotProfile
+		}
+		if len(cfg.BlockUserAgents) > 0 {
+			fileCfg.BlockUserAgents = cfg.BlockUserAgents
+		}
+		if len(cfg.AllowUserAgents) > 0 {
+			fileCfg.AllowUserAgents = cfg.AllowUserAgents
+		}
+		if len(cfg.HoneypotTrapPaths) > 0 {
+			fileCfg.HoneypotTrapPaths = cfg.HoneypotTrapPaths
+		}
+		if cfg.TrapBanDuration != "" {
+			fileCfg.TrapBanDuration = cfg.TrapBanDuration
 		}
 		if len(cfg.AllowedIPs) > 0 {
 			fileCfg.AllowedIPs = cfg.AllowedIPs
@@ -928,12 +1006,46 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 	}
 
+	compiledBlockUA := make([]*regexp.Regexp, 0, len(cfg.BlockUserAgents))
+	for _, p := range cfg.BlockUserAgents {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid block user agent regex %q: %w", p, err)
+		}
+		compiledBlockUA = append(compiledBlockUA, re)
+	}
+
+	compiledAllowUA := make([]*regexp.Regexp, 0, len(cfg.AllowUserAgents))
+	for _, p := range cfg.AllowUserAgents {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid allow user agent regex %q: %w", p, err)
+		}
+		compiledAllowUA = append(compiledAllowUA, re)
+	}
+
+	var banTable *BanTable
+	banDuration := ParseBanDuration(cfg.TrapBanDuration)
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		banTable = NewBanTable(10000)
+	}
+
 	return &Engine{
 		Config:           cfg,
 		Methods:          methodsMap,
 		BlockRegexes:     compiledBlock,
 		AllowRegexes:     compiledAllow,
 		BodyRegexes:      compiledBody,
+		BlockUARegexes:   compiledBlockUA,
+		AllowUARegexes:   compiledAllowUA,
+		BanTable:         banTable,
+		TrapBanDuration:  banDuration,
 		ASN:              asn,
 		AllowedIPs:       ips,
 		AllowedNets:      nets,
@@ -1102,8 +1214,78 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		}
 	}
 
+	// Check active IP ban
+	if e.BanTable != nil && effectiveIPStr != "" && e.BanTable.IsBanned(effectiveIPStr) {
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = "ip_banned"
+		result.MatchedPattern = "ban_table"
+		result.MatchedTarget = effectiveIPStr
+		return result
+	}
+
+	// User-Agent & AI Bot check
+	ua := ""
+	if headers != nil {
+		for k, v := range headers {
+			if strings.EqualFold(k, "User-Agent") {
+				ua = v
+				break
+			}
+		}
+	}
+	uaAllowed := false
+	for _, re := range e.AllowUARegexes {
+		if re.MatchString(ua) {
+			uaAllowed = true
+			break
+		}
+	}
+	if !uaAllowed && ua != "" {
+		for _, re := range e.BlockUARegexes {
+			if re.MatchString(ua) {
+				result.Allowed = false
+				result.Blocked = true
+				result.Reason = "user_agent_blocked"
+				result.MatchedPattern = re.String()
+				result.MatchedTarget = ua
+				return result
+			}
+		}
+		if e.Config.BlockAIBots {
+			if matched, botType := MatchAIBot(ua, e.Config.AIBotProfile); matched {
+				result.Allowed = false
+				result.Blocked = true
+				result.Reason = "ai_bot_blocked"
+				result.MatchedPattern = botType
+				result.MatchedTarget = ua
+				return result
+			}
+		}
+	}
+
 	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
 	result.CandidatePaths = candidatePaths
+
+	// Honeypot spider trap check
+	if len(e.Config.HoneypotTrapPaths) > 0 {
+		for _, p := range candidatePaths {
+			for _, trapPath := range e.Config.HoneypotTrapPaths {
+				cleanTrap := strings.TrimSpace(trapPath)
+				if cleanTrap != "" && (p == cleanTrap || (strings.HasSuffix(cleanTrap, "/") && strings.HasPrefix(p, cleanTrap))) {
+					if e.BanTable != nil && effectiveIPStr != "" {
+						e.BanTable.Ban(effectiveIPStr, e.TrapBanDuration)
+					}
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "honeypot_trap_triggered"
+					result.MatchedPattern = cleanTrap
+					result.MatchedTarget = p
+					return result
+				}
+			}
+		}
+	}
 
 	// Check allow patterns first
 	for _, p := range candidatePaths {
@@ -1386,6 +1568,33 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "          asnDB: %q\n", cfg.ASNDB)
 	}
+	if cfg.BlockAIBots {
+		b.WriteString("          blockAIBots: true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "          aiBotProfile: %q\n", cfg.AIBotProfile)
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("          blockUserAgents:\n")
+		for _, ua := range cfg.BlockUserAgents {
+			fmt.Fprintf(&b, "            - %q\n", ua)
+		}
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("          allowUserAgents:\n")
+		for _, ua := range cfg.AllowUserAgents {
+			fmt.Fprintf(&b, "            - %q\n", ua)
+		}
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("          honeypotTrapPaths:\n")
+		for _, trap := range cfg.HoneypotTrapPaths {
+			fmt.Fprintf(&b, "            - %q\n", trap)
+		}
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "          trapBanDuration: %q\n", cfg.TrapBanDuration)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("          allowedIps:\n")
 		for _, ip := range cfg.AllowedIPs {
@@ -1553,6 +1762,45 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  asnDB = %q\n", cfg.ASNDB)
 	}
+	if cfg.BlockAIBots {
+		b.WriteString("  blockAIBots = true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "  aiBotProfile = %q\n", cfg.AIBotProfile)
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("  blockUserAgents = [")
+		for i, ua := range cfg.BlockUserAgents {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", ua)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("  allowUserAgents = [")
+		for i, ua := range cfg.AllowUserAgents {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", ua)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("  honeypotTrapPaths = [")
+		for i, trap := range cfg.HoneypotTrapPaths {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", trap)
+		}
+		b.WriteString("]\n")
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "  trapBanDuration = %q\n", cfg.TrapBanDuration)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("  allowedIps = [")
 		for i, ip := range cfg.AllowedIPs {
@@ -1714,6 +1962,24 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.asnDB="+cfg.ASNDB)
 	}
+	if cfg.BlockAIBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=true\"\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.aiBotProfile="+cfg.AIBotProfile)
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockUserAgents="+strings.Join(cfg.BlockUserAgents, ","))
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.allowUserAgents="+strings.Join(cfg.AllowUserAgents, ","))
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.honeypotTrapPaths="+strings.Join(cfg.HoneypotTrapPaths, ","))
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.trapBanDuration="+cfg.TrapBanDuration)
+	}
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
 	}
@@ -1859,6 +2125,24 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db %q\n", cfg.ASNDB)
 	}
+	if cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "    ai_bot_profile %s\n", cfg.AIBotProfile)
+	}
+	for _, ua := range cfg.BlockUserAgents {
+		fmt.Fprintf(&b, "    block_user_agents %q\n", ua)
+	}
+	for _, ua := range cfg.AllowUserAgents {
+		fmt.Fprintf(&b, "    allow_user_agents %q\n", ua)
+	}
+	for _, trap := range cfg.HoneypotTrapPaths {
+		fmt.Fprintf(&b, "    honeypot_trap_paths %q\n", trap)
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "    trap_ban_duration %s\n", cfg.TrapBanDuration)
+	}
 	for _, ip := range cfg.AllowedIPs {
 		fmt.Fprintf(&b, "    allowed_ips %s\n", ip)
 	}
@@ -1985,6 +2269,36 @@ func (cfg *Config) GenerateNginxLua() string {
 	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db = %q,\n", cfg.ASNDB)
+	}
+	if cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots = true,\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "    ai_bot_profile = %q,\n", cfg.AIBotProfile)
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("    block_user_agents = {\n")
+		for _, ua := range cfg.BlockUserAgents {
+			fmt.Fprintf(&b, "        %q,\n", ua)
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("    allow_user_agents = {\n")
+		for _, ua := range cfg.AllowUserAgents {
+			fmt.Fprintf(&b, "        %q,\n", ua)
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("    honeypot_trap_paths = {\n")
+		for _, trap := range cfg.HoneypotTrapPaths {
+			fmt.Fprintf(&b, "        %q,\n", trap)
+		}
+		b.WriteString("    },\n")
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "    trap_ban_duration = %q,\n", cfg.TrapBanDuration)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allowed_ips = {\n")

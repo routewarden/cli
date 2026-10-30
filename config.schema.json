@@ -181,6 +181,26 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Whitelisted User-Agent regular expressions that take precedence over blockUserAgents and AI bot rules."
+    },
+    "honeypotTrapPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Hidden spider trap endpoints (e.g. /hidden-trap, /crawler-trap/) that instantly ban offending crawlers."
+    },
+    "honeypot_trap_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Hidden spider trap endpoints (snake_case alias)."
+    },
+    "trapBanDuration": {
+      "type": "string",
+      "default": "24h",
+      "description": "Sliding window duration to ban an IP after triggering a honeypot spider trap (e.g. 24h, 1h, 86400)."
+    },
+    "trap_ban_duration": {
+      "type": "string",
+      "default": "24h",
+      "description": "Sliding window ban duration (snake_case alias)."
     }
   },
   "$defs": {
