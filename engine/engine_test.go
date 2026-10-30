@@ -1,7 +1,9 @@
 package engine_test
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1786,6 +1788,61 @@ func TestEngine_AIBotsAndHoneypotSpiderTrap(t *testing.T) {
 		t.Errorf("expected banned client to be blocked with ip_banned, got blocked=%v, reason=%s", resBanned.Blocked, resBanned.Reason)
 	}
 }
+
+func TestEngine_VerifySearchEngineBots(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.BlockAIBots = true
+	cfg.VerifySearchEngineBots = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	eng.SetFCrDNSLookupFuncs(
+		func(ctx context.Context, addr string) ([]string, error) {
+			if addr == "66.249.66.1" {
+				return []string{"crawl-66-249-66-1.googlebot.com."}, nil
+			}
+			return []string{"attacker.com."}, nil
+		},
+		func(ctx context.Context, host string) ([]net.IP, error) {
+			if host == "crawl-66-249-66-1.googlebot.com." || host == "crawl-66-249-66-1.googlebot.com" {
+				return []net.IP{net.ParseIP("66.249.66.1")}, nil
+			}
+			return []net.IP{net.ParseIP("198.51.100.2")}, nil
+		},
+	)
+
+	googleUA := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+	// 1. Spoofed Googlebot
+	resSpoofed := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": googleUA}, "198.51.100.2")
+	if !resSpoofed.Blocked || resSpoofed.Reason != "search_engine_spoofed" {
+		t.Errorf("expected spoofed Googlebot to be blocked with search_engine_spoofed, got blocked=%v, reason=%s", resSpoofed.Blocked, resSpoofed.Reason)
+	}
+
+	// 2. Legitimate Googlebot
+	resLegit := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": googleUA}, "66.249.66.1")
+	if resLegit.Blocked {
+		t.Errorf("expected genuine Googlebot to be allowed, got blocked=%v, reason=%s", resLegit.Blocked, resLegit.Reason)
+	}
+
+	// 3. Generators include verifySearchEngineBots
+	yamlOut := cfg.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, "verifySearchEngineBots: true") {
+		t.Errorf("expected Traefik YAML to contain verifySearchEngineBots: true, got:\n%s", yamlOut)
+	}
+	caddyOut := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "verify_search_engine_bots true") {
+		t.Errorf("expected Caddyfile to contain verify_search_engine_bots true, got:\n%s", caddyOut)
+	}
+	nginxOut := cfg.GenerateNginxLua()
+	if !strings.Contains(nginxOut, "verify_search_engine_bots = true") {
+		t.Errorf("expected Nginx Lua to contain verify_search_engine_bots = true, got:\n%s", nginxOut)
+	}
+}
+
 
 
 

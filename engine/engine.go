@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -86,6 +87,7 @@ type Config struct {
 	ASNDB                      string          `json:"asnDB,omitempty"`
 	BlockAIBots                bool            `json:"blockAIBots,omitempty"`
 	AIBotProfile               string          `json:"aiBotProfile,omitempty"`
+	VerifySearchEngineBots     bool            `json:"verifySearchEngineBots,omitempty"`
 	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
 	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
 	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
@@ -268,6 +270,8 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		BlockAIBotsSnake                *bool           `json:"block_ai_bots"`
 		AIBotProfile                    string          `json:"aiBotProfile"`
 		AIBotProfileSnake               string          `json:"ai_bot_profile"`
+		VerifySearchEngineBots          *bool           `json:"verifySearchEngineBots"`
+		VerifySearchEngineBotsSnake     *bool           `json:"verify_search_engine_bots"`
 		BlockUserAgents                 []string        `json:"blockUserAgents"`
 		BlockUserAgentsSnake            []string        `json:"block_user_agents"`
 		AllowUserAgents                 []string        `json:"allowUserAgents"`
@@ -387,6 +391,12 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		cfg.AIBotProfile = raw.AIBotProfile
 	} else if raw.AIBotProfileSnake != "" {
 		cfg.AIBotProfile = raw.AIBotProfileSnake
+	}
+
+	if raw.VerifySearchEngineBots != nil {
+		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBots
+	} else if raw.VerifySearchEngineBotsSnake != nil {
+		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBotsSnake
 	}
 
 	if raw.BlockUserAgents != nil {
@@ -639,6 +649,7 @@ type Engine struct {
 	BodyRegexes      []*regexp.Regexp
 	BlockUARegexes   []*regexp.Regexp
 	AllowUARegexes   []*regexp.Regexp
+	FCrDNS           *FCrDNSVerifier
 	BanTable         *BanTable
 	TrapBanDuration  time.Duration
 	AllowedIPs       []net.IP
@@ -699,6 +710,9 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 		if cfg.AIBotProfile != "" {
 			fileCfg.AIBotProfile = cfg.AIBotProfile
+		}
+		if cfg.VerifySearchEngineBots {
+			fileCfg.VerifySearchEngineBots = cfg.VerifySearchEngineBots
 		}
 		if len(cfg.BlockUserAgents) > 0 {
 			fileCfg.BlockUserAgents = cfg.BlockUserAgents
@@ -1036,6 +1050,11 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		banTable = NewBanTable(10000)
 	}
 
+	var fcrdns *FCrDNSVerifier
+	if cfg.VerifySearchEngineBots {
+		fcrdns = NewFCrDNSVerifier(6*time.Hour, 500*time.Millisecond)
+	}
+
 	return &Engine{
 		Config:           cfg,
 		Methods:          methodsMap,
@@ -1044,6 +1063,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		BodyRegexes:      compiledBody,
 		BlockUARegexes:   compiledBlockUA,
 		AllowUARegexes:   compiledAllowUA,
+		FCrDNS:           fcrdns,
 		BanTable:         banTable,
 		TrapBanDuration:  banDuration,
 		ASN:              asn,
@@ -1149,6 +1169,16 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 	return e.EvaluateWithBody(method, requestPath, queryString, headers, clientIPStr, "")
 }
 
+// SetFCrDNSLookupFuncs overrides the DNS lookup functions for testing or custom resolvers.
+func (e *Engine) SetFCrDNSLookupFuncs(
+	lookupAddr func(ctx context.Context, addr string) ([]string, error),
+	lookupIP func(ctx context.Context, host string) ([]net.IP, error),
+) {
+	if e.FCrDNS != nil {
+		e.FCrDNS.SetLookupFuncs(lookupAddr, lookupIP)
+	}
+}
+
 // EvaluateWithBody inspects a simulated request against compiled rules including client IP and body check.
 func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, headers map[string]string, clientIPStr string, body string) *EvaluationResult {
 	result := &EvaluationResult{
@@ -1241,6 +1271,22 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 			break
 		}
 	}
+
+	// Search engine bot impersonation verification (FCrDNS)
+	if !uaAllowed && e.FCrDNS != nil && e.Config.VerifySearchEngineBots {
+		if claimsBot, engine := DetectSearchEngineBot(ua); claimsBot {
+			if !e.FCrDNS.Verify(context.Background(), effectiveIPStr, engine) {
+				result.Allowed = false
+				result.Blocked = true
+				result.Reason = "search_engine_spoofed"
+				result.MatchedPattern = string(engine) + "_spoofed"
+				result.MatchedTarget = ua
+				return result
+			}
+			uaAllowed = true
+		}
+	}
+
 	if !uaAllowed && ua != "" {
 		for _, re := range e.BlockUARegexes {
 			if re.MatchString(ua) {
@@ -1574,6 +1620,9 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "          aiBotProfile: %q\n", cfg.AIBotProfile)
 	}
+	if cfg.VerifySearchEngineBots {
+		b.WriteString("          verifySearchEngineBots: true\n")
+	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("          blockUserAgents:\n")
 		for _, ua := range cfg.BlockUserAgents {
@@ -1767,6 +1816,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "  aiBotProfile = %q\n", cfg.AIBotProfile)
+	}
+	if cfg.VerifySearchEngineBots {
+		b.WriteString("  verifySearchEngineBots = true\n")
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("  blockUserAgents = [")
@@ -1968,6 +2020,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.aiBotProfile="+cfg.AIBotProfile)
 	}
+	if cfg.VerifySearchEngineBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=true\"\n")
+	}
 	if len(cfg.BlockUserAgents) > 0 {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockUserAgents="+strings.Join(cfg.BlockUserAgents, ","))
 	}
@@ -2131,6 +2186,9 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "    ai_bot_profile %s\n", cfg.AIBotProfile)
 	}
+	if cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots true\n")
+	}
 	for _, ua := range cfg.BlockUserAgents {
 		fmt.Fprintf(&b, "    block_user_agents %q\n", ua)
 	}
@@ -2275,6 +2333,9 @@ func (cfg *Config) GenerateNginxLua() string {
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "    ai_bot_profile = %q,\n", cfg.AIBotProfile)
+	}
+	if cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots = true,\n")
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("    block_user_agents = {\n")

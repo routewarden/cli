@@ -139,3 +139,4 @@ func (bt *BanTable) Clear() {
 	defer bt.mu.Unlock()
 	bt.entries = make(map[string]time.Time)
 }
+

@@ -201,6 +201,16 @@
       "type": "string",
       "default": "24h",
       "description": "Sliding window ban duration (snake_case alias)."
+    },
+    "verifySearchEngineBots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Verify search engine crawlers (Googlebot, Bingbot, Applebot) via Forward-Confirmed Reverse DNS (FCrDNS) to detect and block spoofed scrapers."
+    },
+    "verify_search_engine_bots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Verify search engine crawlers via FCrDNS (snake_case alias)."
     }
   },
   "$defs": {
