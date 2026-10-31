@@ -542,9 +542,9 @@ func handleGenerate(args []string) {
 		os.Exit(1)
 	}
 
-	cfg := engine.CreateConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+	cfg, err := engine.ParseConfig(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing configuration: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -934,9 +934,9 @@ func handleValidate(args []string) {
 		return
 	}
 
-	cfg := engine.CreateConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+	cfg, err := engine.ParseConfig(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing configuration: %v\n", err)
 		os.Exit(1)
 	}
 

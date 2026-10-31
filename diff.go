@@ -62,14 +62,14 @@ func handleDiff(args []string) {
 		os.Exit(1)
 	}
 
-	baseCfg := engine.CreateConfig()
-	candidateCfg := engine.CreateConfig()
-	if err := json.Unmarshal(baseData, baseCfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing base JSON %s: %v\n", baseFile, err)
+	baseCfg, err := engine.ParseConfig(baseData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing base configuration %s: %v\n", baseFile, err)
 		os.Exit(1)
 	}
-	if err := json.Unmarshal(candidateData, candidateCfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing candidate JSON %s: %v\n", candidateFile, err)
+	candidateCfg, err := engine.ParseConfig(candidateData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing candidate configuration %s: %v\n", candidateFile, err)
 		os.Exit(1)
 	}
 
