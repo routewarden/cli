@@ -112,3 +112,39 @@ func TestAuditConfig_SARIFSerialization(t *testing.T) {
 		t.Errorf("expected SARIF version 2.1.0, got %v", parsed["version"])
 	}
 }
+
+func TestAuditConfig_ResponseModeFieldValidation(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.Mode = "valid_json" // will be invalid
+	cfg.Response = &ResponseConfig{
+		Mode: "nested_invalid_mode",
+	}
+
+	report := AuditConfig(cfg, "config.json")
+	var flaggedFields []string
+	for _, issue := range report.Issues {
+		if issue.Code == "RW-A012" {
+			flaggedFields = append(flaggedFields, issue.Field)
+		}
+	}
+
+	if len(flaggedFields) != 2 {
+		t.Fatalf("expected 2 RW-A012 issues for top-level and response.mode, got %d: %v", len(flaggedFields), flaggedFields)
+	}
+	if flaggedFields[0] != "mode" || flaggedFields[1] != "response.mode" {
+		t.Errorf("expected fields [mode, response.mode], got %v", flaggedFields)
+	}
+
+	// Verify valid modes pass without RW-A012
+	cfgClean := CreateConfig()
+	cfgClean.Mode = "aiPoison"
+	cfgClean.Response = &ResponseConfig{
+		Mode: "markovTarpit",
+	}
+	cleanReport := AuditConfig(cfgClean, "clean.json")
+	for _, issue := range cleanReport.Issues {
+		if issue.Code == "RW-A012" {
+			t.Errorf("unexpected RW-A012 issue for valid modes: %v", issue)
+		}
+	}
+}

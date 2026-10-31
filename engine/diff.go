@@ -65,14 +65,14 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		Properties:        make(map[string]ScalarDiff),
 		BlockPatterns:     diffStringSlices(base.BlockPatterns, candidate.BlockPatterns),
 		AllowPatterns:     diffStringSlices(base.AllowPatterns, candidate.AllowPatterns),
-		AllowedASNs:       diffStringSlices(base.AllowedASNs, candidate.AllowedASNs),
-		BlockedASNs:       diffStringSlices(base.BlockedASNs, candidate.BlockedASNs),
+		AllowedASNs:       diffASNSlices(base.AllowedASNs, candidate.AllowedASNs),
+		BlockedASNs:       diffASNSlices(base.BlockedASNs, candidate.BlockedASNs),
 		BlockUserAgents:   diffStringSlices(base.BlockUserAgents, candidate.BlockUserAgents),
 		AllowUserAgents:   diffStringSlices(base.AllowUserAgents, candidate.AllowUserAgents),
 		HoneypotTrapPaths: diffStringSlices(base.HoneypotTrapPaths, candidate.HoneypotTrapPaths),
-		AllowedIPs:        diffStringSlices(base.AllowedIPs, candidate.AllowedIPs),
-		TrustedProxies:    diffStringSlices(base.TrustedProxies, candidate.TrustedProxies),
-		Methods:           diffStringSlices(base.Methods, candidate.Methods),
+		AllowedIPs:        diffIPSlices(base.AllowedIPs, candidate.AllowedIPs),
+		TrustedProxies:    diffIPSlices(base.TrustedProxies, candidate.TrustedProxies),
+		Methods:           diffMethodSlices(base.Methods, candidate.Methods),
 		CheckHeaders:      diffStringSlices(base.CheckHeaders, candidate.CheckHeaders),
 		CheckBodyPatterns: diffStringSlices(base.CheckBodyPatterns, candidate.CheckBodyPatterns),
 	}
@@ -368,4 +368,152 @@ func diffStringSlices(oldList, newList []string) SliceDiff {
 		Added:   added,
 		Removed: removed,
 	}
+}
+
+func diffASNSlices(oldList, newList []string) SliceDiff {
+	canonicalize := func(raw string) string {
+		trimmed := strings.TrimSpace(raw)
+		if n, err := parseASN(trimmed); err == nil {
+			return fmt.Sprintf("AS%d", n)
+		}
+		return strings.ToUpper(trimmed)
+	}
+
+	oldMap := make(map[string]bool)
+	for _, s := range oldList {
+		if c := canonicalize(s); c != "" {
+			oldMap[c] = true
+		}
+	}
+
+	newMap := make(map[string]bool)
+	for _, s := range newList {
+		if c := canonicalize(s); c != "" {
+			newMap[c] = true
+		}
+	}
+
+	var added []string
+	seenAdded := make(map[string]bool)
+	for _, s := range newList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !oldMap[c] && !seenAdded[c] {
+			seenAdded[c] = true
+			added = append(added, trimmed)
+		}
+	}
+
+	var removed []string
+	seenRemoved := make(map[string]bool)
+	for _, s := range oldList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !newMap[c] && !seenRemoved[c] {
+			seenRemoved[c] = true
+			removed = append(removed, trimmed)
+		}
+	}
+
+	sort.Strings(added)
+	sort.Strings(removed)
+
+	return SliceDiff{Added: added, Removed: removed}
+}
+
+func diffMethodSlices(oldList, newList []string) SliceDiff {
+	canonicalize := func(raw string) string {
+		return strings.ToUpper(strings.TrimSpace(raw))
+	}
+
+	oldMap := make(map[string]bool)
+	for _, s := range oldList {
+		if c := canonicalize(s); c != "" {
+			oldMap[c] = true
+		}
+	}
+
+	newMap := make(map[string]bool)
+	for _, s := range newList {
+		if c := canonicalize(s); c != "" {
+			newMap[c] = true
+		}
+	}
+
+	var added []string
+	seenAdded := make(map[string]bool)
+	for _, s := range newList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !oldMap[c] && !seenAdded[c] {
+			seenAdded[c] = true
+			added = append(added, trimmed)
+		}
+	}
+
+	var removed []string
+	seenRemoved := make(map[string]bool)
+	for _, s := range oldList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !newMap[c] && !seenRemoved[c] {
+			seenRemoved[c] = true
+			removed = append(removed, trimmed)
+		}
+	}
+
+	sort.Strings(added)
+	sort.Strings(removed)
+
+	return SliceDiff{Added: added, Removed: removed}
+}
+
+func diffIPSlices(oldList, newList []string) SliceDiff {
+	canonicalize := func(raw string) string {
+		s := strings.TrimSpace(raw)
+		s = strings.TrimPrefix(s, "[")
+		s = strings.TrimSuffix(s, "]")
+		return strings.ToLower(s)
+	}
+
+	oldMap := make(map[string]bool)
+	for _, s := range oldList {
+		if c := canonicalize(s); c != "" {
+			oldMap[c] = true
+		}
+	}
+
+	newMap := make(map[string]bool)
+	for _, s := range newList {
+		if c := canonicalize(s); c != "" {
+			newMap[c] = true
+		}
+	}
+
+	var added []string
+	seenAdded := make(map[string]bool)
+	for _, s := range newList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !oldMap[c] && !seenAdded[c] {
+			seenAdded[c] = true
+			added = append(added, trimmed)
+		}
+	}
+
+	var removed []string
+	seenRemoved := make(map[string]bool)
+	for _, s := range oldList {
+		c := canonicalize(s)
+		trimmed := strings.TrimSpace(s)
+		if c != "" && !newMap[c] && !seenRemoved[c] {
+			seenRemoved[c] = true
+			removed = append(removed, trimmed)
+		}
+	}
+
+	sort.Strings(added)
+	sort.Strings(removed)
+
+	return SliceDiff{Added: added, Removed: removed}
 }

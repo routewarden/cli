@@ -190,3 +190,38 @@ func TestDiffConfigs_BotDefenseAndCrawlers(t *testing.T) {
 		t.Errorf("expected RELAXED impact, got %s", diffRelax.Impact)
 	}
 }
+
+func TestDiffConfigs_ASNMethodAndIPCanonicalization(t *testing.T) {
+	base := CreateConfig()
+	base.AllowedASNs = []string{"AS64500", "as64502"}
+	base.BlockedASNs = []string{"64501"}
+	base.Methods = []string{"GET", "post"}
+	base.AllowedIPs = []string{"192.0.2.1", "[2001:db8::1]"}
+	base.TrustedProxies = []string{"10.0.0.1"}
+
+	candidate := CreateConfig()
+	// Equivalent representations with different casing, prefixing, and bracketing
+	candidate.AllowedASNs = []string{"64500", "AS64502"}
+	candidate.BlockedASNs = []string{"AS64501"}
+	candidate.Methods = []string{"get", "POST"}
+	candidate.AllowedIPs = []string{"192.0.2.1", "2001:db8::1"}
+	candidate.TrustedProxies = []string{"10.0.0.1"}
+
+	diff := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if diff.HasDifferences {
+		t.Errorf("expected no differences between semantically identical ASN, Method, and IP representations, got %+v", diff)
+	}
+	if diff.Impact != DiffImpactNeutral {
+		t.Errorf("expected NEUTRAL impact, got %s", diff.Impact)
+	}
+
+	// Now introduce an actual change
+	candidate.AllowedASNs = append(candidate.AllowedASNs, "AS64503")
+	diffActual := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if !diffActual.HasDifferences {
+		t.Error("expected difference when new ASN is added")
+	}
+	if len(diffActual.AllowedASNs.Added) != 1 || diffActual.AllowedASNs.Added[0] != "AS64503" {
+		t.Errorf("expected added AS64503, got %+v", diffActual.AllowedASNs.Added)
+	}
+}

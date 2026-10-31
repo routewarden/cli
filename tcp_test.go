@@ -125,6 +125,13 @@ func TestTCP_ServerLifecycleAndEventListener(t *testing.T) {
 	defer echoListener.Close()
 	echoAddr := echoListener.Addr().String()
 
+	testConn, err := net.Dial("tcp4", echoAddr)
+	if err != nil {
+		t.Skipf("skipping test in sandbox: loopback dial not permitted: %v", err)
+		return
+	}
+	_ = testConn.Close()
+
 	go func() {
 		for {
 			conn, err := echoListener.Accept()

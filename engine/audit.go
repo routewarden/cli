@@ -362,19 +362,23 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		"custom":               true,
 		"default":              true,
 	}
-	modeToCheck := cfg.Mode
-	if modeToCheck == "" && cfg.Response != nil && cfg.Response.Mode != "" {
-		modeToCheck = cfg.Response.Mode
+	checkMode := func(m, fieldName string) {
+		if m != "" && !validModes[strings.ToLower(strings.TrimSpace(m))] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A012",
+				Severity:    SeverityWarning,
+				Title:       "Unrecognized Response Mode",
+				Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", m),
+				Field:       fieldName,
+				Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', 'xml', 'aiPoison', or 'markovTarpit'.",
+			})
+		}
 	}
-	if modeToCheck != "" && !validModes[strings.ToLower(modeToCheck)] {
-		report.Issues = append(report.Issues, AuditIssue{
-			Code:        "RW-A012",
-			Severity:    SeverityWarning,
-			Title:       "Unrecognized Response Mode",
-			Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", modeToCheck),
-			Field:       "mode",
-			Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', 'xml', 'aiPoison', or 'markovTarpit'.",
-		})
+	if cfg.Mode != "" {
+		checkMode(cfg.Mode, "mode")
+	}
+	if cfg.Response != nil && cfg.Response.Mode != "" {
+		checkMode(cfg.Response.Mode, "response.mode")
 	}
 
 	// ── Rule RW-A013: Monitored Forwarding Headers without Trusted Proxies ──
