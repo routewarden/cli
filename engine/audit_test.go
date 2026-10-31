@@ -45,6 +45,7 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 	}
 	cfg.AllowPatterns = []string{
 		".*", // RW-A004: universal allow
+		".*", // RW-A008: duplicate allow
 	}
 	cfg.CheckBodyPatterns = []string{
 		"((b+)+)+", // RW-A006: ReDoS in body pattern
@@ -56,6 +57,8 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 	}
 	cfg.AIBotProfile = "unsupported_profile"     // RW-A016: invalid profile
 	cfg.BotDefenseLevel = "unsupported_level"   // RW-A017: invalid bot defense level
+	cfg.AllowedASNs = []string{"AS13335", "AS_INVALID"} // RW-A018: missing asnDB, RW-A019: malformed ASN
+	cfg.TrapBanDuration = "invalid_duration"    // RW-A020: invalid ban duration
 	cfg.AllowedIPs = []string{"999.999.999.999"} // RW-A009: malformed IP
 	cfg.StatusCode = 999                         // RW-A011: invalid status code
 	cfg.Mode = "invalidMode"                     // RW-A012: invalid mode
@@ -73,7 +76,7 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 		foundCodes[issue.Code] = true
 	}
 
-	expectedCodes := []string{"RW-A001", "RW-A003", "RW-A004", "RW-A005", "RW-A006", "RW-A007", "RW-A008", "RW-A009", "RW-A011", "RW-A012", "RW-A015", "RW-A016", "RW-A017"}
+	expectedCodes := []string{"RW-A001", "RW-A003", "RW-A004", "RW-A005", "RW-A006", "RW-A007", "RW-A008", "RW-A009", "RW-A011", "RW-A012", "RW-A015", "RW-A016", "RW-A017", "RW-A018", "RW-A019", "RW-A020", "RW-A021"}
 	for _, code := range expectedCodes {
 		if !foundCodes[code] {
 			t.Errorf("expected audit issue %s to be flagged", code)

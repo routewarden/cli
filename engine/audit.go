@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Severity represents the severity level of an audit finding.
@@ -191,7 +193,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		normalized := strings.TrimSpace(p)
 		if seenBody[normalized] {
 			report.Issues = append(report.Issues, AuditIssue{
-				Code:        "RW-A008",
+				Code:        "RW-A021",
 				Severity:    SeverityInfo,
 				Title:       "Duplicate Body Pattern",
 				Message:     fmt.Sprintf("Pattern %q is defined multiple times in checkBodyPatterns.", p),
@@ -407,8 +409,70 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		})
 	}
 
+	// ── Rule RW-A018: Missing ASN Database Check ────────────────────────────
+	if (len(cfg.AllowedASNs) > 0 || len(cfg.BlockedASNs) > 0) && strings.TrimSpace(cfg.ASNDB) == "" {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A018",
+			Severity:    SeverityCritical,
+			Title:       "Missing ASN Database File",
+			Message:     "ASN allowlisting or blocking is configured, but 'asnDB' is empty. RouteWarden requires an offline JSON routing database to resolve client IPs to ASNs.",
+			Field:       "asnDB",
+			Remediation: "Specify the path to your offline ASN routing snapshot in 'asnDB' (e.g. '/etc/routewarden/asn.json').",
+		})
+	}
+
+	// ── Rule RW-A019: ASN Identifier Syntax Validation ──────────────────────
+	checkASNs := func(asns []string, field string) {
+		for _, rawASN := range asns {
+			trimmed := strings.TrimSpace(rawASN)
+			if trimmed == "" {
+				continue
+			}
+			if _, err := parseASN(trimmed); err != nil {
+				report.Issues = append(report.Issues, AuditIssue{
+					Code:        "RW-A019",
+					Severity:    SeverityCritical,
+					Title:       "Malformed ASN Identifier",
+					Message:     fmt.Sprintf("ASN %q in %s is invalid: %v", rawASN, field, err),
+					Pattern:     rawASN,
+					Field:       field,
+					Remediation: "Provide valid ASN format like 'AS13335' or numeric '13335' (1..4294967295).",
+				})
+			}
+		}
+	}
+	checkASNs(cfg.AllowedASNs, "allowedASNs")
+	checkASNs(cfg.BlockedASNs, "blockedASNs")
+
+	// ── Rule RW-A020: Trap Ban Duration Validation ──────────────────────────
+	if cfg.TrapBanDuration != "" && !isValidBanDuration(cfg.TrapBanDuration) {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A020",
+			Severity:    SeverityWarning,
+			Title:       "Invalid Honeypot Trap Ban Duration",
+			Message:     fmt.Sprintf("trapBanDuration %q cannot be parsed as a time duration or integer seconds.", cfg.TrapBanDuration),
+			Pattern:     cfg.TrapBanDuration,
+			Field:       "trapBanDuration",
+			Remediation: "Use standard duration strings such as '24h', '1h', '30m', or positive integer seconds (e.g. '86400').",
+		})
+	}
+
 	report.finalize(false)
 	return report
+}
+
+func isValidBanDuration(d string) bool {
+	d = strings.TrimSpace(d)
+	if d == "" {
+		return true
+	}
+	if dur, err := time.ParseDuration(d); err == nil && dur > 0 {
+		return true
+	}
+	if secs, err := strconv.ParseInt(d, 10, 64); err == nil && secs > 0 {
+		return true
+	}
+	return false
 }
 
 func isValidIPOrCIDR(v string) bool {
