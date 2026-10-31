@@ -55,13 +55,13 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 	cfg.BlockUserAgents = []string{
 		"(?i)[a-z", // RW-A015: unclosed bracket regex in blockUserAgents
 	}
-	cfg.AIBotProfile = "unsupported_profile"     // RW-A016: invalid profile
-	cfg.BotDefenseLevel = "unsupported_level"   // RW-A017: invalid bot defense level
+	cfg.AIBotProfile = "unsupported_profile"            // RW-A016: invalid profile
+	cfg.BotDefenseLevel = "unsupported_level"           // RW-A017: invalid bot defense level
 	cfg.AllowedASNs = []string{"AS13335", "AS_INVALID"} // RW-A018: missing asnDB, RW-A019: malformed ASN
-	cfg.TrapBanDuration = "invalid_duration"    // RW-A020: invalid ban duration
-	cfg.AllowedIPs = []string{"999.999.999.999"} // RW-A009: malformed IP
-	cfg.StatusCode = 999                         // RW-A011: invalid status code
-	cfg.Mode = "invalidMode"                     // RW-A012: invalid mode
+	cfg.TrapBanDuration = "invalid_duration"            // RW-A020: invalid ban duration
+	cfg.AllowedIPs = []string{"999.999.999.999"}        // RW-A009: malformed IP
+	cfg.StatusCode = 999                                // RW-A011: invalid status code
+	cfg.Mode = "invalidMode"                            // RW-A012: invalid mode
 
 	report := AuditConfig(cfg, "malformed.json")
 	if report.Passed {

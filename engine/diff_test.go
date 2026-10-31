@@ -73,7 +73,7 @@ func TestDiffConfigs_BodyPatternsAndResponse(t *testing.T) {
 	}
 
 	candidate := CreateConfig()
-	candidate.CheckBody = false // relaxed
+	candidate.CheckBody = false                                // relaxed
 	candidate.CheckBodyPatterns = []string{`(?i)drop\s+table`} // removed union select
 	candidate.CheckBodyMaxBytes = 131072
 	candidate.CustomResponseText = "Custom WAF Block"
