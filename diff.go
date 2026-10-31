@@ -144,6 +144,7 @@ func printDiffTextReport(diff *engine.PolicyDiff) {
 	}
 
 	// Allowed IPs
+	// Allowed ASNs
 	if len(diff.AllowedASNs.Added) > 0 || len(diff.AllowedASNs.Removed) > 0 {
 		fmt.Println("\nAllowed ASNs:")
 		for _, asn := range diff.AllowedASNs.Removed {
@@ -151,6 +152,50 @@ func printDiffTextReport(diff *engine.PolicyDiff) {
 		}
 		for _, asn := range diff.AllowedASNs.Added {
 			fmt.Printf("  + %s\n", asn)
+		}
+	}
+
+	// Blocked ASNs
+	if len(diff.BlockedASNs.Added) > 0 || len(diff.BlockedASNs.Removed) > 0 {
+		fmt.Println("\nBlocked ASNs:")
+		for _, asn := range diff.BlockedASNs.Removed {
+			fmt.Printf("  - %s\n", asn)
+		}
+		for _, asn := range diff.BlockedASNs.Added {
+			fmt.Printf("  + %s\n", asn)
+		}
+	}
+
+	// Block User Agents
+	if len(diff.BlockUserAgents.Added) > 0 || len(diff.BlockUserAgents.Removed) > 0 {
+		fmt.Println("\nBlocked User Agents:")
+		for _, ua := range diff.BlockUserAgents.Removed {
+			fmt.Printf("  - %s (removed)\n", ua)
+		}
+		for _, ua := range diff.BlockUserAgents.Added {
+			fmt.Printf("  + %s (added)\n", ua)
+		}
+	}
+
+	// Allow User Agents
+	if len(diff.AllowUserAgents.Added) > 0 || len(diff.AllowUserAgents.Removed) > 0 {
+		fmt.Println("\nAllowed User Agents:")
+		for _, ua := range diff.AllowUserAgents.Removed {
+			fmt.Printf("  - %s (removed)\n", ua)
+		}
+		for _, ua := range diff.AllowUserAgents.Added {
+			fmt.Printf("  + %s (added)\n", ua)
+		}
+	}
+
+	// Honeypot Trap Paths
+	if len(diff.HoneypotTrapPaths.Added) > 0 || len(diff.HoneypotTrapPaths.Removed) > 0 {
+		fmt.Println("\nHoneypot Spider Trap Paths:")
+		for _, p := range diff.HoneypotTrapPaths.Removed {
+			fmt.Printf("  - %s (removed)\n", p)
+		}
+		for _, p := range diff.HoneypotTrapPaths.Added {
+			fmt.Printf("  + %s (added)\n", p)
 		}
 	}
 	if len(diff.AllowedIPs.Added) > 0 || len(diff.AllowedIPs.Removed) > 0 {

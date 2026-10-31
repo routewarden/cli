@@ -2093,6 +2093,41 @@ func TestEngine_BotDefenseLevelPresets(t *testing.T) {
 	if !strings.Contains(nginxOut, `bot_defense_level = "standard"`) {
 		t.Errorf("expected Nginx Lua to contain bot_defense_level, got:\n%s", nginxOut)
 	}
+
+	// 5b. Generator tests with explicit false overrides
+	cfgExplicitFalse := engine.CreateConfig()
+	overrideFalseJSON := `{
+		"botDefenseLevel": "standard",
+		"detectBrowserImpersonation": false
+	}`
+	if err := json.Unmarshal([]byte(overrideFalseJSON), cfgExplicitFalse); err != nil {
+		t.Fatalf("failed to unmarshal explicit false json: %v", err)
+	}
+
+	yamlFalse := cfgExplicitFalse.GenerateTraefikYAML()
+	if !strings.Contains(yamlFalse, "detectBrowserImpersonation: false") {
+		t.Errorf("expected Traefik YAML to serialize detectBrowserImpersonation: false, got:\n%s", yamlFalse)
+	}
+
+	tomlFalse := cfgExplicitFalse.GenerateTraefikTOML()
+	if !strings.Contains(tomlFalse, "detectBrowserImpersonation = false") {
+		t.Errorf("expected Traefik TOML to serialize detectBrowserImpersonation = false, got:\n%s", tomlFalse)
+	}
+
+	labelsFalse := cfgExplicitFalse.GenerateTraefikLabels()
+	if !strings.Contains(labelsFalse, "detectBrowserImpersonation=false") {
+		t.Errorf("expected Traefik Labels to serialize detectBrowserImpersonation=false, got:\n%s", labelsFalse)
+	}
+
+	caddyFalse := cfgExplicitFalse.GenerateCaddyfile()
+	if !strings.Contains(caddyFalse, "detect_browser_impersonation false") {
+		t.Errorf("expected Caddyfile to serialize detect_browser_impersonation false, got:\n%s", caddyFalse)
+	}
+
+	nginxFalse := cfgExplicitFalse.GenerateNginxLua()
+	if !strings.Contains(nginxFalse, "detect_browser_impersonation = false") {
+		t.Errorf("expected Nginx Lua to serialize detect_browser_impersonation = false, got:\n%s", nginxFalse)
+	}
 }
 
 

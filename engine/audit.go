@@ -244,6 +244,26 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		}
 	}
 
+	// ── Rule RW-A017: Bot Defense Level Validation ──────────────────────────
+	if cfg.BotDefenseLevel != "" {
+		lvl := strings.ToLower(strings.TrimSpace(cfg.BotDefenseLevel))
+		validLevels := map[string]bool{
+			"off": true, "light": true, "relaxed": true,
+			"standard": true, "moderate": true,
+			"strict": true, "aggressive": true, "paranoia": true,
+		}
+		if !validLevels[lvl] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A017",
+				Severity:    SeverityWarning,
+				Title:       "Unrecognized Bot Defense Level",
+				Message:     fmt.Sprintf("Bot defense level %q is not recognized.", cfg.BotDefenseLevel),
+				Field:       "botDefenseLevel",
+				Remediation: "Use one of: 'off', 'light' (relaxed), 'standard' (moderate), 'strict', or 'aggressive' (paranoia).",
+			})
+		}
+	}
+
 	// ── Rule RW-A009: Invalid IP / CIDR Notations ───────────────────────────
 	for _, ipStr := range cfg.AllowedIPs {
 		ipTrimmed := strings.TrimSpace(ipStr)

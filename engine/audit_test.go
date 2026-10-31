@@ -54,7 +54,8 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 	cfg.BlockUserAgents = []string{
 		"(?i)[a-z", // RW-A015: unclosed bracket regex in blockUserAgents
 	}
-	cfg.AIBotProfile = "unsupported_profile" // RW-A016: invalid profile
+	cfg.AIBotProfile = "unsupported_profile"     // RW-A016: invalid profile
+	cfg.BotDefenseLevel = "unsupported_level"   // RW-A017: invalid bot defense level
 	cfg.AllowedIPs = []string{"999.999.999.999"} // RW-A009: malformed IP
 	cfg.StatusCode = 999                         // RW-A011: invalid status code
 	cfg.Mode = "invalidMode"                     // RW-A012: invalid mode
@@ -72,7 +73,7 @@ func TestAuditConfig_DetectFlaws(t *testing.T) {
 		foundCodes[issue.Code] = true
 	}
 
-	expectedCodes := []string{"RW-A001", "RW-A003", "RW-A004", "RW-A005", "RW-A006", "RW-A007", "RW-A008", "RW-A009", "RW-A011", "RW-A012", "RW-A015", "RW-A016"}
+	expectedCodes := []string{"RW-A001", "RW-A003", "RW-A004", "RW-A005", "RW-A006", "RW-A007", "RW-A008", "RW-A009", "RW-A011", "RW-A012", "RW-A015", "RW-A016", "RW-A017"}
 	for _, code := range expectedCodes {
 		if !foundCodes[code] {
 			t.Errorf("expected audit issue %s to be flagged", code)

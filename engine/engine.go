@@ -114,20 +114,28 @@ type Config struct {
 	ExplicitFields             []string        `json:"explicitFields,omitempty"`
 }
 
-func (cfg *Config) markExplicit(field string) {
+func (cfg *Config) MarkExplicit(field string) {
 	if slices.Contains(cfg.ExplicitFields, field) {
 		return
 	}
 	cfg.ExplicitFields = append(cfg.ExplicitFields, field)
 }
 
-func (cfg *Config) isExplicit(fields ...string) bool {
+func (cfg *Config) IsExplicit(fields ...string) bool {
 	for _, f := range fields {
 		if slices.Contains(cfg.ExplicitFields, f) {
 			return true
 		}
 	}
 	return false
+}
+
+func (cfg *Config) markExplicit(field string) {
+	cfg.MarkExplicit(field)
+}
+
+func (cfg *Config) isExplicit(fields ...string) bool {
+	return cfg.IsExplicit(fields...)
 }
 
 // UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
@@ -1810,20 +1818,47 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.BotDefenseLevel != "" {
 		fmt.Fprintf(&b, "          botDefenseLevel: %q\n", cfg.BotDefenseLevel)
 	}
-	if cfg.BlockAIBots {
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("          blockAIBots: false\n")
+	} else if cfg.BlockAIBots {
 		b.WriteString("          blockAIBots: true\n")
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "          aiBotProfile: %q\n", cfg.AIBotProfile)
 	}
-	if cfg.VerifySearchEngineBots {
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("          verifySearchEngineBots: false\n")
+	} else if cfg.VerifySearchEngineBots {
 		b.WriteString("          verifySearchEngineBots: true\n")
 	}
-	if cfg.DetectBrowserImpersonation {
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("          detectBrowserImpersonation: false\n")
+	} else if cfg.DetectBrowserImpersonation {
 		b.WriteString("          detectBrowserImpersonation: true\n")
 	}
-	if cfg.BlockScriptClients {
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("          blockScriptClients: false\n")
+	} else if cfg.BlockScriptClients {
 		b.WriteString("          blockScriptClients: true\n")
+	}
+	var explicitFalseYAML []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseYAML = append(explicitFalseYAML, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseYAML = append(explicitFalseYAML, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseYAML = append(explicitFalseYAML, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseYAML = append(explicitFalseYAML, "blockScriptClients")
+	}
+	if len(explicitFalseYAML) > 0 {
+		b.WriteString("          explicitFields:\n")
+		for _, ef := range explicitFalseYAML {
+			fmt.Fprintf(&b, "            - %q\n", ef)
+		}
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("          blockUserAgents:\n")
@@ -2016,20 +2051,48 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	if cfg.BotDefenseLevel != "" {
 		fmt.Fprintf(&b, "  botDefenseLevel = %q\n", cfg.BotDefenseLevel)
 	}
-	if cfg.BlockAIBots {
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("  blockAIBots = false\n")
+	} else if cfg.BlockAIBots {
 		b.WriteString("  blockAIBots = true\n")
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "  aiBotProfile = %q\n", cfg.AIBotProfile)
 	}
-	if cfg.VerifySearchEngineBots {
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("  verifySearchEngineBots = false\n")
+	} else if cfg.VerifySearchEngineBots {
 		b.WriteString("  verifySearchEngineBots = true\n")
 	}
-	if cfg.DetectBrowserImpersonation {
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("  detectBrowserImpersonation = false\n")
+	} else if cfg.DetectBrowserImpersonation {
 		b.WriteString("  detectBrowserImpersonation = true\n")
 	}
-	if cfg.BlockScriptClients {
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("  blockScriptClients = false\n")
+	} else if cfg.BlockScriptClients {
 		b.WriteString("  blockScriptClients = true\n")
+	}
+	var explicitFalseTOML []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseTOML = append(explicitFalseTOML, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseTOML = append(explicitFalseTOML, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseTOML = append(explicitFalseTOML, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseTOML = append(explicitFalseTOML, "blockScriptClients")
+	}
+	if len(explicitFalseTOML) > 0 {
+		var quoted []string
+		for _, ef := range explicitFalseTOML {
+			quoted = append(quoted, fmt.Sprintf("%q", ef))
+		}
+		fmt.Fprintf(&b, "  explicitFields = [%s]\n", strings.Join(quoted, ", "))
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("  blockUserAgents = [")
@@ -2228,20 +2291,44 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.BotDefenseLevel != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.botDefenseLevel="+cfg.BotDefenseLevel)
 	}
-	if cfg.BlockAIBots {
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=false\"\n")
+	} else if cfg.BlockAIBots {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=true\"\n")
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.aiBotProfile="+cfg.AIBotProfile)
 	}
-	if cfg.VerifySearchEngineBots {
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=false\"\n")
+	} else if cfg.VerifySearchEngineBots {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=true\"\n")
 	}
-	if cfg.DetectBrowserImpersonation {
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.detectBrowserImpersonation=false\"\n")
+	} else if cfg.DetectBrowserImpersonation {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.detectBrowserImpersonation=true\"\n")
 	}
-	if cfg.BlockScriptClients {
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=false\"\n")
+	} else if cfg.BlockScriptClients {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=true\"\n")
+	}
+	var explicitFalseLabels []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseLabels = append(explicitFalseLabels, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseLabels = append(explicitFalseLabels, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseLabels = append(explicitFalseLabels, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseLabels = append(explicitFalseLabels, "blockScriptClients")
+	}
+	if len(explicitFalseLabels) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.explicitFields="+strings.Join(explicitFalseLabels, ","))
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockUserAgents="+strings.Join(cfg.BlockUserAgents, ","))
@@ -2403,19 +2490,27 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.BotDefenseLevel != "" {
 		fmt.Fprintf(&b, "    bot_defense_level %s\n", cfg.BotDefenseLevel)
 	}
-	if cfg.BlockAIBots {
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots false\n")
+	} else if cfg.BlockAIBots {
 		b.WriteString("    block_ai_bots true\n")
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "    ai_bot_profile %s\n", cfg.AIBotProfile)
 	}
-	if cfg.VerifySearchEngineBots {
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots false\n")
+	} else if cfg.VerifySearchEngineBots {
 		b.WriteString("    verify_search_engine_bots true\n")
 	}
-	if cfg.DetectBrowserImpersonation {
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation false\n")
+	} else if cfg.DetectBrowserImpersonation {
 		b.WriteString("    detect_browser_impersonation true\n")
 	}
-	if cfg.BlockScriptClients {
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients false\n")
+	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients true\n")
 	}
 	for _, ua := range cfg.BlockUserAgents {
@@ -2560,19 +2655,27 @@ func (cfg *Config) GenerateNginxLua() string {
 	if cfg.BotDefenseLevel != "" {
 		fmt.Fprintf(&b, "    bot_defense_level = %q,\n", cfg.BotDefenseLevel)
 	}
-	if cfg.BlockAIBots {
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots = false,\n")
+	} else if cfg.BlockAIBots {
 		b.WriteString("    block_ai_bots = true,\n")
 	}
 	if cfg.AIBotProfile != "" {
 		fmt.Fprintf(&b, "    ai_bot_profile = %q,\n", cfg.AIBotProfile)
 	}
-	if cfg.VerifySearchEngineBots {
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots = false,\n")
+	} else if cfg.VerifySearchEngineBots {
 		b.WriteString("    verify_search_engine_bots = true,\n")
 	}
-	if cfg.DetectBrowserImpersonation {
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation = false,\n")
+	} else if cfg.DetectBrowserImpersonation {
 		b.WriteString("    detect_browser_impersonation = true,\n")
 	}
-	if cfg.BlockScriptClients {
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients = false,\n")
+	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients = true,\n")
 	}
 	if len(cfg.BlockUserAgents) > 0 {

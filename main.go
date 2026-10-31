@@ -1064,18 +1064,23 @@ func handleTest(args []string) {
 			}
 			if f.Name == "block-ai-bots" {
 				cfg.BlockAIBots = *blockAIBots
+				cfg.MarkExplicit("blockAIBots")
 			}
 			if f.Name == "ai-bot-profile" {
 				cfg.AIBotProfile = *aiBotProfile
+				cfg.MarkExplicit("aiBotProfile")
 			}
 			if f.Name == "detect-browser-impersonation" {
 				cfg.DetectBrowserImpersonation = *detectBrowser
+				cfg.MarkExplicit("detectBrowserImpersonation")
 			}
 			if f.Name == "block-script-clients" {
 				cfg.BlockScriptClients = *blockScripts
+				cfg.MarkExplicit("blockScriptClients")
 			}
 			if f.Name == "verify-search-engine-bots" {
 				cfg.VerifySearchEngineBots = *verifySearch
+				cfg.MarkExplicit("verifySearchEngineBots")
 			}
 		})
 		if queryFlagPassed {
@@ -1087,24 +1092,27 @@ func handleTest(args []string) {
 	} else {
 		cfg.CheckQuery = *checkQuery
 		cfg.CheckBody = *checkBody
-		if *botDefenseLevel != "" {
-			cfg.BotDefenseLevel = *botDefenseLevel
-		}
-		if *blockAIBots {
-			cfg.BlockAIBots = true
-		}
-		if *aiBotProfile != "" {
-			cfg.AIBotProfile = *aiBotProfile
-		}
-		if *detectBrowser {
-			cfg.DetectBrowserImpersonation = true
-		}
-		if *blockScripts {
-			cfg.BlockScriptClients = true
-		}
-		if *verifySearch {
-			cfg.VerifySearchEngineBots = true
-		}
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "bot-defense-level":
+				cfg.BotDefenseLevel = *botDefenseLevel
+			case "block-ai-bots":
+				cfg.BlockAIBots = *blockAIBots
+				cfg.MarkExplicit("blockAIBots")
+			case "ai-bot-profile":
+				cfg.AIBotProfile = *aiBotProfile
+				cfg.MarkExplicit("aiBotProfile")
+			case "detect-browser-impersonation":
+				cfg.DetectBrowserImpersonation = *detectBrowser
+				cfg.MarkExplicit("detectBrowserImpersonation")
+			case "block-script-clients":
+				cfg.BlockScriptClients = *blockScripts
+				cfg.MarkExplicit("blockScriptClients")
+			case "verify-search-engine-bots":
+				cfg.VerifySearchEngineBots = *verifySearch
+				cfg.MarkExplicit("verifySearchEngineBots")
+			}
+		})
 	}
 
 	if *testBody != "" && !cfg.CheckBody && len(cfg.CheckBodyPatterns) == 0 {
@@ -1118,7 +1126,9 @@ func handleTest(args []string) {
 			hdrKey := strings.TrimSpace(parts[0])
 			hdrVal := strings.TrimSpace(parts[1])
 			headers[hdrKey] = hdrVal
-			cfg.CheckHeaders = append(cfg.CheckHeaders, hdrKey)
+			if *configPath == "" && !strings.EqualFold(hdrKey, "user-agent") && !strings.EqualFold(hdrKey, "accept-language") && !strings.EqualFold(hdrKey, "accept-encoding") {
+				cfg.CheckHeaders = append(cfg.CheckHeaders, hdrKey)
+			}
 		}
 	}
 

@@ -143,3 +143,50 @@ func TestDiffConfigs_DeduplicateSlices(t *testing.T) {
 		t.Errorf("expected exactly 1 deduplicated removed pattern, got %+v", diff.BlockPatterns.Removed)
 	}
 }
+
+func TestDiffConfigs_BotDefenseAndCrawlers(t *testing.T) {
+	base := CreateConfig()
+	base.BotDefenseLevel = "off"
+	base.BlockAIBots = false
+
+	candidate := CreateConfig()
+	candidate.BotDefenseLevel = "standard"
+	candidate.BlockAIBots = true
+	candidate.DetectBrowserImpersonation = true
+	candidate.BlockScriptClients = true
+	candidate.HoneypotTrapPaths = []string{"/hidden-trap"}
+	candidate.BlockedASNs = []string{"AS64501"}
+	candidate.BlockUserAgents = []string{"(?i)BadCrawler"}
+
+	diff := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if !diff.HasDifferences {
+		t.Fatal("expected differences for bot defense changes")
+	}
+	if diff.Impact != DiffImpactHardened {
+		t.Errorf("expected HARDENED impact, got %s", diff.Impact)
+	}
+	if _, ok := diff.Properties["botDefenseLevel"]; !ok {
+		t.Errorf("expected diff in botDefenseLevel")
+	}
+	if _, ok := diff.Properties["blockAIBots"]; !ok {
+		t.Errorf("expected diff in blockAIBots")
+	}
+	if len(diff.HoneypotTrapPaths.Added) != 1 {
+		t.Errorf("expected 1 added honeypot trap path, got %d", len(diff.HoneypotTrapPaths.Added))
+	}
+	if len(diff.BlockedASNs.Added) != 1 {
+		t.Errorf("expected 1 added blocked ASN, got %d", len(diff.BlockedASNs.Added))
+	}
+	if len(diff.BlockUserAgents.Added) != 1 {
+		t.Errorf("expected 1 added block user agent, got %d", len(diff.BlockUserAgents.Added))
+	}
+
+	// Relaxing case: disable bot defense in candidate
+	diffRelax := DiffConfigs(candidate, base, "candidate.json", "base.json")
+	if !diffRelax.HasDifferences {
+		t.Fatal("expected differences when bot defense is disabled")
+	}
+	if diffRelax.Impact != DiffImpactRelaxed {
+		t.Errorf("expected RELAXED impact, got %s", diffRelax.Impact)
+	}
+}

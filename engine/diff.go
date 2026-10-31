@@ -30,12 +30,16 @@ type ScalarDiff struct {
 // PolicyDiff represents the structural and security difference between two policies.
 type PolicyDiff struct {
 	AllowedASNs       SliceDiff             `json:"allowedASNs"`
+	BlockedASNs       SliceDiff             `json:"blockedASNs"`
 	BaseFile          string                `json:"baseFile"`
 	CandidateFile     string                `json:"candidateFile"`
 	Impact            DiffImpact            `json:"impact"`
 	ImpactReasons     []string              `json:"impactReasons"`
 	BlockPatterns     SliceDiff             `json:"blockPatterns"`
 	AllowPatterns     SliceDiff             `json:"allowPatterns"`
+	BlockUserAgents   SliceDiff             `json:"blockUserAgents"`
+	AllowUserAgents   SliceDiff             `json:"allowUserAgents"`
+	HoneypotTrapPaths SliceDiff             `json:"honeypotTrapPaths"`
 	AllowedIPs        SliceDiff             `json:"allowedIps"`
 	TrustedProxies    SliceDiff             `json:"trustedProxies"`
 	Methods           SliceDiff             `json:"methods"`
@@ -62,6 +66,10 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		BlockPatterns:     diffStringSlices(base.BlockPatterns, candidate.BlockPatterns),
 		AllowPatterns:     diffStringSlices(base.AllowPatterns, candidate.AllowPatterns),
 		AllowedASNs:       diffStringSlices(base.AllowedASNs, candidate.AllowedASNs),
+		BlockedASNs:       diffStringSlices(base.BlockedASNs, candidate.BlockedASNs),
+		BlockUserAgents:   diffStringSlices(base.BlockUserAgents, candidate.BlockUserAgents),
+		AllowUserAgents:   diffStringSlices(base.AllowUserAgents, candidate.AllowUserAgents),
+		HoneypotTrapPaths: diffStringSlices(base.HoneypotTrapPaths, candidate.HoneypotTrapPaths),
 		AllowedIPs:        diffStringSlices(base.AllowedIPs, candidate.AllowedIPs),
 		TrustedProxies:    diffStringSlices(base.TrustedProxies, candidate.TrustedProxies),
 		Methods:           diffStringSlices(base.Methods, candidate.Methods),
@@ -136,6 +144,59 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		diff.Properties["customResponseText"] = ScalarDiff{Old: base.CustomResponseText, New: candidate.CustomResponseText}
 	}
 
+	if base.BotDefenseLevel != candidate.BotDefenseLevel {
+		diff.Properties["botDefenseLevel"] = ScalarDiff{Old: base.BotDefenseLevel, New: candidate.BotDefenseLevel}
+		if candidate.BotDefenseLevel == "" || candidate.BotDefenseLevel == "off" {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: Bot defense preset tier was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: Bot defense preset tier changed to %q.", candidate.BotDefenseLevel))
+		}
+	}
+
+	if base.BlockAIBots != candidate.BlockAIBots {
+		diff.Properties["blockAIBots"] = ScalarDiff{Old: base.BlockAIBots, New: candidate.BlockAIBots}
+		if !candidate.BlockAIBots {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: AI bot blocking was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: AI bot blocking was enabled.")
+		}
+	}
+
+	if base.AIBotProfile != candidate.AIBotProfile {
+		diff.Properties["aiBotProfile"] = ScalarDiff{Old: base.AIBotProfile, New: candidate.AIBotProfile}
+	}
+
+	if base.VerifySearchEngineBots != candidate.VerifySearchEngineBots {
+		diff.Properties["verifySearchEngineBots"] = ScalarDiff{Old: base.VerifySearchEngineBots, New: candidate.VerifySearchEngineBots}
+		if !candidate.VerifySearchEngineBots {
+			diff.ImpactReasons = append(diff.ImpactReasons, "MEDIUM: Search engine bot FCrDNS verification was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: Search engine bot FCrDNS verification was enabled.")
+		}
+	}
+
+	if base.DetectBrowserImpersonation != candidate.DetectBrowserImpersonation {
+		diff.Properties["detectBrowserImpersonation"] = ScalarDiff{Old: base.DetectBrowserImpersonation, New: candidate.DetectBrowserImpersonation}
+		if !candidate.DetectBrowserImpersonation {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: Browser impersonation detection was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: Browser impersonation detection was enabled.")
+		}
+	}
+
+	if base.BlockScriptClients != candidate.BlockScriptClients {
+		diff.Properties["blockScriptClients"] = ScalarDiff{Old: base.BlockScriptClients, New: candidate.BlockScriptClients}
+		if !candidate.BlockScriptClients {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: Automated script client blocking was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: Automated script client blocking was enabled.")
+		}
+	}
+
+	if base.TrapBanDuration != candidate.TrapBanDuration {
+		diff.Properties["trapBanDuration"] = ScalarDiff{Old: base.TrapBanDuration, New: candidate.TrapBanDuration}
+	}
+
 	baseMode, baseStatus, baseBody := base.ResolveResponse()
 	candMode, candStatus, candBody := candidate.ResolveResponse()
 	if baseMode != candMode {
@@ -174,21 +235,44 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d IP/CIDR entry(ies) were removed from whitelist.", len(diff.AllowedIPs.Removed)))
 	}
 
+	if len(diff.BlockedASNs.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d ASN(s) were added to blocklist: %s", len(diff.BlockedASNs.Added), strings.Join(diff.BlockedASNs.Added, ", ")))
+	}
+	if len(diff.BlockedASNs.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d ASN(s) were removed from blocklist: %s", len(diff.BlockedASNs.Removed), strings.Join(diff.BlockedASNs.Removed, ", ")))
+	}
+
+	if len(diff.BlockUserAgents.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d User-Agent block pattern(s) were added.", len(diff.BlockUserAgents.Added)))
+	}
+	if len(diff.BlockUserAgents.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HIGH: %d User-Agent block pattern(s) were removed.", len(diff.BlockUserAgents.Removed)))
+	}
+
+	if len(diff.AllowUserAgents.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("WARNING: %d User-Agent allow pattern(s) were added (may bypass bot defense).", len(diff.AllowUserAgents.Added)))
+	}
+
+	if len(diff.HoneypotTrapPaths.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d honeypot trap path(s) were configured.", len(diff.HoneypotTrapPaths.Added)))
+	}
+	if len(diff.HoneypotTrapPaths.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d honeypot trap path(s) were removed.", len(diff.HoneypotTrapPaths.Removed)))
+	}
+
 	// ── Determine Overall Impact ────────────────────────────────────────────
-	diff.HasDifferences = len(diff.AllowedASNs.Added) > 0 || len(diff.AllowedASNs.Removed) > 0 || len(diff.BlockPatterns.Added) > 0 ||
-		len(diff.BlockPatterns.Removed) > 0 ||
-		len(diff.AllowPatterns.Added) > 0 ||
-		len(diff.AllowPatterns.Removed) > 0 ||
-		len(diff.AllowedIPs.Added) > 0 ||
-		len(diff.AllowedIPs.Removed) > 0 ||
-		len(diff.TrustedProxies.Added) > 0 ||
-		len(diff.TrustedProxies.Removed) > 0 ||
-		len(diff.Methods.Added) > 0 ||
-		len(diff.Methods.Removed) > 0 ||
-		len(diff.CheckHeaders.Added) > 0 ||
-		len(diff.CheckHeaders.Removed) > 0 ||
-		len(diff.CheckBodyPatterns.Added) > 0 ||
-		len(diff.CheckBodyPatterns.Removed) > 0 ||
+	diff.HasDifferences = len(diff.AllowedASNs.Added) > 0 || len(diff.AllowedASNs.Removed) > 0 ||
+		len(diff.BlockedASNs.Added) > 0 || len(diff.BlockedASNs.Removed) > 0 ||
+		len(diff.BlockPatterns.Added) > 0 || len(diff.BlockPatterns.Removed) > 0 ||
+		len(diff.AllowPatterns.Added) > 0 || len(diff.AllowPatterns.Removed) > 0 ||
+		len(diff.BlockUserAgents.Added) > 0 || len(diff.BlockUserAgents.Removed) > 0 ||
+		len(diff.AllowUserAgents.Added) > 0 || len(diff.AllowUserAgents.Removed) > 0 ||
+		len(diff.HoneypotTrapPaths.Added) > 0 || len(diff.HoneypotTrapPaths.Removed) > 0 ||
+		len(diff.AllowedIPs.Added) > 0 || len(diff.AllowedIPs.Removed) > 0 ||
+		len(diff.TrustedProxies.Added) > 0 || len(diff.TrustedProxies.Removed) > 0 ||
+		len(diff.Methods.Added) > 0 || len(diff.Methods.Removed) > 0 ||
+		len(diff.CheckHeaders.Added) > 0 || len(diff.CheckHeaders.Removed) > 0 ||
+		len(diff.CheckBodyPatterns.Added) > 0 || len(diff.CheckBodyPatterns.Removed) > 0 ||
 		len(diff.Properties) > 0
 
 	hasRelaxing := false
@@ -198,9 +282,17 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(base.EnableDefaultPatterns && !candidate.EnableDefaultPatterns) ||
 		(base.CheckQuery && !candidate.CheckQuery) ||
 		(base.CheckBody && !candidate.CheckBody) ||
+		(base.BlockAIBots && !candidate.BlockAIBots) ||
+		(base.DetectBrowserImpersonation && !candidate.DetectBrowserImpersonation) ||
+		(base.BlockScriptClients && !candidate.BlockScriptClients) ||
+		(base.VerifySearchEngineBots && !candidate.VerifySearchEngineBots) ||
 		len(diff.BlockPatterns.Removed) > 0 ||
 		len(diff.CheckBodyPatterns.Removed) > 0 ||
-		len(diff.AllowPatterns.Added) > 0 {
+		len(diff.BlockedASNs.Removed) > 0 ||
+		len(diff.BlockUserAgents.Removed) > 0 ||
+		len(diff.HoneypotTrapPaths.Removed) > 0 ||
+		len(diff.AllowPatterns.Added) > 0 ||
+		len(diff.AllowUserAgents.Added) > 0 {
 		hasRelaxing = true
 	}
 
@@ -208,8 +300,15 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(!base.EnableDefaultPatterns && candidate.EnableDefaultPatterns) ||
 		(!base.CheckQuery && candidate.CheckQuery) ||
 		(!base.CheckBody && candidate.CheckBody) ||
+		(!base.BlockAIBots && candidate.BlockAIBots) ||
+		(!base.DetectBrowserImpersonation && candidate.DetectBrowserImpersonation) ||
+		(!base.BlockScriptClients && candidate.BlockScriptClients) ||
+		(!base.VerifySearchEngineBots && candidate.VerifySearchEngineBots) ||
 		len(diff.BlockPatterns.Added) > 0 ||
 		len(diff.CheckBodyPatterns.Added) > 0 ||
+		len(diff.BlockedASNs.Added) > 0 ||
+		len(diff.BlockUserAgents.Added) > 0 ||
+		len(diff.HoneypotTrapPaths.Added) > 0 ||
 		len(diff.AllowedIPs.Removed) > 0 {
 		hasHardening = true
 	}
