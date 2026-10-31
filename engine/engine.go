@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -110,6 +111,23 @@ type Config struct {
 	Debug                      bool            `json:"debug,omitempty"`
 	SecurityLog                bool            `json:"securityLog,omitempty"`
 	Response                   *ResponseConfig `json:"response,omitempty"`
+	ExplicitFields             []string        `json:"explicitFields,omitempty"`
+}
+
+func (cfg *Config) markExplicit(field string) {
+	if slices.Contains(cfg.ExplicitFields, field) {
+		return
+	}
+	cfg.ExplicitFields = append(cfg.ExplicitFields, field)
+}
+
+func (cfg *Config) isExplicit(fields ...string) bool {
+	for _, f := range fields {
+		if slices.Contains(cfg.ExplicitFields, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
@@ -319,6 +337,13 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err == nil {
+		for k := range rawMap {
+			cfg.markExplicit(k)
+		}
+	}
+
 	// 1. Config file
 	if raw.ConfigFile != "" {
 		cfg.ConfigFile = raw.ConfigFile
@@ -398,7 +423,7 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	}
 	cfg.BotDefenseLevelSnake = cfg.BotDefenseLevel
 	if cfg.BotDefenseLevel != "" {
-		applyBotDefenseLevel(cfg.BotDefenseLevel, &cfg.BlockAIBots, &cfg.AIBotProfile, &cfg.DetectBrowserImpersonation, &cfg.BlockScriptClients, &cfg.VerifySearchEngineBots)
+		cfg.applyBotDefense(cfg.BotDefenseLevel)
 	}
 
 	if raw.BlockAIBots != nil {
@@ -594,6 +619,72 @@ func applyBotDefenseLevel(level string, blockAIBots *bool, aiBotProfile *string,
 	}
 }
 
+func (cfg *Config) applyBotDefense(level string) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "light", "relaxed":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "train_only"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "standard", "moderate":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "train_only"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "strict":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "all"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "aggressive", "paranoia":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "aggressive"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	}
+}
+
 // CreateConfig creates default RouteWarden configuration.
 func CreateConfig() *Config {
 	return &Config{
@@ -775,21 +866,21 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 		if cfg.BotDefenseLevel != "" {
 			fileCfg.BotDefenseLevel = cfg.BotDefenseLevel
-			applyBotDefenseLevel(cfg.BotDefenseLevel, &fileCfg.BlockAIBots, &fileCfg.AIBotProfile, &fileCfg.DetectBrowserImpersonation, &fileCfg.BlockScriptClients, &fileCfg.VerifySearchEngineBots)
+			fileCfg.applyBotDefense(cfg.BotDefenseLevel)
 		}
-		if cfg.BlockAIBots {
+		if cfg.isExplicit("blockAIBots", "block_ai_bots") || cfg.BlockAIBots {
 			fileCfg.BlockAIBots = cfg.BlockAIBots
 		}
-		if cfg.AIBotProfile != "" {
+		if cfg.isExplicit("aiBotProfile", "ai_bot_profile") || cfg.AIBotProfile != "" {
 			fileCfg.AIBotProfile = cfg.AIBotProfile
 		}
-		if cfg.VerifySearchEngineBots {
+		if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") || cfg.VerifySearchEngineBots {
 			fileCfg.VerifySearchEngineBots = cfg.VerifySearchEngineBots
 		}
-		if cfg.DetectBrowserImpersonation {
+		if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") || cfg.DetectBrowserImpersonation {
 			fileCfg.DetectBrowserImpersonation = cfg.DetectBrowserImpersonation
 		}
-		if cfg.BlockScriptClients {
+		if cfg.isExplicit("blockScriptClients", "block_script_clients") || cfg.BlockScriptClients {
 			fileCfg.BlockScriptClients = cfg.BlockScriptClients
 		}
 		if len(cfg.BlockUserAgents) > 0 {
@@ -892,7 +983,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		fileCfg.ConfigFile = filePath
 		cfg = fileCfg
 	} else if cfg.BotDefenseLevel != "" {
-		applyBotDefenseLevel(cfg.BotDefenseLevel, &cfg.BlockAIBots, &cfg.AIBotProfile, &cfg.DetectBrowserImpersonation, &cfg.BlockScriptClients, &cfg.VerifySearchEngineBots)
+		cfg.applyBotDefense(cfg.BotDefenseLevel)
 	}
 
 	methodsMap := make(map[string]struct{})

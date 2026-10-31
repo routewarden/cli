@@ -2036,6 +2036,42 @@ func TestEngine_BotDefenseLevelPresets(t *testing.T) {
 		t.Errorf("expected GPTBot to be blocked under standard level in file, got blocked=%v, reason=%s", resGPTOverride.Blocked, resGPTOverride.Reason)
 	}
 
+	// 4b. Direct JSON Unmarshal without ConfigFile, verifying explicit override is preserved in NewEngine
+	var cfgDirect engine.Config
+	if err := json.Unmarshal([]byte(overrideJSON), &cfgDirect); err != nil {
+		t.Fatalf("failed to unmarshal direct JSON: %v", err)
+	}
+	engDirect, err := engine.NewEngine(&cfgDirect)
+	if err != nil {
+		t.Fatalf("failed to create direct engine: %v", err)
+	}
+	resSpoofedDirect := engDirect.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedDirect.Blocked {
+		t.Errorf("expected spoofed Chrome to pass with direct json unmarshal override, got blocked=%v, reason=%s", resSpoofedDirect.Blocked, resSpoofedDirect.Reason)
+	}
+	resGPTDirect := engDirect.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPTDirect.Blocked || resGPTDirect.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under direct json unmarshal, got blocked=%v, reason=%s", resGPTDirect.Blocked, resGPTDirect.Reason)
+	}
+
+	// 4c. Bug audit tests: Amazonbot and Anthropic UA matching
+	resAmazon := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)",
+	})
+	if !resAmazon.Blocked || resAmazon.Reason != "ai_bot_blocked" {
+		t.Errorf("expected Amazonbot to be blocked under standard level, got blocked=%v, reason=%s", resAmazon.Blocked, resAmazon.Reason)
+	}
+	resAnthropic := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Anthropic/1.0",
+	})
+	if !resAnthropic.Blocked || resAnthropic.Reason != "ai_bot_blocked" {
+		t.Errorf("expected Anthropic/1.0 to be blocked under standard level, got blocked=%v, reason=%s", resAnthropic.Blocked, resAnthropic.Reason)
+	}
+
 	// 5. Generator tests
 	yamlOut := cfgStandard.GenerateTraefikYAML()
 	if !strings.Contains(yamlOut, `botDefenseLevel: "standard"`) {
