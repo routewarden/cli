@@ -85,6 +85,8 @@ type Config struct {
 	AllowedASNs                []string        `json:"allowedASNs,omitempty"`
 	BlockedASNs                []string        `json:"blockedASNs,omitempty"`
 	ASNDB                      string          `json:"asnDB,omitempty"`
+	BotDefenseLevel            string          `json:"botDefenseLevel,omitempty"`
+	BotDefenseLevelSnake       string          `json:"bot_defense_level,omitempty"`
 	BlockAIBots                bool            `json:"blockAIBots,omitempty"`
 	AIBotProfile               string          `json:"aiBotProfile,omitempty"`
 	VerifySearchEngineBots     bool            `json:"verifySearchEngineBots,omitempty"`
@@ -268,6 +270,8 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		BlockedASNsSnake                []string        `json:"blocked_asns"`
 		ASNDB                           string          `json:"asnDB"`
 		ASNDBSnake                      string          `json:"asn_db"`
+		BotDefenseLevel                 string          `json:"botDefenseLevel"`
+		BotDefenseLevelSnake            string          `json:"bot_defense_level"`
 		BlockAIBots                     *bool           `json:"blockAIBots"`
 		BlockAIBotsSnake                *bool           `json:"block_ai_bots"`
 		AIBotProfile                    string          `json:"aiBotProfile"`
@@ -385,6 +389,16 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	cfg.ASNDB = raw.ASNDB
 	if raw.ASNDBSnake != "" {
 		cfg.ASNDB = raw.ASNDBSnake
+	}
+
+	if raw.BotDefenseLevel != "" {
+		cfg.BotDefenseLevel = raw.BotDefenseLevel
+	} else if raw.BotDefenseLevelSnake != "" {
+		cfg.BotDefenseLevel = raw.BotDefenseLevelSnake
+	}
+	cfg.BotDefenseLevelSnake = cfg.BotDefenseLevel
+	if cfg.BotDefenseLevel != "" {
+		applyBotDefenseLevel(cfg.BotDefenseLevel, &cfg.BlockAIBots, &cfg.AIBotProfile, &cfg.DetectBrowserImpersonation, &cfg.BlockScriptClients, &cfg.VerifySearchEngineBots)
 	}
 
 	if raw.BlockAIBots != nil {
@@ -542,6 +556,42 @@ func (cfg *Config) GetConfigFile() string {
 		return cfg.ConfigFile
 	}
 	return cfg.ConfigFileSnake
+}
+
+func applyBotDefenseLevel(level string, blockAIBots *bool, aiBotProfile *string, detectBrowser *bool, blockScripts *bool, verifySearch *bool) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "light", "relaxed":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "train_only"
+		}
+		*blockScripts = true
+		*verifySearch = true
+	case "standard", "moderate":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "train_only"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	case "strict":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "all"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	case "aggressive", "paranoia":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "aggressive"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	}
 }
 
 // CreateConfig creates default RouteWarden configuration.
@@ -723,6 +773,10 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		if cfg.ASNDB != "" {
 			fileCfg.ASNDB = cfg.ASNDB
 		}
+		if cfg.BotDefenseLevel != "" {
+			fileCfg.BotDefenseLevel = cfg.BotDefenseLevel
+			applyBotDefenseLevel(cfg.BotDefenseLevel, &fileCfg.BlockAIBots, &fileCfg.AIBotProfile, &fileCfg.DetectBrowserImpersonation, &fileCfg.BlockScriptClients, &fileCfg.VerifySearchEngineBots)
+		}
 		if cfg.BlockAIBots {
 			fileCfg.BlockAIBots = cfg.BlockAIBots
 		}
@@ -837,6 +891,8 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 		fileCfg.ConfigFile = filePath
 		cfg = fileCfg
+	} else if cfg.BotDefenseLevel != "" {
+		applyBotDefenseLevel(cfg.BotDefenseLevel, &cfg.BlockAIBots, &cfg.AIBotProfile, &cfg.DetectBrowserImpersonation, &cfg.BlockScriptClients, &cfg.VerifySearchEngineBots)
 	}
 
 	methodsMap := make(map[string]struct{})
@@ -1660,6 +1716,9 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "          asnDB: %q\n", cfg.ASNDB)
 	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "          botDefenseLevel: %q\n", cfg.BotDefenseLevel)
+	}
 	if cfg.BlockAIBots {
 		b.WriteString("          blockAIBots: true\n")
 	}
@@ -1862,6 +1921,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  asnDB = %q\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "  botDefenseLevel = %q\n", cfg.BotDefenseLevel)
 	}
 	if cfg.BlockAIBots {
 		b.WriteString("  blockAIBots = true\n")
@@ -2072,6 +2134,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.asnDB="+cfg.ASNDB)
 	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.botDefenseLevel="+cfg.BotDefenseLevel)
+	}
 	if cfg.BlockAIBots {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=true\"\n")
 	}
@@ -2244,6 +2309,9 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db %q\n", cfg.ASNDB)
 	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "    bot_defense_level %s\n", cfg.BotDefenseLevel)
+	}
 	if cfg.BlockAIBots {
 		b.WriteString("    block_ai_bots true\n")
 	}
@@ -2397,6 +2465,9 @@ func (cfg *Config) GenerateNginxLua() string {
 	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db = %q,\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "    bot_defense_level = %q,\n", cfg.BotDefenseLevel)
 	}
 	if cfg.BlockAIBots {
 		b.WriteString("    block_ai_bots = true,\n")

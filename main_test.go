@@ -165,6 +165,26 @@ func TestCLI_TestCommand(t *testing.T) {
 			}`,
 			wantOutput: "Result: ✅ ALLOWED",
 		},
+		{
+			name: "Bot defense level standard blocks GPTBot",
+			args: []string{
+				"test",
+				"--path", "/index.html",
+				"--bot-defense-level", "standard",
+				"-H", "User-Agent: Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+			},
+			wantOutput: "Result: 🛑 BLOCKED",
+		},
+		{
+			name: "Bot defense level standard allows search bot PerplexityBot",
+			args: []string{
+				"test",
+				"--path", "/index.html",
+				"--bot-defense-level", "standard",
+				"-H", "User-Agent: Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+			},
+			wantOutput: "Result: ✅ ALLOWED",
+		},
 	}
 
 	for _, tc := range tests {

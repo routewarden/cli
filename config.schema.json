@@ -161,6 +161,18 @@
       "type": "string",
       "description": "Path to local JSON ASN-to-CIDR routing snapshot."
     },
+    "botDefenseLevel": {
+      "type": "string",
+      "enum": ["off", "light", "relaxed", "standard", "moderate", "strict", "aggressive", "paranoia"],
+      "default": "off",
+      "description": "Preset bot defense tier enabling curated combinations of AI bot blocking, script client rejection, browser impersonation detection, and search engine verification."
+    },
+    "bot_defense_level": {
+      "type": "string",
+      "enum": ["off", "light", "relaxed", "standard", "moderate", "strict", "aggressive", "paranoia"],
+      "default": "off",
+      "description": "Alias for botDefenseLevel in snake_case."
+    },
     "blockAIBots": {
       "type": "boolean",
       "default": false,

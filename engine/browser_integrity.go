@@ -52,6 +52,11 @@ func DetectBrowserImpersonation(ua string, headers map[string]string) (bool, str
 		return false, ""
 	}
 
+	// Exclude recognized AI bots governed by AI bot registry profiles
+	if isAIBot, _ := MatchAIBot(uaTrim, AIBotProfileAll); isAIBot {
+		return false, ""
+	}
+
 	// 1. Mandatory companion headers expected from any real interactive browser
 	acceptLang := getHeaderCaseInsensitive(headers, "Accept-Language")
 	if strings.TrimSpace(acceptLang) == "" {

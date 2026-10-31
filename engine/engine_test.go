@@ -1928,6 +1928,137 @@ func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
 	}
 }
 
+func TestEngine_BotDefenseLevelPresets(t *testing.T) {
+	// 1. Standard Level
+	cfgStandard := engine.CreateConfig()
+	cfgStandard.BotDefenseLevel = "standard"
+	engStandard, err := engine.NewEngine(cfgStandard)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	// GPTBot blocked
+	resGPT := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPT.Blocked || resGPT.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under standard level, got blocked=%v, reason=%s", resGPT.Blocked, resGPT.Reason)
+	}
+
+	// python-requests blocked
+	resPy := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resPy.Blocked || resPy.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked under standard level, got blocked=%v, reason=%s", resPy.Blocked, resPy.Reason)
+	}
+
+	// Spoofed Chrome (missing Accept-Language) blocked
+	chromeUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+	resSpoofed := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if !resSpoofed.Blocked || resSpoofed.Reason != "browser_spoofed" {
+		t.Errorf("expected spoofed Chrome to be blocked under standard level, got blocked=%v, reason=%s", resSpoofed.Blocked, resSpoofed.Reason)
+	}
+
+	// Search bot (PerplexityBot) allowed under standard (train_only default)
+	resPerp := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+	})
+	if resPerp.Blocked {
+		t.Errorf("expected PerplexityBot to pass under standard level, got blocked=%v, reason=%s", resPerp.Blocked, resPerp.Reason)
+	}
+
+	// 2. Strict Level -> blocks search bot (PerplexityBot)
+	cfgStrict := engine.CreateConfig()
+	cfgStrict.BotDefenseLevel = "strict"
+	engStrict, err := engine.NewEngine(cfgStrict)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resPerpStrict := engStrict.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+	})
+	if !resPerpStrict.Blocked || resPerpStrict.Reason != "ai_bot_blocked" {
+		t.Errorf("expected PerplexityBot to be blocked under strict level, got blocked=%v, reason=%s", resPerpStrict.Blocked, resPerpStrict.Reason)
+	}
+
+	// 3. Light Level -> allows spoofed Chrome (browser impersonation off), blocks python-requests
+	cfgLight := engine.CreateConfig()
+	cfgLight.BotDefenseLevel = "light"
+	engLight, err := engine.NewEngine(cfgLight)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resSpoofedLight := engLight.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedLight.Blocked {
+		t.Errorf("expected spoofed Chrome to pass under light level, got blocked=%v, reason=%s", resSpoofedLight.Blocked, resSpoofedLight.Reason)
+	}
+	resPyLight := engLight.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resPyLight.Blocked || resPyLight.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked under light level, got blocked=%v, reason=%s", resPyLight.Blocked, resPyLight.Reason)
+	}
+
+	// 4. JSON Config File with override
+	tmpDir := t.TempDir()
+	confPath := filepath.Join(tmpDir, "routewarden.json")
+	overrideJSON := `{
+		"botDefenseLevel": "standard",
+		"detectBrowserImpersonation": false
+	}`
+	if err := os.WriteFile(confPath, []byte(overrideJSON), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfgOverride := engine.CreateConfig()
+	cfgOverride.ConfigFile = confPath
+	engOverride, err := engine.NewEngine(cfgOverride)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	// Spoofed Chrome should pass because detectBrowserImpersonation is overridden to false
+	resSpoofedOverride := engOverride.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedOverride.Blocked {
+		t.Errorf("expected spoofed Chrome to pass with explicit override, got blocked=%v, reason=%s", resSpoofedOverride.Blocked, resSpoofedOverride.Reason)
+	}
+	// GPTBot still blocked because standard level enabled blockAIBots
+	resGPTOverride := engOverride.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPTOverride.Blocked || resGPTOverride.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under standard level in file, got blocked=%v, reason=%s", resGPTOverride.Blocked, resGPTOverride.Reason)
+	}
+
+	// 5. Generator tests
+	yamlOut := cfgStandard.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, `botDefenseLevel: "standard"`) {
+		t.Errorf("expected Traefik YAML to contain botDefenseLevel, got:\n%s", yamlOut)
+	}
+	tomlOut := cfgStandard.GenerateTraefikTOML()
+	if !strings.Contains(tomlOut, `botDefenseLevel = "standard"`) {
+		t.Errorf("expected Traefik TOML to contain botDefenseLevel, got:\n%s", tomlOut)
+	}
+	labelsOut := cfgStandard.GenerateTraefikLabels()
+	if !strings.Contains(labelsOut, `botDefenseLevel=standard`) {
+		t.Errorf("expected Traefik labels to contain botDefenseLevel, got:\n%s", labelsOut)
+	}
+	caddyOut := cfgStandard.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "bot_defense_level standard") {
+		t.Errorf("expected Caddyfile to contain bot_defense_level, got:\n%s", caddyOut)
+	}
+	nginxOut := cfgStandard.GenerateNginxLua()
+	if !strings.Contains(nginxOut, `bot_defense_level = "standard"`) {
+		t.Errorf("expected Nginx Lua to contain bot_defense_level, got:\n%s", nginxOut)
+	}
+}
+
 
 
 

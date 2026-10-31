@@ -993,6 +993,7 @@ func handleTest(args []string) {
 	fs.StringVar(configPath, "c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
 	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
+	botDefenseLevel := fs.String("bot-defense-level", "", "Bot defense preset level (off, light, standard, strict, aggressive)")
 	blockAIBots := fs.Bool("block-ai-bots", false, "Enable AI bot blocking")
 	aiBotProfile := fs.String("ai-bot-profile", "", "AI bot profile (train_only, all, aggressive, custom)")
 	detectBrowser := fs.Bool("detect-browser-impersonation", false, "Enable browser impersonation detection")
@@ -1058,6 +1059,9 @@ func handleTest(args []string) {
 			if f.Name == "check-body" {
 				bodyFlagPassed = true
 			}
+			if f.Name == "bot-defense-level" {
+				cfg.BotDefenseLevel = *botDefenseLevel
+			}
 			if f.Name == "block-ai-bots" {
 				cfg.BlockAIBots = *blockAIBots
 			}
@@ -1083,6 +1087,9 @@ func handleTest(args []string) {
 	} else {
 		cfg.CheckQuery = *checkQuery
 		cfg.CheckBody = *checkBody
+		if *botDefenseLevel != "" {
+			cfg.BotDefenseLevel = *botDefenseLevel
+		}
 		if *blockAIBots {
 			cfg.BlockAIBots = true
 		}
