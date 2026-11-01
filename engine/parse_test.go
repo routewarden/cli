@@ -87,6 +87,81 @@ func TestParseConfig_TraefikDynamicYAML(t *testing.T) {
 	}
 }
 
+func TestParseConfig_WrappedJSON(t *testing.T) {
+	wrappedJSON := []byte(`{
+		"routewarden": {
+			"enabled": true,
+			"blockPatterns": ["(?i)^/admin"],
+			"methods": ["GET", "POST"]
+		}
+	}`)
+
+	cfg, err := ParseConfig(wrappedJSON)
+	if err != nil {
+		t.Fatalf("unexpected error parsing wrapped JSON: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("expected enabled=true from wrapped JSON")
+	}
+	if len(cfg.BlockPatterns) != 1 || cfg.BlockPatterns[0] != "(?i)^/admin" {
+		t.Errorf("unexpected block patterns: %v", cfg.BlockPatterns)
+	}
+	if len(cfg.Methods) != 2 {
+		t.Errorf("unexpected methods: %v", cfg.Methods)
+	}
+}
+
+func TestParseConfig_WrappedYAML_Helm(t *testing.T) {
+	helmYAML := []byte(`
+routewarden:
+  enabled: true
+  enableDefaultPatterns: true
+  blockPatterns:
+    - '(?i)\.env'
+  checkQuery: true
+`)
+
+	cfg, err := ParseConfig(helmYAML)
+	if err != nil {
+		t.Fatalf("unexpected error parsing Helm YAML: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("expected enabled=true from Helm YAML")
+	}
+	if !cfg.EnableDefaultPatterns {
+		t.Error("expected enableDefaultPatterns=true from Helm YAML")
+	}
+	if len(cfg.BlockPatterns) != 1 || cfg.BlockPatterns[0] != `(?i)\.env` {
+		t.Errorf("unexpected block patterns: %v", cfg.BlockPatterns)
+	}
+	if !cfg.CheckQuery {
+		t.Error("expected checkQuery=true from Helm YAML")
+	}
+}
+
+func TestParseConfig_TraefikMiddlewaresRoot(t *testing.T) {
+	traefikMiddlewaresYAML := []byte(`
+middlewares:
+  sec-filter:
+    plugin:
+      routewarden:
+        enabled: true
+        blockPatterns:
+          - '(?i)^/api/private'
+`)
+
+	cfg, err := ParseConfig(traefikMiddlewaresYAML)
+	if err != nil {
+		t.Fatalf("unexpected error parsing Traefik middlewares root YAML: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("expected enabled=true from Traefik middlewares YAML")
+	}
+	if len(cfg.BlockPatterns) != 1 || cfg.BlockPatterns[0] != `(?i)^/api/private` {
+		t.Errorf("unexpected block patterns: %v", cfg.BlockPatterns)
+	}
+}
+
 func TestParseConfig_EmptyAndInvalid(t *testing.T) {
 	cfgEmpty, err := ParseConfig([]byte(""))
 	if err != nil {
@@ -101,3 +176,4 @@ func TestParseConfig_EmptyAndInvalid(t *testing.T) {
 		t.Error("expected error on malformed YAML/JSON")
 	}
 }
+

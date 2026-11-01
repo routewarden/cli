@@ -79,7 +79,13 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 
 	if base.ASNDB != candidate.ASNDB {
 		diff.Properties["asnDB"] = ScalarDiff{Old: base.ASNDB, New: candidate.ASNDB}
-		diff.ImpactReasons = append(diff.ImpactReasons, "ASN database path changed; review routing data for bypass changes.")
+		if base.ASNDB != "" && candidate.ASNDB == "" {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: ASN database was removed; ASN-based rules will be inactive.")
+		} else if base.ASNDB == "" && candidate.ASNDB != "" {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: ASN database configured; ASN-based rules are now active.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "ASN database path changed; review routing data for bypass changes.")
+		}
 	}
 	if len(diff.AllowedASNs.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, "ASN allowlist bypasses were added.")
@@ -227,6 +233,9 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	if len(diff.AllowPatterns.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("WARNING: %d allow pattern(s) were added: %s (may bypass security rules)", len(diff.AllowPatterns.Added), strings.Join(diff.AllowPatterns.Added, ", ")))
 	}
+	if len(diff.AllowPatterns.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d allow pattern(s) were removed: %s", len(diff.AllowPatterns.Removed), strings.Join(diff.AllowPatterns.Removed, ", ")))
+	}
 
 	if len(diff.AllowedIPs.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("ALLOWED IPs: %d IP/CIDR entry(ies) were added to whitelist.", len(diff.AllowedIPs.Added)))
@@ -252,12 +261,29 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	if len(diff.AllowUserAgents.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("WARNING: %d User-Agent allow pattern(s) were added (may bypass bot defense).", len(diff.AllowUserAgents.Added)))
 	}
+	if len(diff.AllowUserAgents.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d User-Agent allow pattern(s) were removed.", len(diff.AllowUserAgents.Removed)))
+	}
 
 	if len(diff.HoneypotTrapPaths.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d honeypot trap path(s) were configured.", len(diff.HoneypotTrapPaths.Added)))
 	}
 	if len(diff.HoneypotTrapPaths.Removed) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d honeypot trap path(s) were removed.", len(diff.HoneypotTrapPaths.Removed)))
+	}
+
+	if len(diff.CheckHeaders.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d monitored header(s) were added: %s", len(diff.CheckHeaders.Added), strings.Join(diff.CheckHeaders.Added, ", ")))
+	}
+	if len(diff.CheckHeaders.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d monitored header(s) were removed: %s", len(diff.CheckHeaders.Removed), strings.Join(diff.CheckHeaders.Removed, ", ")))
+	}
+
+	if len(diff.Methods.Added) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d HTTP method(s) were added to inspection: %s", len(diff.Methods.Added), strings.Join(diff.Methods.Added, ", ")))
+	}
+	if len(diff.Methods.Removed) > 0 {
+		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d HTTP method(s) were removed from inspection: %s", len(diff.Methods.Removed), strings.Join(diff.Methods.Removed, ", ")))
 	}
 
 	// ── Determine Overall Impact ────────────────────────────────────────────
@@ -291,8 +317,11 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		len(diff.BlockedASNs.Removed) > 0 ||
 		len(diff.BlockUserAgents.Removed) > 0 ||
 		len(diff.HoneypotTrapPaths.Removed) > 0 ||
+		len(diff.CheckHeaders.Removed) > 0 ||
+		len(diff.Methods.Removed) > 0 ||
 		len(diff.AllowPatterns.Added) > 0 ||
-		len(diff.AllowUserAgents.Added) > 0 {
+		len(diff.AllowUserAgents.Added) > 0 ||
+		len(diff.AllowedIPs.Added) > 0 {
 		hasRelaxing = true
 	}
 
@@ -309,14 +338,18 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		len(diff.BlockedASNs.Added) > 0 ||
 		len(diff.BlockUserAgents.Added) > 0 ||
 		len(diff.HoneypotTrapPaths.Added) > 0 ||
-		len(diff.AllowedIPs.Removed) > 0 {
+		len(diff.CheckHeaders.Added) > 0 ||
+		len(diff.Methods.Added) > 0 ||
+		len(diff.AllowedIPs.Removed) > 0 ||
+		len(diff.AllowPatterns.Removed) > 0 ||
+		len(diff.AllowUserAgents.Removed) > 0 {
 		hasHardening = true
 	}
 
-	if len(diff.AllowedASNs.Added) > 0 || base.ASNDB != candidate.ASNDB {
+	if len(diff.AllowedASNs.Added) > 0 || (base.ASNDB != "" && candidate.ASNDB == "") {
 		hasRelaxing = true
 	}
-	if len(diff.AllowedASNs.Removed) > 0 {
+	if len(diff.AllowedASNs.Removed) > 0 || (base.ASNDB == "" && candidate.ASNDB != "") {
 		hasHardening = true
 	}
 	if hasRelaxing {

@@ -230,6 +230,28 @@ func printDiffTextReport(diff *engine.PolicyDiff) {
 		}
 	}
 
+	// Monitored Forwarded/Rewrite Headers
+	if len(diff.CheckHeaders.Added) > 0 || len(diff.CheckHeaders.Removed) > 0 {
+		fmt.Println("\nMonitored Forwarded/Rewrite Headers:")
+		for _, h := range diff.CheckHeaders.Removed {
+			fmt.Printf("  - %s (removed)\n", h)
+		}
+		for _, h := range diff.CheckHeaders.Added {
+			fmt.Printf("  + %s (added)\n", h)
+		}
+	}
+
+	// Inspected HTTP Methods
+	if len(diff.Methods.Added) > 0 || len(diff.Methods.Removed) > 0 {
+		fmt.Println("\nInspected HTTP Methods:")
+		for _, m := range diff.Methods.Removed {
+			fmt.Printf("  - %s (removed)\n", m)
+		}
+		for _, m := range diff.Methods.Added {
+			fmt.Printf("  + %s (added)\n", m)
+		}
+	}
+
 	// Properties
 	if len(diff.Properties) > 0 {
 		fmt.Println("\nConfiguration Properties:")

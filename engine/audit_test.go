@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +147,267 @@ func TestAuditConfig_ResponseModeFieldValidation(t *testing.T) {
 		if issue.Code == "RW-A012" {
 			t.Errorf("unexpected RW-A012 issue for valid modes: %v", issue)
 		}
+	}
+}
+
+func TestAuditConfig_WildcardsAndUnescapedDots(t *testing.T) {
+	// 1. (?i).* and ^/.*$ universal wildcards
+	cfgWild := CreateConfig()
+	cfgWild.BlockPatterns = []string{"(?i).*", "^/.*$"}
+	cfgWild.AllowPatterns = []string{"(?i)^.*$", "/.*"}
+	repWild := AuditConfig(cfgWild, "wildcards.json")
+
+	rwa003Count := 0
+	rwa004Count := 0
+	for _, issue := range repWild.Issues {
+		if issue.Code == "RW-A003" {
+			rwa003Count++
+		}
+		if issue.Code == "RW-A004" {
+			rwa004Count++
+		}
+	}
+	if rwa003Count != 2 {
+		t.Errorf("expected 2 RW-A003 issues for (?i).* and ^/.*$, got %d", rwa003Count)
+	}
+	if rwa004Count != 2 {
+		t.Errorf("expected 2 RW-A004 issues for (?i)^.*$ and /.*, got %d", rwa004Count)
+	}
+
+	// 2. Pattern with both escaped and unescaped dots
+	cfgDots := CreateConfig()
+	cfgDots.BlockPatterns = []string{`(?i)\.env|config.json`}
+	repDots := AuditConfig(cfgDots, "dots.json")
+	hasRwa005 := false
+	for _, issue := range repDots.Issues {
+		if issue.Code == "RW-A005" {
+			hasRwa005 = true
+			break
+		}
+	}
+	if !hasRwa005 {
+		t.Errorf("expected RW-A005 to flag config.json even when pattern contains escaped \\.env")
+	}
+}
+
+func TestAuditConfig_UniversalCIDRs(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.AllowedIPs = []string{"0.0.0.0/0", "::/0", "192.168.1.50:8080"}
+	cfg.TrustedProxies = []string{"0.0.0.0/0", "10.0.0.1:443"}
+
+	rep := AuditConfig(cfg, "universal_cidrs.json")
+
+	hasRwa022V4 := false
+	hasRwa022V6 := false
+	hasRwa023 := false
+	hasRwa009 := false
+	hasRwa010 := false
+
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A022" && issue.Pattern == "0.0.0.0/0" {
+			hasRwa022V4 = true
+		}
+		if issue.Code == "RW-A022" && issue.Pattern == "::/0" {
+			hasRwa022V6 = true
+		}
+		if issue.Code == "RW-A023" && issue.Pattern == "0.0.0.0/0" {
+			hasRwa023 = true
+		}
+		if issue.Code == "RW-A009" {
+			hasRwa009 = true
+		}
+		if issue.Code == "RW-A010" {
+			hasRwa010 = true
+		}
+	}
+
+	if !hasRwa022V4 || !hasRwa022V6 {
+		t.Errorf("expected RW-A022 for 0.0.0.0/0 and ::/0, got v4=%v v6=%v", hasRwa022V4, hasRwa022V6)
+	}
+	if !hasRwa023 {
+		t.Errorf("expected RW-A023 for 0.0.0.0/0 in trustedProxies")
+	}
+	if hasRwa009 {
+		t.Errorf("did not expect RW-A009 error for 192.168.1.50:8080 (port should be stripped cleanly)")
+	}
+	if hasRwa010 {
+		t.Errorf("did not expect RW-A010 error for 10.0.0.1:443 (port should be stripped cleanly)")
+	}
+}
+
+func TestAuditConfig_UserAgentAudit(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.BlockUserAgents = []string{`(?i)(badbot+)+`, `badbot1`, `badbot1`}
+	cfg.AllowUserAgents = []string{`goodbot1`, `goodbot1`}
+
+	rep := AuditConfig(cfg, "ua_audit.json")
+
+	hasReDoS := false
+	hasDupBlockUA := false
+	hasDupAllowUA := false
+
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A006" && strings.Contains(issue.Pattern, "badbot") {
+			hasReDoS = true
+		}
+		if issue.Code == "RW-A007" && issue.Field == "blockUserAgents" {
+			hasDupBlockUA = true
+		}
+		if issue.Code == "RW-A008" && issue.Field == "allowUserAgents" {
+			hasDupAllowUA = true
+		}
+	}
+
+	if !hasReDoS {
+		t.Errorf("expected RW-A006 ReDoS alert for blockUserAgents nested quantifier")
+	}
+	if !hasDupBlockUA {
+		t.Errorf("expected RW-A007 duplicate alert for blockUserAgents")
+	}
+	if !hasDupAllowUA {
+		t.Errorf("expected RW-A008 duplicate alert for allowUserAgents")
+	}
+}
+
+func TestAuditConfig_CaseSensitiveBlockPattern(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.BlockPatterns = []string{`^/admin/.*`, `(?i)^/secret/.*`}
+
+	rep := AuditConfig(cfg, "case_audit.json")
+
+	hasRwa024 := false
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A024" && issue.Pattern == `^/admin/.*` {
+			hasRwa024 = true
+		}
+		if issue.Code == "RW-A024" && issue.Pattern == `(?i)^/secret/.*` {
+			t.Errorf("did not expect RW-A024 for pattern with (?i)")
+		}
+	}
+
+	if !hasRwa024 {
+		t.Errorf("expected RW-A024 case-sensitive warning for ^/admin/.*")
+	}
+}
+
+func TestAuditConfig_HTTPMethodsValidation(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.Methods = []string{"get", "CUSTOM_VERB", ""}
+
+	rep := AuditConfig(cfg, "methods_audit.json")
+
+	hasLower := false
+	hasCustom := false
+	hasEmpty := false
+
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A025" {
+			if strings.Contains(issue.Title, "Lowercase") {
+				hasLower = true
+			}
+			if strings.Contains(issue.Title, "Unrecognized") {
+				hasCustom = true
+			}
+			if strings.Contains(issue.Title, "Empty") {
+				hasEmpty = true
+			}
+		}
+	}
+
+	if !hasLower {
+		t.Errorf("expected RW-A025 lowercase method warning for 'get'")
+	}
+	if !hasCustom {
+		t.Errorf("expected RW-A025 unrecognized method warning for 'CUSTOM_VERB'")
+	}
+	if !hasEmpty {
+		t.Errorf("expected RW-A025 empty method warning")
+	}
+}
+
+func TestAuditConfig_BodyInspectionWithoutMutationMethods(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.CheckBody = true
+	cfg.Methods = []string{"GET", "HEAD"}
+
+	rep := AuditConfig(cfg, "body_methods_audit.json")
+
+	hasRwa026 := false
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A026" {
+			hasRwa026 = true
+			break
+		}
+	}
+
+	if !hasRwa026 {
+		t.Errorf("expected RW-A026 warning when checkBody is true but methods contains only read-only verbs")
+	}
+}
+
+func TestAuditConfig_CheckHeadersValidation(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.CheckHeaders = []string{"X-Header: value", "Invalid Header Name", ""}
+
+	rep := AuditConfig(cfg, "headers_audit.json")
+
+	hasColon := false
+	hasInvalidToken := false
+	hasEmpty := false
+
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A027" {
+			if strings.Contains(issue.Title, "Colon") {
+				hasColon = true
+			}
+			if strings.Contains(issue.Title, "Token") {
+				hasInvalidToken = true
+			}
+			if strings.Contains(issue.Title, "Empty") {
+				hasEmpty = true
+			}
+		}
+	}
+
+	if !hasColon {
+		t.Errorf("expected RW-A027 critical error for header with colon")
+	}
+	if !hasInvalidToken {
+		t.Errorf("expected RW-A027 warning for header with space")
+	}
+	if !hasEmpty {
+		t.Errorf("expected RW-A027 warning for empty header name")
+	}
+}
+
+func TestAuditConfig_CheckBodyMaxBytesValidation(t *testing.T) {
+	cfgNegative := CreateConfig()
+	cfgNegative.CheckBodyMaxBytes = -50
+	repNeg := AuditConfig(cfgNegative, "neg_bytes.json")
+
+	hasNeg := false
+	for _, issue := range repNeg.Issues {
+		if issue.Code == "RW-A028" && issue.Severity == SeverityCritical {
+			hasNeg = true
+			break
+		}
+	}
+	if !hasNeg {
+		t.Errorf("expected RW-A028 critical issue for negative checkBodyMaxBytes")
+	}
+
+	cfgExcessive := CreateConfig()
+	cfgExcessive.CheckBodyMaxBytes = 50 * 1024 * 1024 // 50MB
+	repExcessive := AuditConfig(cfgExcessive, "excessive_bytes.json")
+
+	hasExcessive := false
+	for _, issue := range repExcessive.Issues {
+		if issue.Code == "RW-A028" && issue.Severity == SeverityWarning {
+			hasExcessive = true
+			break
+		}
+	}
+	if !hasExcessive {
+		t.Errorf("expected RW-A028 warning for excessive checkBodyMaxBytes (>10MB)")
 	}
 }

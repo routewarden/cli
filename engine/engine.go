@@ -721,6 +721,48 @@ func CreateConfig() *Config {
 }
 
 // ExtractCandidatePaths normalizes and extracts all representations of a request URI path.
+func isHex(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+func unhex(c byte) byte {
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0'
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10
+	case 'A' <= c && c <= 'F':
+		return c - 'A' + 10
+	}
+	return 0
+}
+
+func lenientPathUnescape(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			val := unhex(s[i+1])<<4 | unhex(s[i+2])
+			b.WriteByte(val)
+			i += 2
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+func lenientQueryUnescape(s string) string {
+	if u, err := url.QueryUnescape(s); err == nil {
+		return u
+	}
+	s = strings.ReplaceAll(s, "+", " ")
+	return lenientPathUnescape(s)
+}
+
 func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	pathsToCheck := []string{path.Clean(pathStr)}
 
@@ -735,18 +777,34 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 		pathsToCheck = append(pathsToCheck, path.Clean(rawURIPath))
 	}
 
+	// 1a. Extract path from absolute URIs (e.g. http://example.com/path, http://example.com\path)
+	for _, initial := range []string{pathStr, rawURIPath, rawPath} {
+		if idx := strings.Index(initial, "://"); idx != -1 {
+			rest := initial[idx+3:]
+			if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
+				pathsToCheck = append(pathsToCheck, path.Clean(rest[slashIdx:]))
+			}
+		}
+	}
+
 	if rawPath != "" && rawPath != pathStr {
 		pathsToCheck = append(pathsToCheck, path.Clean(rawPath))
 	}
 
-	curPath := pathStr
-	for i := 0; i < 3; i++ {
-		unescaped, err := url.PathUnescape(curPath)
-		if err != nil || unescaped == curPath {
-			break
+	// 2. Perform iterative unescaping to prevent multi-layer URL encoding evasion (e.g. %252e%252e)
+	for _, initial := range []string{pathStr, rawURIPath, rawPath} {
+		if initial == "" {
+			continue
 		}
-		pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
-		curPath = unescaped
+		curPath := initial
+		for i := 0; i < 5; i++ {
+			unescaped := lenientPathUnescape(curPath)
+			if unescaped == curPath {
+				break
+			}
+			pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
+			curPath = unescaped
+		}
 	}
 
 	for _, p := range append([]string{}, pathsToCheck...) {
@@ -777,18 +835,74 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 
 	for _, p := range append([]string{}, pathsToCheck...) {
 		if strings.ContainsRune(p, '\x00') {
+			if before, _, found := strings.Cut(p, "\x00"); found {
+				pathsToCheck = append(pathsToCheck, path.Clean(before))
+			}
 			pathsToCheck = append(pathsToCheck, path.Clean(strings.ReplaceAll(p, "\x00", "")))
 		}
 	}
 
+	// 7. Strip embedded URI query (?) and fragments (#) to prevent regex anchor evasion
 	for _, p := range append([]string{}, pathsToCheck...) {
-		if before, _, found := strings.Cut(p, "#"); found {
-			pathsToCheck = append(pathsToCheck, path.Clean(before))
+		cut := p
+		hasDelim := false
+		if before, _, found := strings.Cut(cut, "?"); found {
+			cut = before
+			hasDelim = true
+		}
+		if before, _, found := strings.Cut(cut, "#"); found {
+			cut = before
+			hasDelim = true
+		}
+		if hasDelim && cut != "" {
+			pathsToCheck = append(pathsToCheck, path.Clean(cut))
 		}
 	}
 
-	candidatePaths := make([]string, 0, len(pathsToCheck))
-	seen := make(map[string]struct{}, len(pathsToCheck))
+	// 8. Strip Windows NTFS Alternate Data Streams (::$DATA) evasion
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.Contains(strings.ToLower(p), "::$data") {
+			var b strings.Builder
+			i := 0
+			for {
+				idx := strings.Index(strings.ToLower(p[i:]), "::$data")
+				if idx == -1 {
+					b.WriteString(p[i:])
+					break
+				}
+				b.WriteString(p[i : i+idx])
+				i += idx + len("::$data")
+			}
+			cleaned := path.Clean(b.String())
+			if cleaned != "" {
+				pathsToCheck = append(pathsToCheck, cleaned)
+			}
+		}
+	}
+
+	// 9. Strip trailing dots and spaces from path segments (Windows/IIS Win32 API evasion)
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.ContainsAny(p, ". \t\r\n") {
+			parts := strings.Split(p, "/")
+			modified := false
+			for i, seg := range parts {
+				if seg == "." || seg == ".." || seg == "" {
+					continue
+				}
+				trimmed := strings.TrimRight(seg, ". \t\r\n")
+				if trimmed != seg && trimmed != "" {
+					parts[i] = trimmed
+					modified = true
+				}
+			}
+			if modified {
+				pathsToCheck = append(pathsToCheck, path.Clean(strings.Join(parts, "/")))
+			}
+		}
+	}
+
+	candidatePaths := make([]string, 0, len(pathsToCheck)*2)
+	seen := make(map[string]struct{}, len(pathsToCheck)*2)
 	for _, p := range pathsToCheck {
 		if p == "" {
 			continue
@@ -800,6 +914,13 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 		if _, exists := seen[p]; !exists {
 			seen[p] = struct{}{}
 			candidatePaths = append(candidatePaths, p)
+		}
+		if p != "/" && !strings.HasSuffix(p, "/") {
+			pSlash := p + "/"
+			if _, exists := seen[pSlash]; !exists {
+				seen[pSlash] = struct{}{}
+				candidatePaths = append(candidatePaths, pSlash)
+			}
 		}
 	}
 
@@ -1306,6 +1427,12 @@ func cleanIP(raw string) string {
 	if idx := strings.IndexByte(raw, '%'); idx != -1 {
 		raw = raw[:idx]
 	}
+	if parsed := net.ParseIP(raw); parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			return v4.String()
+		}
+		return parsed.String()
+	}
 	return raw
 }
 
@@ -1466,36 +1593,49 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		}
 	}
 
-	if !uaAllowed && ua != "" {
-		for _, re := range e.BlockUARegexes {
-			if re.MatchString(ua) {
-				result.Allowed = false
-				result.Blocked = true
-				result.Reason = "user_agent_blocked"
-				result.MatchedPattern = re.String()
-				result.MatchedTarget = ua
-				return result
+	if !uaAllowed {
+		if ua != "" {
+			for _, re := range e.BlockUARegexes {
+				if re.MatchString(ua) {
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "user_agent_blocked"
+					result.MatchedPattern = re.String()
+					result.MatchedTarget = ua
+					return result
+				}
 			}
-		}
-		if e.Config.BlockAIBots {
-			if matched, botType := MatchAIBot(ua, e.Config.AIBotProfile); matched {
-				result.Allowed = false
-				result.Blocked = true
-				result.Reason = "ai_bot_blocked"
-				result.MatchedPattern = botType
-				result.MatchedTarget = ua
-				return result
+			if e.Config.BlockAIBots {
+				if matched, botType := MatchAIBot(ua, e.Config.AIBotProfile); matched {
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "ai_bot_blocked"
+					result.MatchedPattern = botType
+					result.MatchedTarget = ua
+					return result
+				}
 			}
-		}
 
-		if e.Config.DetectBrowserImpersonation {
-			if isSpoofed, reason := DetectBrowserImpersonation(ua, headers); isSpoofed {
-				result.Allowed = false
-				result.Blocked = true
-				result.Reason = "browser_spoofed"
-				result.MatchedPattern = reason
-				result.MatchedTarget = ua
-				return result
+			if e.Config.DetectBrowserImpersonation {
+				if isSpoofed, reason := DetectBrowserImpersonation(ua, headers); isSpoofed {
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "browser_spoofed"
+					result.MatchedPattern = reason
+					result.MatchedTarget = ua
+					return result
+				}
+			}
+		} else {
+			for _, re := range e.BlockUARegexes {
+				if re.MatchString("") {
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "user_agent_blocked"
+					result.MatchedPattern = re.String()
+					result.MatchedTarget = "[empty]"
+					return result
+				}
 			}
 		}
 
@@ -1519,7 +1659,12 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, p := range candidatePaths {
 			for _, trapPath := range e.Config.HoneypotTrapPaths {
 				cleanTrap := strings.TrimSpace(trapPath)
-				if cleanTrap != "" && (p == cleanTrap || (strings.HasSuffix(cleanTrap, "/") && strings.HasPrefix(p, cleanTrap))) {
+				if cleanTrap != "" && !strings.HasPrefix(cleanTrap, "/") {
+					cleanTrap = "/" + cleanTrap
+				}
+				baseTrap := strings.TrimRight(cleanTrap, "/")
+				prefixTrap := baseTrap + "/"
+				if cleanTrap != "" && (p == baseTrap || p == cleanTrap || (baseTrap != "" && strings.HasPrefix(p, prefixTrap))) {
 					if e.BanTable != nil && effectiveIPStr != "" {
 						e.BanTable.Ban(effectiveIPStr, e.TrapBanDuration)
 					}
@@ -1562,10 +1707,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 
 	// Check query string
 	if e.Config.CheckQuery && queryString != "" {
-		unescapedQuery, err := url.QueryUnescape(queryString)
-		if err != nil {
-			unescapedQuery = queryString
-		}
+		unescapedQuery := lenientQueryUnescape(queryString)
 
 		queryCandidates := []string{queryString, unescapedQuery}
 		parsed, _ := url.ParseQuery(queryString)
@@ -1577,15 +1719,22 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
 			}
 		}
-		// Also split raw query string on '&' and ';' to catch keys/values even when malformed encodings cause ParseQuery to error
-		for _, pair := range strings.FieldsFunc(queryString, func(r rune) bool { return r == '&' || r == ';' }) {
-			if k, v, ok := strings.Cut(pair, "="); ok {
-				queryCandidates = append(queryCandidates, k, v)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", k, k)...)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
-			} else if pair != "" {
-				queryCandidates = append(queryCandidates, pair)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", pair, pair)...)
+		// Also split raw and unescaped query strings on '&' and ';' to catch keys/values even when
+		// malformed encodings, semicolons, or encoded delimiters (%26, %3b) cause ParseQuery to error
+		queriesToParse := []string{queryString}
+		if unescapedQuery != queryString {
+			queriesToParse = append(queriesToParse, unescapedQuery)
+		}
+		for _, qStr := range queriesToParse {
+			for _, pair := range strings.FieldsFunc(qStr, func(r rune) bool { return r == '&' || r == ';' }) {
+				if k, v, ok := strings.Cut(pair, "="); ok {
+					queryCandidates = append(queryCandidates, k, v)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", k, k)...)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
+				} else if pair != "" {
+					queryCandidates = append(queryCandidates, pair)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", pair, pair)...)
+				}
 			}
 		}
 
@@ -1607,11 +1756,28 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, hdrName := range e.Config.CheckHeaders {
 			for k, v := range headers {
 				if strings.EqualFold(k, hdrName) && strings.TrimSpace(v) != "" {
-					rawVals := []string{v}
-					if strings.Contains(v, ",") {
-						for _, part := range strings.Split(v, ",") {
+					trimmedV := strings.TrimSpace(v)
+					rawVals := []string{trimmedV}
+					if strings.HasPrefix(trimmedV, "\"") && strings.HasSuffix(trimmedV, "\"") && len(trimmedV) >= 2 {
+						unquoted := strings.TrimSpace(trimmedV[1 : len(trimmedV)-1])
+						if unquoted != "" && unquoted != trimmedV {
+							rawVals = append(rawVals, unquoted)
+						}
+					} else if strings.HasPrefix(trimmedV, "'") && strings.HasSuffix(trimmedV, "'") && len(trimmedV) >= 2 {
+						unquoted := strings.TrimSpace(trimmedV[1 : len(trimmedV)-1])
+						if unquoted != "" && unquoted != trimmedV {
+							rawVals = append(rawVals, unquoted)
+						}
+					}
+					if strings.Contains(trimmedV, ",") {
+						for _, part := range strings.Split(trimmedV, ",") {
 							part = strings.TrimSpace(part)
-							if part != "" && part != v {
+							if strings.HasPrefix(part, "\"") && strings.HasSuffix(part, "\"") && len(part) >= 2 {
+								part = strings.TrimSpace(part[1 : len(part)-1])
+							} else if strings.HasPrefix(part, "'") && strings.HasSuffix(part, "'") && len(part) >= 2 {
+								part = strings.TrimSpace(part[1 : len(part)-1])
+							}
+							if part != "" {
 								rawVals = append(rawVals, part)
 							}
 						}
@@ -1647,14 +1813,64 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 			bodyBytes = bodyBytes[:maxBytes]
 		}
 		bodyStr := string(bodyBytes)
-		unescapedBody, err := url.QueryUnescape(bodyStr)
-		if err != nil {
-			unescapedBody = bodyStr
-		}
+		unescapedBody := lenientQueryUnescape(bodyStr)
 
 		bodyCandidates := []string{bodyStr}
 		if unescapedBody != bodyStr {
 			bodyCandidates = append(bodyCandidates, unescapedBody)
+		}
+
+		// Form urlencoded parameters extraction (&, ;)
+		if parsedValues, err := url.ParseQuery(bodyStr); err == nil && len(parsedValues) > 0 {
+			for k, vs := range parsedValues {
+				bodyCandidates = append(bodyCandidates, k)
+				bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+				for _, v := range vs {
+					bodyCandidates = append(bodyCandidates, v)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", v, v)...)
+				}
+			}
+		}
+		bodiesToParse := []string{bodyStr}
+		if unescapedBody != bodyStr {
+			bodiesToParse = append(bodiesToParse, unescapedBody)
+		}
+		for _, bStr := range bodiesToParse {
+			for _, pair := range strings.FieldsFunc(bStr, func(r rune) bool { return r == '&' || r == ';' }) {
+				if k, v, ok := strings.Cut(pair, "="); ok {
+					bodyCandidates = append(bodyCandidates, k, v)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", v, v)...)
+				}
+			}
+		}
+
+		// JSON payload string values extraction
+		trimmedBody := strings.TrimSpace(bodyStr)
+		if (strings.HasPrefix(trimmedBody, "{") && strings.HasSuffix(trimmedBody, "}")) ||
+			(strings.HasPrefix(trimmedBody, "[") && strings.HasSuffix(trimmedBody, "]")) {
+			var jsonVal any
+			if err := json.Unmarshal([]byte(trimmedBody), &jsonVal); err == nil {
+				var extractJSON func(v any)
+				extractJSON = func(v any) {
+					switch val := v.(type) {
+					case string:
+						bodyCandidates = append(bodyCandidates, val)
+						bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", val, val)...)
+					case []any:
+						for _, item := range val {
+							extractJSON(item)
+						}
+					case map[string]any:
+						for k, item := range val {
+							bodyCandidates = append(bodyCandidates, k)
+							bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+							extractJSON(item)
+						}
+					}
+				}
+				extractJSON(jsonVal)
+			}
 		}
 
 		patternsToCheck := e.BodyRegexes

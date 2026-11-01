@@ -88,10 +88,18 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	}
 
 	// ── Rule RW-A003: Overly Broad Wildcard Pattern Check ───────────────────
+	isUniversalWildcard := func(p string) bool {
+		trimmed := strings.TrimSpace(p)
+		clean := strings.TrimPrefix(trimmed, "(?i)")
+		clean = strings.TrimPrefix(clean, "(?-i)")
+		clean = strings.TrimSpace(clean)
+		return clean == ".*" || clean == "^.*$" || clean == "*" || clean == "^.+$" || clean == ".+" ||
+			clean == "^.*" || clean == ".*$" || clean == "^/.*$" || clean == "^/.*" || clean == "/.*"
+	}
+
 	allBlockPatterns := append([]string{}, cfg.BlockPatterns...)
 	for _, p := range allBlockPatterns {
-		trimmed := strings.TrimSpace(p)
-		if trimmed == ".*" || trimmed == "^.*$" || trimmed == "*" || trimmed == "^.+$" || trimmed == ".+" {
+		if isUniversalWildcard(p) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A003",
 				Severity:    SeverityCritical,
@@ -105,8 +113,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	}
 
 	for _, p := range cfg.AllowPatterns {
-		trimmed := strings.TrimSpace(p)
-		if trimmed == ".*" || trimmed == "^.*$" || trimmed == "*" || trimmed == "^.+$" || trimmed == ".+" {
+		if isUniversalWildcard(p) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A004",
 				Severity:    SeverityCritical,
@@ -122,7 +129,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	// ── Rule RW-A005: Unescaped Dots in File Extensions ────────────────────
 	unescapedDotRegex := regexp.MustCompile(`(^|[^\\])\.(env|git|sql|bak|yml|yaml|json|conf|ini|log|key|pem|crt|tar|gz|zip|sh|bash)($|[^a-zA-Z0-9_-])`)
 	for _, p := range cfg.BlockPatterns {
-		if unescapedDotRegex.MatchString(p) && !strings.Contains(p, `\.`) {
+		if unescapedDotRegex.MatchString(p) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A005",
 				Severity:    SeverityWarning,
@@ -130,7 +137,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 				Message:     fmt.Sprintf("Pattern %q contains an unescaped dot before a file extension. In regex, '.' matches any single character.", p),
 				Pattern:     p,
 				Field:       "blockPatterns",
-				Remediation: fmt.Sprintf("Escape the dot with a backslash: e.g. %q", strings.ReplaceAll(p, ".", `\.`)),
+				Remediation: fmt.Sprintf("Escape the dot with a backslash: e.g. %q", unescapedDotRegex.ReplaceAllString(p, `${1}\.${2}${3}`)),
 			})
 		}
 	}
@@ -139,6 +146,8 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	nestedQuantifiers := regexp.MustCompile(`(\([^\)]*[\*\+\?][^\)]*\)[\*\+\?]|\.\*[\*\+]|\.\+[\*\+])`)
 	allPatternsToCheck := append(append([]string{}, cfg.BlockPatterns...), cfg.AllowPatterns...)
 	allPatternsToCheck = append(allPatternsToCheck, cfg.CheckBodyPatterns...)
+	allPatternsToCheck = append(allPatternsToCheck, cfg.BlockUserAgents...)
+	allPatternsToCheck = append(allPatternsToCheck, cfg.AllowUserAgents...)
 	for _, p := range allPatternsToCheck {
 		if nestedQuantifiers.MatchString(p) {
 			report.Issues = append(report.Issues, AuditIssue{
@@ -203,6 +212,40 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 			})
 		}
 		seenBody[normalized] = true
+	}
+
+	seenBlockUA := make(map[string]bool)
+	for _, p := range cfg.BlockUserAgents {
+		normalized := strings.TrimSpace(p)
+		if seenBlockUA[normalized] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A007",
+				Severity:    SeverityInfo,
+				Title:       "Duplicate Block User-Agent Pattern",
+				Message:     fmt.Sprintf("Pattern %q is defined multiple times in blockUserAgents.", p),
+				Pattern:     p,
+				Field:       "blockUserAgents",
+				Remediation: "Remove duplicate entries to optimize User-Agent inspection.",
+			})
+		}
+		seenBlockUA[normalized] = true
+	}
+
+	seenAllowUA := make(map[string]bool)
+	for _, p := range cfg.AllowUserAgents {
+		normalized := strings.TrimSpace(p)
+		if seenAllowUA[normalized] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A008",
+				Severity:    SeverityInfo,
+				Title:       "Duplicate Allow User-Agent Pattern",
+				Message:     fmt.Sprintf("Pattern %q is defined multiple times in allowUserAgents.", p),
+				Pattern:     p,
+				Field:       "allowUserAgents",
+				Remediation: "Remove duplicate allow entries to optimize User-Agent matching.",
+			})
+		}
+		seenAllowUA[normalized] = true
 	}
 
 	// ── Rule RW-A015: Invalid Regular Expression Syntax ─────────────────────
@@ -272,7 +315,17 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		if ipTrimmed == "" {
 			continue
 		}
-		if !isValidIPOrCIDR(ipTrimmed) {
+		if ipTrimmed == "0.0.0.0/0" || ipTrimmed == "::/0" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A022",
+				Severity:    SeverityCritical,
+				Title:       "Universal Allowlist CIDR (Bypasses All Defense)",
+				Message:     fmt.Sprintf("%q in allowedIps unconditionally bypasses all RouteWarden inspection and security rules for all clients worldwide.", ipStr),
+				Pattern:     ipStr,
+				Field:       "allowedIps",
+				Remediation: "Remove '0.0.0.0/0' or '::/0'. Whitelist only specific administrative IPs or internal subnets.",
+			})
+		} else if !isValidIPOrCIDR(ipTrimmed) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A009",
 				Severity:    SeverityCritical,
@@ -290,7 +343,17 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		if ipTrimmed == "" {
 			continue
 		}
-		if !isValidIPOrCIDR(ipTrimmed) {
+		if ipTrimmed == "0.0.0.0/0" || ipTrimmed == "::/0" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A023",
+				Severity:    SeverityCritical,
+				Title:       "Universal Trusted Proxy CIDR (Header Spoofing Risk)",
+				Message:     fmt.Sprintf("%q in trustedProxies trusts forwarding headers (X-Forwarded-For, X-Real-IP) from every client on the internet, enabling arbitrary IP spoofing.", ipStr),
+				Pattern:     ipStr,
+				Field:       "trustedProxies",
+				Remediation: "Define explicit upstream reverse proxy or load balancer CIDRs in 'trustedProxies' instead of universal 0.0.0.0/0 or ::/0.",
+			})
+		} else if !isValidIPOrCIDR(ipTrimmed) {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A010",
 				Severity:    SeverityCritical,
@@ -461,6 +524,155 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		})
 	}
 
+	// ── Rule RW-A024: Case-Sensitive Block Pattern Advisory ──────────────────
+	for _, p := range cfg.BlockPatterns {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.Contains(trimmed, "(?i)") && !strings.Contains(trimmed, "(?i:") {
+			hasLetters := false
+			for _, r := range trimmed {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+					hasLetters = true
+					break
+				}
+			}
+			if hasLetters {
+				report.Issues = append(report.Issues, AuditIssue{
+					Code:        "RW-A024",
+					Severity:    SeverityInfo,
+					Title:       "Case-Sensitive Block Pattern",
+					Message:     fmt.Sprintf("Pattern %q lacks '(?i)' flag. On case-insensitive file systems (Windows, macOS) or frameworks, requests with alternative casing (e.g. /ADMIN) may bypass inspection.", p),
+					Pattern:     p,
+					Field:       "blockPatterns",
+					Remediation: fmt.Sprintf("Prefix the pattern with '(?i)' for case-insensitive matching: '(?i)%s'", trimmed),
+				})
+			}
+		}
+	}
+
+	// ── Rule RW-A025: HTTP Methods Validation ───────────────────────────────
+	standardMethods := map[string]bool{
+		"GET": true, "HEAD": true, "POST": true, "PUT": true,
+		"DELETE": true, "CONNECT": true, "OPTIONS": true, "TRACE": true, "PATCH": true,
+	}
+	for _, m := range cfg.Methods {
+		trimmed := strings.TrimSpace(m)
+		if trimmed == "" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A025",
+				Severity:    SeverityWarning,
+				Title:       "Empty HTTP Method in Inspected Methods",
+				Message:     "An empty string was found in the 'methods' configuration list.",
+				Field:       "methods",
+				Remediation: "Remove the empty entry or specify standard HTTP methods like 'GET', 'POST', 'PUT'.",
+			})
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if upper != trimmed {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A025",
+				Severity:    SeverityWarning,
+				Title:       "Lowercase or Mixed-Case HTTP Method",
+				Message:     fmt.Sprintf("HTTP method %q should be uppercase (%q). RFC 9110 specifies HTTP methods are case-sensitive uppercase tokens.", m, upper),
+				Pattern:     m,
+				Field:       "methods",
+				Remediation: fmt.Sprintf("Use uppercase %q in 'methods'.", upper),
+			})
+		} else if !standardMethods[upper] {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A025",
+				Severity:    SeverityWarning,
+				Title:       "Unrecognized Non-Standard HTTP Method",
+				Message:     fmt.Sprintf("Method %q is not a standard HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT).", m),
+				Pattern:     m,
+				Field:       "methods",
+				Remediation: "Verify the method name or replace with standard HTTP methods.",
+			})
+		}
+	}
+
+	// ── Rule RW-A026: Body Inspection Configured Without Mutation Methods ───
+	if (cfg.CheckBody || len(cfg.CheckBodyPatterns) > 0) && len(cfg.Methods) > 0 {
+		hasMutationMethod := false
+		for _, m := range cfg.Methods {
+			upper := strings.ToUpper(strings.TrimSpace(m))
+			if upper == "POST" || upper == "PUT" || upper == "PATCH" || upper == "DELETE" {
+				hasMutationMethod = true
+				break
+			}
+		}
+		if !hasMutationMethod {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A026",
+				Severity:    SeverityWarning,
+				Title:       "Body Inspection Configured Without Mutation Methods",
+				Message:     "Body inspection is enabled ('checkBody' or 'checkBodyPatterns'), but 'methods' contains only read-only methods (e.g. GET/HEAD/OPTIONS). Incoming POST, PUT, or PATCH request bodies will bypass inspection.",
+				Field:       "methods",
+				Remediation: "Add 'POST', 'PUT', and 'PATCH' to 'methods' so mutating requests with payloads are inspected.",
+			})
+		}
+	}
+
+	// ── Rule RW-A027: Malformed Monitored Header Name ───────────────────────
+	headerTokenRegex := regexp.MustCompile(`^[a-zA-Z0-9!#$%&'*+\-.^_` + "`" + `|~]+$`)
+	for _, h := range cfg.CheckHeaders {
+		trimmed := strings.TrimSpace(h)
+		if trimmed == "" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A027",
+				Severity:    SeverityWarning,
+				Title:       "Empty Header Name in checkHeaders",
+				Message:     "An empty string was found in 'checkHeaders'.",
+				Field:       "checkHeaders",
+				Remediation: "Remove the empty entry from 'checkHeaders'.",
+			})
+		} else if strings.Contains(trimmed, ":") {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A027",
+				Severity:    SeverityCritical,
+				Title:       "Header Name Contains Colon",
+				Message:     fmt.Sprintf("Header name %q in 'checkHeaders' contains a colon (:). Only the header field name should be specified, not its value.", h),
+				Pattern:     h,
+				Field:       "checkHeaders",
+				Remediation: fmt.Sprintf("Use %q instead of %q.", strings.TrimSpace(strings.Split(trimmed, ":")[0]), h),
+			})
+		} else if !headerTokenRegex.MatchString(trimmed) {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A027",
+				Severity:    SeverityWarning,
+				Title:       "Invalid HTTP Header Token Syntax",
+				Message:     fmt.Sprintf("Header name %q in 'checkHeaders' contains characters not permitted in RFC 9110 HTTP field names.", h),
+				Pattern:     h,
+				Field:       "checkHeaders",
+				Remediation: "Use standard HTTP header names (e.g. 'X-Forwarded-Prefix', 'X-Original-URL').",
+			})
+		}
+	}
+
+	// ── Rule RW-A028: Body Inspection Buffer Limit ──────────────────────────
+	if cfg.CheckBodyMaxBytes < 0 {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A028",
+			Severity:    SeverityCritical,
+			Title:       "Negative Body Inspection Buffer Limit",
+			Message:     fmt.Sprintf("checkBodyMaxBytes (%d) cannot be negative.", cfg.CheckBodyMaxBytes),
+			Field:       "checkBodyMaxBytes",
+			Remediation: "Set 'checkBodyMaxBytes' to a positive byte size, e.g. 65536 (64KB).",
+		})
+	} else if cfg.CheckBodyMaxBytes > 10*1024*1024 { // >10 MB
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A028",
+			Severity:    SeverityWarning,
+			Title:       "Excessive Body Inspection Buffer Limit (DoS Risk)",
+			Message:     fmt.Sprintf("checkBodyMaxBytes (%d bytes) exceeds 10MB. Buffering large request bodies in memory per concurrent request risks memory exhaustion / denial of service.", cfg.CheckBodyMaxBytes),
+			Field:       "checkBodyMaxBytes",
+			Remediation: "Limit 'checkBodyMaxBytes' to reasonable sizes (e.g. 65536 for 64KB or 1048576 for 1MB).",
+		})
+	}
+
 	report.finalize(false)
 	return report
 }
@@ -481,6 +693,9 @@ func isValidBanDuration(d string) bool {
 
 func isValidIPOrCIDR(v string) bool {
 	v = strings.TrimSpace(v)
+	if host, _, err := net.SplitHostPort(v); err == nil {
+		v = host
+	}
 	v = strings.Trim(v, "[]")
 	if idx := strings.IndexByte(v, '%'); idx != -1 {
 		v = v[:idx]

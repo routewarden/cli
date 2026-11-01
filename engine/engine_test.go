@@ -395,6 +395,48 @@ func TestEngine_ExtractCandidatePaths(t *testing.T) {
 			requestURI: "/admin\x00/page",
 			wantPaths:  []string{"/admin/page"},
 		},
+		{
+			name:       "NTFS Alternate Data Stream (::$DATA)",
+			rawPath:    "",
+			pathStr:    "/wp-config.php::$DATA",
+			requestURI: "/wp-config.php::$DATA",
+			wantPaths:  []string{"/wp-config.php"},
+		},
+		{
+			name:       "Trailing dot on sensitive file extension",
+			rawPath:    "",
+			pathStr:    "/settings.py.",
+			requestURI: "/settings.py.",
+			wantPaths:  []string{"/settings.py"},
+		},
+		{
+			name:       "Trailing dot on path segment",
+			rawPath:    "",
+			pathStr:    "/sub./.env",
+			requestURI: "/sub./.env",
+			wantPaths:  []string{"/sub/.env"},
+		},
+		{
+			name:       "Absolute URI in requestURI",
+			rawPath:    "",
+			pathStr:    "/wp-config.php",
+			requestURI: "http://example.com/wp-config.php",
+			wantPaths:  []string{"/wp-config.php"},
+		},
+		{
+			name:       "Absolute URI with Windows backslash",
+			rawPath:    "",
+			pathStr:    `http://example.com\.env`,
+			requestURI: `http://example.com\.env`,
+			wantPaths:  []string{"/.env"},
+		},
+		{
+			name:       "Multi-layer encoded rawPath",
+			rawPath:    "/%252e%252e/.env",
+			pathStr:    "/public/test",
+			requestURI: "/public/test",
+			wantPaths:  []string{"/.env"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -414,6 +456,136 @@ func TestEngine_ExtractCandidatePaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPathNormalizer_EdgeCases covers edge cases P-1 through P-5 in CLI engine.
+func TestPathNormalizer_EdgeCases(t *testing.T) {
+	// P-1: Repeated percent signs (%%%%2eenv) – should not panic; result must be well-formed
+	t.Run("P-1 repeated percent signs", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%%%%2eenv", "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for %%%%2eenv path")
+		}
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("candidate %q does not start with '/'", c)
+			}
+		}
+	})
+
+	// P-2: Exact "/" path
+	t.Run("P-2 exact root path", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/", "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for '/'")
+		}
+		found := false
+		for _, c := range candidates {
+			if c == "/" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected '/' to be in candidates, got: %v", candidates)
+		}
+	})
+
+	// P-3: Very long path (>16 KB) must not panic or OOM
+	t.Run("P-3 very long path", func(t *testing.T) {
+		longPath := "/" + string(make([]byte, 16*1024+1))
+		for i := range longPath[1:] {
+			longPath = longPath[:i+1] + "a" + longPath[i+2:]
+		}
+		candidates := engine.ExtractCandidatePaths("", longPath, "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for very long path")
+		}
+	})
+
+	// P-4: Unicode NFD path – normalizer must not panic; result must be well-formed
+	t.Run("P-4 unicode NFC/NFD path", func(t *testing.T) {
+		nfdPath := "/caf\u00e9/menu"
+		candidates := engine.ExtractCandidatePaths("", nfdPath, "")
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("unicode candidate %q does not start with '/'", c)
+			}
+		}
+	})
+
+	// P-5: Path with embedded fragment (#anchor) – fragment must not pollute path candidates
+	t.Run("P-5 embedded fragment", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/api/v1#admin", "/api/v1#admin")
+		foundBase := false
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("fragment candidate %q does not start with '/'", c)
+			}
+			if c == "/api/v1" {
+				foundBase = true
+			}
+		}
+		if !foundBase {
+			t.Errorf("expected candidates to contain stripped base path '/api/v1', got %v", candidates)
+		}
+	})
+
+	// P-6: Malformed percent-encoding (%zz or trailing %) with multi-layer traversal
+	t.Run("P-6 lenient multi-layer percent decoding", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%252e%252e/.env%zz", "/%252e%252e/.env%zz")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env%zz" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env%%zz', got %v", candidates)
+		}
+
+		cfg := engine.CreateConfig()
+		cfg.BlockPatterns = []string{`(?i)(^|/)\.env($|[/?#])`}
+		cfg.CheckQuery = true
+		cfg.CheckBody = true
+		eng, err := engine.NewEngine(cfg)
+		if err != nil {
+			t.Fatalf("failed to create engine: %v", err)
+		}
+
+		// Blocked via path
+		res := eng.Evaluate("GET", "/%252e%252e/.env%zz", "", nil)
+		if !res.Blocked {
+			t.Errorf("expected /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+
+		// Blocked via query string with malformed percent-encoding
+		resQuery := eng.Evaluate("GET", "/search", "target=/%252e%252e/.env%zz", nil)
+		if !resQuery.Blocked {
+			t.Errorf("expected query with /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+
+		// Blocked via body with malformed percent-encoding
+		resBody := eng.EvaluateWithBody("POST", "/submit", "", nil, "127.0.0.1", "field=/%252e%252e/.env%zz")
+		if !resBody.Blocked {
+			t.Errorf("expected body with /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+	})
+
+	// P-7: Quadruple percent-encoded traversal (/%2525252e%2525252e/.env)
+	t.Run("P-7 quadruple percent-encoded traversal", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%2525252e%2525252e/.env", "/%2525252e%2525252e/.env")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env' after 4 unescaping passes, got %v", candidates)
+		}
+	})
 }
 
 func TestEngine_CheckDockerInstalled(t *testing.T) {
@@ -645,6 +817,29 @@ func TestEngine_CheckBody(t *testing.T) {
 	res4 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql%5Finjection")
 	if !res4.Blocked {
 		t.Errorf("expected URL-encoded request body to be detected and blocked")
+	}
+
+	// 5. Form parameter unpacking with end-anchored pattern
+	cfgForm := engine.CreateConfig()
+	cfgForm.Methods = []string{"POST"}
+	cfgForm.CheckBody = true
+	cfgForm.BlockPatterns = []string{`(?i)\.key$`}
+
+	engForm, err := engine.NewEngine(cfgForm)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// In raw form string "other=1&cert=server.key&final=ok", raw body ends in "ok", not ".key"
+	res5 := engForm.EvaluateWithBody("POST", "/upload", "", nil, "127.0.0.1", "other=1&cert=server.key&final=ok")
+	if !res5.Blocked {
+		t.Errorf("expected form parameter server.key to be extracted and blocked by end-anchored pattern")
+	}
+
+	// 6. JSON payload unpacking with end-anchored pattern
+	res6 := engForm.EvaluateWithBody("POST", "/upload", "", nil, "127.0.0.1", `{"config": {"private_key": "id_rsa.key"}, "status": "active"}`)
+	if !res6.Blocked {
+		t.Errorf("expected JSON string id_rsa.key to be extracted and blocked by end-anchored pattern")
 	}
 }
 
@@ -1787,6 +1982,34 @@ func TestEngine_AIBotsAndHoneypotSpiderTrap(t *testing.T) {
 	if !resBanned.Blocked || resBanned.Reason != "ip_banned" {
 		t.Errorf("expected banned client to be blocked with ip_banned, got blocked=%v, reason=%s", resBanned.Blocked, resBanned.Reason)
 	}
+
+	// 7. Subpath of trap without trailing slash (/secret-spider-trap/deep/link) triggers trap
+	clientSub := "198.51.100.88"
+	resSubTrap := eng.EvaluateWithClientIP("GET", "/secret-spider-trap/deep/link", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientSub)
+	if !resSubTrap.Blocked || resSubTrap.Reason != "honeypot_trap_triggered" {
+		t.Fatalf("expected subpath trap to be blocked with honeypot_trap_triggered, got blocked=%v, reason=%s", resSubTrap.Blocked, resSubTrap.Reason)
+	}
+
+	// 8. Legitimate request to prefix-collision path (/secret-spider-trapdoor) must NOT trigger trap
+	clientPrefixSafe := "198.51.100.89"
+	resPrefixSafe := eng.EvaluateWithClientIP("GET", "/secret-spider-trapdoor", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientPrefixSafe)
+	if resPrefixSafe.Blocked {
+		t.Errorf("expected prefix-collision path /secret-spider-trapdoor to pass, got blocked: %s", resPrefixSafe.Reason)
+	}
+
+	// 9. Honeypot trap configured WITHOUT leading slash (e.g. "no-slash-trap")
+	cfgNoSlash := engine.CreateConfig()
+	cfgNoSlash.EnableDefaultPatterns = false
+	cfgNoSlash.HoneypotTrapPaths = []string{"no-slash-trap"}
+	cfgNoSlash.TrapBanDuration = "1h"
+	engNoSlash, err := engine.NewEngine(cfgNoSlash)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resNoSlash := engNoSlash.EvaluateWithClientIP("GET", "/no-slash-trap", "", nil, "198.51.100.91")
+	if !resNoSlash.Blocked || resNoSlash.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected trap path without leading slash to trigger, got blocked=%v, reason=%s", resNoSlash.Blocked, resNoSlash.Reason)
+	}
 }
 
 func TestEngine_VerifySearchEngineBots(t *testing.T) {
@@ -1903,6 +2126,26 @@ func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
 	})
 	if !resHeadless.Blocked || resHeadless.Reason != "script_client_blocked" || resHeadless.MatchedPattern != "playwright_headless" {
 		t.Errorf("expected playwright to be blocked with script_client_blocked, got blocked=%v, reason=%s, pattern=%s", resHeadless.Blocked, resHeadless.Reason, resHeadless.MatchedPattern)
+	}
+
+	// 4b. Script client via headless header with EMPTY User-Agent
+	resEmptyUAHeadless := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"X-Playwright": "true",
+	})
+	if !resEmptyUAHeadless.Blocked || resEmptyUAHeadless.Reason != "script_client_blocked" || resEmptyUAHeadless.MatchedPattern != "playwright_headless" {
+		t.Errorf("expected empty UA with X-Playwright to be blocked, got blocked=%v, reason=%s", resEmptyUAHeadless.Blocked, resEmptyUAHeadless.Reason)
+	}
+
+	// 4c. Custom BlockUserAgents with ^$ regex matching empty User-Agent
+	cfgEmptyUA := engine.CreateConfig()
+	cfgEmptyUA.BlockUserAgents = []string{"^$"}
+	engEmptyUA, err := engine.NewEngine(cfgEmptyUA)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resEmptyBlocked := engEmptyUA.Evaluate("GET", "/index.html", "", map[string]string{})
+	if !resEmptyBlocked.Blocked || resEmptyBlocked.Reason != "user_agent_blocked" {
+		t.Errorf("expected empty UA to be blocked by ^$ pattern, got blocked=%v, reason=%s", resEmptyBlocked.Blocked, resEmptyBlocked.Reason)
 	}
 
 	// 5. Check generators
@@ -2129,6 +2372,152 @@ func TestEngine_BotDefenseLevelPresets(t *testing.T) {
 		t.Errorf("expected Nginx Lua to serialize detect_browser_impersonation = false, got:\n%s", nginxFalse)
 	}
 }
+
+func TestEngine_TrailingSlashMatching(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: false,
+		BlockPatterns:         []string{`(?i)^/admin/$`},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	// 1. Request with trailing slash
+	resWithSlash := e.Evaluate("GET", "/admin/", "", nil)
+	if !resWithSlash.Blocked {
+		t.Fatalf("expected /admin/ to be blocked by ^/admin/$")
+	}
+
+	// 2. Request without trailing slash
+	resNoSlash := e.Evaluate("GET", "/admin", "", nil)
+	if !resNoSlash.Blocked {
+		t.Fatalf("expected /admin to be blocked by ^/admin/$ (candidate trailing slash)")
+	}
+
+	// 3. Subpath should not match exact ^/admin/$
+	resSubpath := e.Evaluate("GET", "/admin/users", "", nil)
+	if resSubpath.Blocked {
+		t.Fatalf("expected /admin/users NOT to be blocked by ^/admin/$")
+	}
+}
+
+func TestEngine_CheckHeaders_WhitespaceAndQuotes(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: true,
+		CheckHeaders:          []string{"X-Forwarded-Prefix", "X-Rewrite-URL"},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		headers map[string]string
+		blocked bool
+	}{
+		{
+			name:    "Header with whitespace",
+			headers: map[string]string{"X-Forwarded-Prefix": "  /.env  "},
+			blocked: true,
+		},
+		{
+			name:    "Header wrapped in double quotes",
+			headers: map[string]string{"X-Forwarded-Prefix": `"/wp-config.php"`},
+			blocked: true,
+		},
+		{
+			name:    "Header wrapped in single quotes",
+			headers: map[string]string{"X-Rewrite-URL": `'/.env'`},
+			blocked: true,
+		},
+		{
+			name:    "Comma-separated header with quotes and spaces",
+			headers: map[string]string{"X-Forwarded-Prefix": `" /safe ", " /.env "`},
+			blocked: true,
+		},
+		{
+			name:    "Safe header",
+			headers: map[string]string{"X-Forwarded-Prefix": `"/dashboard"`},
+			blocked: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := e.Evaluate("GET", "/api/data", "", tc.headers)
+			if res.Blocked != tc.blocked {
+				t.Fatalf("expected blocked=%v, got=%v (reason=%s)", tc.blocked, res.Blocked, res.Reason)
+			}
+		})
+	}
+}
+
+func TestEngine_EncodedDelimitersAndWhitespaceEvasion(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: true,
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		path    string
+		blocked bool
+	}{
+		{
+			name:    "Encoded question mark in sensitive extension (?param)",
+			path:    "/backup.sql%3fparam=value",
+			blocked: true,
+		},
+		{
+			name:    "Encoded fragment in sensitive file (#section)",
+			path:    "/database.sql%23section",
+			blocked: true,
+		},
+		{
+			name:    "Encoded query and fragment combined (%3f and %23)",
+			path:    "/server.key%3ffoo%23bar",
+			blocked: true,
+		},
+		{
+			name:    "Encoded carriage return (%0d)",
+			path:    "/.env%0d",
+			blocked: true,
+		},
+		{
+			name:    "Encoded newline (%0a)",
+			path:    "/.env%0a",
+			blocked: true,
+		},
+		{
+			name:    "Encoded horizontal tab (%09)",
+			path:    "/.env%09",
+			blocked: true,
+		},
+		{
+			name:    "Clean harmless request",
+			path:    "/index.html",
+			blocked: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := e.Evaluate("GET", tc.path, "", nil)
+			if res.Blocked != tc.blocked {
+				t.Fatalf("expected blocked=%v, got=%v (reason=%s, candidates=%v)", tc.blocked, res.Blocked, res.Reason, res.CandidatePaths)
+			}
+		})
+	}
+}
+
 
 
 

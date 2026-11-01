@@ -225,3 +225,72 @@ func TestDiffConfigs_ASNMethodAndIPCanonicalization(t *testing.T) {
 		t.Errorf("expected added AS64503, got %+v", diffActual.AllowedASNs.Added)
 	}
 }
+
+func TestDiffConfigs_AllowedIPsAndAllowPatternsImpact(t *testing.T) {
+	// 1. Adding allowedIps relaxes posture
+	base := CreateConfig()
+	candidateRelaxed := CreateConfig()
+	candidateRelaxed.AllowedIPs = []string{"10.0.0.0/8"}
+	diff1 := DiffConfigs(base, candidateRelaxed, "base.json", "candidate.json")
+	if diff1.Impact != DiffImpactRelaxed {
+		t.Errorf("expected adding allowedIps to be RELAXED, got %s", diff1.Impact)
+	}
+
+	// 2. Removing allowedIps hardens posture
+	diff2 := DiffConfigs(candidateRelaxed, base, "base.json", "candidate.json")
+	if diff2.Impact != DiffImpactHardened {
+		t.Errorf("expected removing allowedIps to be HARDENED, got %s", diff2.Impact)
+	}
+
+	// 3. Removing allowPatterns hardens posture
+	baseAllow := CreateConfig()
+	baseAllow.AllowPatterns = []string{"/safe/bypass"}
+	diff3 := DiffConfigs(baseAllow, base, "base.json", "candidate.json")
+	if diff3.Impact != DiffImpactHardened {
+		t.Errorf("expected removing allowPatterns to be HARDENED, got %s", diff3.Impact)
+	}
+
+	// 4. Adding ASNDB hardens posture
+	candASN := CreateConfig()
+	candASN.ASNDB = "/data/GeoLite2-ASN.mmdb"
+	diff4 := DiffConfigs(base, candASN, "base.json", "candidate.json")
+	if diff4.Impact != DiffImpactHardened {
+		t.Errorf("expected configuring ASNDB to be HARDENED, got %s", diff4.Impact)
+	}
+
+	// 5. Removing ASNDB relaxes posture
+	diff5 := DiffConfigs(candASN, base, "base.json", "candidate.json")
+	if diff5.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing ASNDB to be RELAXED, got %s", diff5.Impact)
+	}
+
+	// 6. Adding CheckHeaders hardens posture
+	candHeaders := CreateConfig()
+	candHeaders.CheckHeaders = []string{"X-Forwarded-Prefix"}
+	diff6 := DiffConfigs(base, candHeaders, "base.json", "candidate.json")
+	if diff6.Impact != DiffImpactHardened {
+		t.Errorf("expected adding checkHeaders to be HARDENED, got %s", diff6.Impact)
+	}
+
+	// 7. Removing CheckHeaders relaxes posture
+	diff7 := DiffConfigs(candHeaders, base, "base.json", "candidate.json")
+	if diff7.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing checkHeaders to be RELAXED, got %s", diff7.Impact)
+	}
+
+	// 8. Adding Methods hardens posture
+	baseMethods := CreateConfig()
+	baseMethods.Methods = []string{"GET"}
+	candMethods := CreateConfig()
+	candMethods.Methods = []string{"GET", "POST"}
+	diff8 := DiffConfigs(baseMethods, candMethods, "base.json", "candidate.json")
+	if diff8.Impact != DiffImpactHardened {
+		t.Errorf("expected adding methods to be HARDENED, got %s", diff8.Impact)
+	}
+
+	// 9. Removing Methods relaxes posture
+	diff9 := DiffConfigs(candMethods, baseMethods, "base.json", "candidate.json")
+	if diff9.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing methods to be RELAXED, got %s", diff9.Impact)
+	}
+}
