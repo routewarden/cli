@@ -763,6 +763,17 @@ func lenientQueryUnescape(s string) string {
 	return lenientPathUnescape(s)
 }
 
+func stripSchemeAndAuthority(s string) (string, bool) {
+	if idx := strings.Index(s, "://"); idx != -1 {
+		rest := s[idx+3:]
+		if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
+			return rest[slashIdx:], true
+		}
+		return "/", true
+	}
+	return s, false
+}
+
 func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	pathsToCheck := []string{path.Clean(pathStr)}
 
@@ -778,12 +789,15 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	}
 
 	// 1a. Extract path from absolute URIs (e.g. http://example.com/path, http://example.com\path)
+	initials := make([]string, 0, 8)
 	for _, initial := range []string{pathStr, rawURIPath, rawPath} {
-		if idx := strings.Index(initial, "://"); idx != -1 {
-			rest := initial[idx+3:]
-			if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
-				pathsToCheck = append(pathsToCheck, path.Clean(rest[slashIdx:]))
-			}
+		if initial == "" {
+			continue
+		}
+		initials = append(initials, initial)
+		if extracted, ok := stripSchemeAndAuthority(initial); ok {
+			initials = append(initials, extracted)
+			pathsToCheck = append(pathsToCheck, path.Clean(extracted))
 		}
 	}
 
@@ -792,7 +806,7 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	}
 
 	// 2. Perform iterative unescaping to prevent multi-layer URL encoding evasion (e.g. %252e%252e)
-	for _, initial := range []string{pathStr, rawURIPath, rawPath} {
+	for _, initial := range initials {
 		if initial == "" {
 			continue
 		}
@@ -803,6 +817,9 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 				break
 			}
 			pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
+			if extracted, ok := stripSchemeAndAuthority(unescaped); ok {
+				pathsToCheck = append(pathsToCheck, path.Clean(extracted))
+			}
 			curPath = unescaped
 		}
 	}
@@ -907,10 +924,23 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 		if p == "" {
 			continue
 		}
+		if extracted, ok := stripSchemeAndAuthority(p); ok {
+			p = extracted
+		}
 		if !strings.HasPrefix(p, "/") {
 			p = "/" + p
 		}
 		p = path.Clean(p)
+		if strings.HasPrefix(p, "/http:/") || strings.HasPrefix(p, "/https:/") {
+			if secondSlash := strings.Index(p[1:], "/"); secondSlash != -1 {
+				rest := p[1+secondSlash+1:]
+				if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
+					p = path.Clean(rest[slashIdx:])
+				} else {
+					p = "/"
+				}
+			}
+		}
 		if _, exists := seen[p]; !exists {
 			seen[p] = struct{}{}
 			candidatePaths = append(candidatePaths, p)

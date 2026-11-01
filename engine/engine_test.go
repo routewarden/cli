@@ -586,6 +586,39 @@ func TestPathNormalizer_EdgeCases(t *testing.T) {
 			t.Errorf("expected candidates to contain '/.env' after 4 unescaping passes, got %v", candidates)
 		}
 	})
+
+	// P-8: Absolute URI with multi-layer percent-encoded traversal and backslashes
+	t.Run("P-8 absolute URI with multi-layer traversal", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "http://example.com/%252e%252e/.env", "http://example.com/%252e%252e/.env")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env' from absolute URI, got %v", candidates)
+		}
+
+		// Verify evaluation blocks absolute URI targeting sensitive file
+		cfg := engine.CreateConfig()
+		cfg.EnableDefaultPatterns = true
+		eng, err := engine.NewEngine(cfg)
+		if err != nil {
+			t.Fatalf("failed to create engine: %v", err)
+		}
+		res := eng.Evaluate("GET", "http://example.com/%252e%252e/.env", "", nil)
+		if !res.Blocked {
+			t.Errorf("expected absolute URI http://example.com/%%252e%%252e/.env to be blocked, got allowed")
+		}
+
+		// Also check absolute URI with backslash
+		resBackslash := eng.Evaluate("GET", "http://example.com\\admin\\.env", "", nil)
+		if !resBackslash.Blocked {
+			t.Errorf("expected absolute URI http://example.com\\admin\\.env to be blocked, got allowed")
+		}
+	})
 }
 
 func TestEngine_CheckDockerInstalled(t *testing.T) {
