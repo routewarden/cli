@@ -12,18 +12,23 @@ const (
 	AIBotProfileAll        = "all"
 	AIBotProfileTrainOnly  = "train_only"
 	AIBotProfileAggressive = "aggressive"
+	AIBotProfileSearchOnly = "search_only"
+	AIBotProfileAgentsOnly = "agents_only"
 	AIBotProfileCustom     = "custom"
 )
 
 var (
 	// Training/Harvester crawlers (Tier 1): Mass scrape content for LLM pre-training.
-	reAITrainingBots = regexp.MustCompile(`(?i)(GPTBot|ClaudeBot|anthropic|Claude-Web|Google-Extended|Bytespider|CCBot|Applebot-Extended|cohere|Amazonbot|Diffbot|ImagesiftBot|FacebookBot|Meta-ExternalAgent|Meta-ExternalFetcher|Omgilibot|Timpibot|Webzio|YouBot)`)
+	reAITrainingBots = regexp.MustCompile(`(?i)(GPTBot|ClaudeBot|anthropic|Claude-Web|Google-Extended|Bytespider|CCBot|Applebot-Extended|cohere|cohere-ai|Amazonbot|Diffbot|ImagesiftBot|FacebookBot|Meta-ExternalAgent|Meta-ExternalFetcher|Omgilibot|Timpibot|Webzio|YouBot|MistralBot|DeepSeekBot|Exabot|MetaphorBot|Cotalker|PetalBot)`)
 
 	// Search and real-time conversational agents (Tier 2): Retrieve live pages to answer user prompts and cite sources.
-	reAISearchBots = regexp.MustCompile(`(?i)(OAI-SearchBot|ChatGPT-User|PerplexityBot)`)
+	reAISearchBots = regexp.MustCompile(`(?i)(OAI-SearchBot|ChatGPT-User|PerplexityBot|Perplexity-Search|GrokBot|Twitterbot|DuckAssistBot|BingPreview)`)
 
 	// Aggressive bots known to disregard crawl delays, robots.txt, or hammer infrastructure.
-	reAIAggressiveBots = regexp.MustCompile(`(?i)(Bytespider|ClaudeBot|CCBot|Diffbot)`)
+	reAIAggressiveBots = regexp.MustCompile(`(?i)(Bytespider|ClaudeBot|CCBot|Diffbot|PetalBot)`)
+
+	// Autonomous AI Agents & Scraper Frameworks (Tier 3).
+	reAIAgents = regexp.MustCompile(`(?i)(Firecrawl|Apify|Zyte|BrightData|Crawlbase|ScrapingBee|Octoparse|AutoGPT|LangChain|LlamaIndex|AgentGPT)`)
 )
 
 // MatchAIBot evaluates a User-Agent against the chosen profile.
@@ -50,13 +55,30 @@ func MatchAIBot(userAgent string, profile string) (bool, string) {
 		if reAIAggressiveBots.MatchString(ua) {
 			return true, "ai_aggressive_bot"
 		}
+		if reAIAgents.MatchString(ua) {
+			return true, "ai_agent_bot"
+		}
 	case AIBotProfileAggressive:
 		if reAIAggressiveBots.MatchString(ua) {
 			return true, "ai_aggressive_bot"
 		}
+		if reAIAgents.MatchString(ua) {
+			return true, "ai_agent_bot"
+		}
 	case AIBotProfileTrainOnly:
 		if reAITrainingBots.MatchString(ua) {
 			return true, "ai_training_bot"
+		}
+		if reAIAgents.MatchString(ua) {
+			return true, "ai_agent_bot"
+		}
+	case AIBotProfileSearchOnly:
+		if reAISearchBots.MatchString(ua) {
+			return true, "ai_search_bot"
+		}
+	case AIBotProfileAgentsOnly:
+		if reAIAgents.MatchString(ua) {
+			return true, "ai_agent_bot"
 		}
 	case AIBotProfileCustom:
 		// Custom profile does not block built-in registries; relies exclusively on BlockUserAgents.
@@ -65,6 +87,9 @@ func MatchAIBot(userAgent string, profile string) (bool, string) {
 		// Default to train_only if invalid profile provided
 		if reAITrainingBots.MatchString(ua) {
 			return true, "ai_training_bot"
+		}
+		if reAIAgents.MatchString(ua) {
+			return true, "ai_agent_bot"
 		}
 	}
 

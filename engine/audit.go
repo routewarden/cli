@@ -277,14 +277,14 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	// ── Rule RW-A016: AI Bot Profile Validation ─────────────────────────────
 	if cfg.AIBotProfile != "" {
 		p := strings.ToLower(cfg.AIBotProfile)
-		if p != "train_only" && p != "all" && p != "aggressive" && p != "custom" {
+		if p != "train_only" && p != "search_only" && p != "agents_only" && p != "all" && p != "aggressive" && p != "custom" {
 			report.Issues = append(report.Issues, AuditIssue{
 				Code:        "RW-A016",
 				Severity:    SeverityWarning,
 				Title:       "Unrecognized AI Bot Profile",
 				Message:     fmt.Sprintf("AI bot profile %q is not recognized.", cfg.AIBotProfile),
 				Field:       "aiBotProfile",
-				Remediation: "Use one of: 'train_only' (default), 'all', 'aggressive', or 'custom'.",
+				Remediation: "Use one of: 'train_only' (default), 'search_only', 'agents_only', 'all', 'aggressive', or 'custom'.",
 			})
 		}
 	}
@@ -704,6 +704,18 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 				})
 			}
 		}
+	}
+
+	// ── Rule RW-A030: Search Engine Verification Advisory ───────────────────
+	if cfg.BlockAIBots && !cfg.VerifySearchEngineBots {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A030",
+			Severity:    SeverityInfo,
+			Title:       "Missing Search Engine FCrDNS Verification",
+			Message:     "AI bot defense is active ('blockAIBots: true') but search engine bot verification ('verifySearchEngineBots') is disabled. Search engine crawlers (Googlebot, Bingbot, Yandex, etc.) may be blocked or spoofed.",
+			Field:       "verifySearchEngineBots",
+			Remediation: "Enable 'verifySearchEngineBots: true' to perform reverse DNS (FCrDNS) verification for legitimate search engine crawlers while blocking impostors.",
+		})
 	}
 
 	report.finalize(false)

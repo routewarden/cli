@@ -310,17 +310,21 @@
       "enum": [
         "all",
         "train_only",
+        "search_only",
+        "agents_only",
         "aggressive",
         "custom"
       ],
       "default": "train_only",
-      "description": "AI bot blocking profile: train_only (allows citation search bots), all (blocks all AI bots), or aggressive (e.g. Bytespider)."
+      "description": "AI bot blocking profile: train_only (allows citation search bots), search_only (blocks AI search citation scrapers), agents_only (blocks agentic AI scrapers/tools), all (blocks all AI bots), or aggressive (e.g. Bytespider)."
     },
     "ai_bot_profile": {
       "type": "string",
       "enum": [
         "all",
         "train_only",
+        "search_only",
+        "agents_only",
         "aggressive",
         "custom"
       ],

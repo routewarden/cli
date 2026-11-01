@@ -438,3 +438,80 @@ func TestAuditConfig_HoneypotTrapPathValidation(t *testing.T) {
 		t.Errorf("expected RW-A029 critical issue for root honeypot trap path ('/')")
 	}
 }
+
+func TestAuditConfig_AIBotProfileValidation(t *testing.T) {
+	validProfiles := []string{"train_only", "search_only", "agents_only", "all", "aggressive", "custom"}
+	for _, p := range validProfiles {
+		cfg := CreateConfig()
+		cfg.AIBotProfile = p
+		rep := AuditConfig(cfg, "profile_valid.json")
+		for _, issue := range rep.Issues {
+			if issue.Code == "RW-A016" {
+				t.Errorf("profile %q should be valid, but got RW-A016: %s", p, issue.Message)
+			}
+		}
+	}
+
+	invalidProfiles := []string{"bogus", "scrape", "everything"}
+	for _, p := range invalidProfiles {
+		cfg := CreateConfig()
+		cfg.AIBotProfile = p
+		rep := AuditConfig(cfg, "profile_invalid.json")
+		found := false
+		for _, issue := range rep.Issues {
+			if issue.Code == "RW-A016" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("profile %q should be flagged by RW-A016, but was not", p)
+		}
+	}
+}
+
+func TestAuditConfig_SearchEngineVerificationAdvisory(t *testing.T) {
+	// Case 1: BlockAIBots is true, VerifySearchEngineBots is false -> Expect RW-A030
+	cfg1 := CreateConfig()
+	cfg1.BlockAIBots = true
+	cfg1.VerifySearchEngineBots = false
+	rep1 := AuditConfig(cfg1, "ai_bots_no_fcrdns.json")
+
+	found30 := false
+	for _, issue := range rep1.Issues {
+		if issue.Code == "RW-A030" {
+			found30 = true
+			if issue.Severity != SeverityInfo {
+				t.Errorf("expected RW-A030 to be SeverityInfo, got %v", issue.Severity)
+			}
+			break
+		}
+	}
+	if !found30 {
+		t.Errorf("expected RW-A030 advisory when BlockAIBots is true and VerifySearchEngineBots is false")
+	}
+
+	// Case 2: BlockAIBots is true, VerifySearchEngineBots is true -> No RW-A030
+	cfg2 := CreateConfig()
+	cfg2.BlockAIBots = true
+	cfg2.VerifySearchEngineBots = true
+	rep2 := AuditConfig(cfg2, "ai_bots_with_fcrdns.json")
+
+	for _, issue := range rep2.Issues {
+		if issue.Code == "RW-A030" {
+			t.Errorf("unexpected RW-A030 when VerifySearchEngineBots is enabled: %s", issue.Message)
+		}
+	}
+
+	// Case 3: BlockAIBots is false -> No RW-A030 regardless of VerifySearchEngineBots
+	cfg3 := CreateConfig()
+	cfg3.BlockAIBots = false
+	cfg3.VerifySearchEngineBots = false
+	rep3 := AuditConfig(cfg3, "no_ai_bots.json")
+
+	for _, issue := range rep3.Issues {
+		if issue.Code == "RW-A030" {
+			t.Errorf("unexpected RW-A030 when BlockAIBots is false: %s", issue.Message)
+		}
+	}
+}
