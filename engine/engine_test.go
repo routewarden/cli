@@ -2010,6 +2010,30 @@ func TestEngine_AIBotsAndHoneypotSpiderTrap(t *testing.T) {
 	if !resNoSlash.Blocked || resNoSlash.Reason != "honeypot_trap_triggered" {
 		t.Errorf("expected trap path without leading slash to trigger, got blocked=%v, reason=%s", resNoSlash.Blocked, resNoSlash.Reason)
 	}
+
+	// 10. Case-insensitive matching: uppercase/mixed-case requests must trigger trap
+	resCase1 := eng.EvaluateWithClientIP("GET", "/SECRET-SPIDER-TRAP", "", map[string]string{"User-Agent": "Mozilla/5.0"}, "198.51.100.92")
+	if !resCase1.Blocked || resCase1.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected /SECRET-SPIDER-TRAP to trigger honeypot trap case-insensitively, got blocked=%v, reason=%s", resCase1.Blocked, resCase1.Reason)
+	}
+	resCase2 := eng.EvaluateWithClientIP("GET", "/Crawler-Trap/Deep/Link", "", map[string]string{"User-Agent": "Mozilla/5.0"}, "198.51.100.93")
+	if !resCase2.Blocked || resCase2.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected /Crawler-Trap/Deep/Link to trigger honeypot trap case-insensitively, got blocked=%v, reason=%s", resCase2.Blocked, resCase2.Reason)
+	}
+
+	// 11. Root honeypot trap path safeguard: "/" must be ignored and not block root
+	cfgRoot := engine.CreateConfig()
+	cfgRoot.EnableDefaultPatterns = false
+	cfgRoot.HoneypotTrapPaths = []string{"/", "   "}
+	cfgRoot.TrapBanDuration = "1h"
+	engRoot, err := engine.NewEngine(cfgRoot)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resRoot := engRoot.EvaluateWithClientIP("GET", "/", "", nil, "198.51.100.94")
+	if resRoot.Blocked {
+		t.Errorf("expected root request to NOT be blocked when honeypotTrapPaths contains '/', got blocked=%v, reason=%s", resRoot.Blocked, resRoot.Reason)
+	}
 }
 
 func TestEngine_VerifySearchEngineBots(t *testing.T) {

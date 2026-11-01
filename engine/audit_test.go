@@ -411,3 +411,30 @@ func TestAuditConfig_CheckBodyMaxBytesValidation(t *testing.T) {
 		t.Errorf("expected RW-A028 warning for excessive checkBodyMaxBytes (>10MB)")
 	}
 }
+
+func TestAuditConfig_HoneypotTrapPathValidation(t *testing.T) {
+	cfg := CreateConfig()
+	cfg.HoneypotTrapPaths = []string{"", "   ", "/", "///", "/valid-trap"}
+	rep := AuditConfig(cfg, "honeypot_audit.json")
+
+	hasEmptyWarning := false
+	hasRootCritical := false
+
+	for _, issue := range rep.Issues {
+		if issue.Code == "RW-A029" {
+			if issue.Severity == SeverityWarning && issue.Title == "Empty Honeypot Trap Path" {
+				hasEmptyWarning = true
+			}
+			if issue.Severity == SeverityCritical && issue.Title == "Dangerous Root Honeypot Trap Path" {
+				hasRootCritical = true
+			}
+		}
+	}
+
+	if !hasEmptyWarning {
+		t.Errorf("expected RW-A029 warning for empty honeypot trap path")
+	}
+	if !hasRootCritical {
+		t.Errorf("expected RW-A029 critical issue for root honeypot trap path ('/')")
+	}
+}

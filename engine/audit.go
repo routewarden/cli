@@ -673,6 +673,39 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		})
 	}
 
+	// ── Rule RW-A029: Honeypot Trap Path Configuration ──────────────────────
+	for _, trap := range cfg.HoneypotTrapPaths {
+		trimmed := strings.TrimSpace(trap)
+		if trimmed == "" {
+			report.Issues = append(report.Issues, AuditIssue{
+				Code:        "RW-A029",
+				Severity:    SeverityWarning,
+				Title:       "Empty Honeypot Trap Path",
+				Message:     "An empty honeypot trap path was configured. Empty trap paths are ignored.",
+				Pattern:     trap,
+				Field:       "honeypotTrapPaths",
+				Remediation: "Remove empty honeypot trap path entries or specify a dedicated hidden URI such as '/hidden-spider-trap'.",
+			})
+		} else {
+			clean := trimmed
+			if !strings.HasPrefix(clean, "/") {
+				clean = "/" + clean
+			}
+			base := strings.TrimRight(clean, "/")
+			if base == "" {
+				report.Issues = append(report.Issues, AuditIssue{
+					Code:        "RW-A029",
+					Severity:    SeverityCritical,
+					Title:       "Dangerous Root Honeypot Trap Path",
+					Message:     fmt.Sprintf("honeypotTrapPath %q resolves to the root path ('/'). This will cause legitimate root requests to be blocked and clients to be banned.", trap),
+					Pattern:     trap,
+					Field:       "honeypotTrapPaths",
+					Remediation: "Do not set honeypot trap path to '/'. Use an obscure path that is only linked via hidden crawler traps (e.g. '/trap/spider').",
+				})
+			}
+		}
+	}
+
 	report.finalize(false)
 	return report
 }

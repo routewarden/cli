@@ -1663,8 +1663,14 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 					cleanTrap = "/" + cleanTrap
 				}
 				baseTrap := strings.TrimRight(cleanTrap, "/")
+				if baseTrap == "" {
+					continue
+				}
 				prefixTrap := baseTrap + "/"
-				if cleanTrap != "" && (p == baseTrap || p == cleanTrap || (baseTrap != "" && strings.HasPrefix(p, prefixTrap))) {
+				lowerP := strings.ToLower(p)
+				lowerBase := strings.ToLower(baseTrap)
+				lowerPrefix := strings.ToLower(prefixTrap)
+				if lowerP == lowerBase || strings.HasPrefix(lowerP, lowerPrefix) {
 					if e.BanTable != nil && effectiveIPStr != "" {
 						e.BanTable.Ban(effectiveIPStr, e.TrapBanDuration)
 					}
