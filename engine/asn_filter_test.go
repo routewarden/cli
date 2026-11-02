@@ -138,3 +138,39 @@ func TestASNBlockedMatching(t *testing.T) {
 		t.Errorf("expected 8.1.2.3 to not be blocked")
 	}
 }
+
+func TestCloudHostClassifier(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cloud_asn.json")
+	dbContent := `{
+		"AS16509": ["3.0.0.0/8"],
+		"AS24940": ["88.198.0.0/16"],
+		"AS64500": ["99.0.0.0/8"]
+	}`
+	if err := os.WriteFile(path, []byte(dbContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := NewASNFilterEx(nil, nil, path, true)
+	if err != nil {
+		t.Fatalf("unexpected error initializing ASN filter for cloud hosts: %v", err)
+	}
+
+	// 1. AWS IP (3.1.2.3) -> detected as cloud host (AWS)
+	isCloud, asnNum, provider := f.IsCloudHost("3.1.2.3")
+	if !isCloud || asnNum != 16509 || provider != "AWS" {
+		t.Fatalf("expected AWS cloud host detection, got isCloud=%v, asnNum=%d, provider=%s", isCloud, asnNum, provider)
+	}
+
+	// 2. Hetzner IP (88.198.1.1) -> detected as cloud host (Hetzner)
+	isCloud, asnNum, provider = f.IsCloudHost("88.198.1.1")
+	if !isCloud || asnNum != 24940 || provider != "Hetzner" {
+		t.Fatalf("expected Hetzner cloud host detection, got isCloud=%v, asnNum=%d, provider=%s", isCloud, asnNum, provider)
+	}
+
+	// 3. Residential / Non-cloud ISP (99.1.2.3) -> not cloud host
+	isCloud, _, _ = f.IsCloudHost("99.1.2.3")
+	if isCloud {
+		t.Fatalf("expected non-cloud IP 99.1.2.3 to return isCloud=false")
+	}
+}

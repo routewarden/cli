@@ -549,3 +549,53 @@ func TestAuditConfig_RobotsTxtHoneypotValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditConfig_CloudHostValidation(t *testing.T) {
+	// Case 1: RW-A018 when blockCloudHosts is true but asnDB is empty
+	cfg1 := CreateConfig()
+	cfg1.BlockCloudHosts = true
+	cfg1.ASNDB = ""
+	rep1 := AuditConfig(cfg1, "nodb.json")
+	found18 := false
+	for _, issue := range rep1.Issues {
+		if issue.Code == "RW-A018" {
+			found18 = true
+			break
+		}
+	}
+	if !found18 {
+		t.Errorf("expected RW-A018 when blockCloudHosts is true without asnDB")
+	}
+
+	// Case 2: RW-A032 advisory when blockCloudHosts is true without verifySearchEngineBots
+	cfg2 := CreateConfig()
+	cfg2.BlockCloudHosts = true
+	cfg2.ASNDB = "/path/to/asn.json"
+	cfg2.VerifySearchEngineBots = false
+	rep2 := AuditConfig(cfg2, "no_fcrdns.json")
+	found32 := false
+	for _, issue := range rep2.Issues {
+		if issue.Code == "RW-A032" {
+			found32 = true
+			if issue.Severity != SeverityInfo {
+				t.Errorf("expected RW-A032 to be SeverityInfo, got %v", issue.Severity)
+			}
+			break
+		}
+	}
+	if !found32 {
+		t.Errorf("expected RW-A032 advisory when blockCloudHosts is true without verifySearchEngineBots")
+	}
+
+	// Case 3: Clean config -> neither RW-A018 nor RW-A032
+	cfgClean := CreateConfig()
+	cfgClean.BlockCloudHosts = true
+	cfgClean.ASNDB = "/path/to/asn.json"
+	cfgClean.VerifySearchEngineBots = true
+	repClean := AuditConfig(cfgClean, "clean.json")
+	for _, issue := range repClean.Issues {
+		if issue.Code == "RW-A018" || issue.Code == "RW-A032" {
+			t.Errorf("unexpected issue %s for clean config: %s", issue.Code, issue.Message)
+		}
+	}
+}

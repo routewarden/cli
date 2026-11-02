@@ -477,12 +477,12 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 	}
 
 	// ── Rule RW-A018: Missing ASN Database Check ────────────────────────────
-	if (len(cfg.AllowedASNs) > 0 || len(cfg.BlockedASNs) > 0) && strings.TrimSpace(cfg.ASNDB) == "" {
+	if (len(cfg.AllowedASNs) > 0 || len(cfg.BlockedASNs) > 0 || cfg.BlockCloudHosts) && strings.TrimSpace(cfg.ASNDB) == "" {
 		report.Issues = append(report.Issues, AuditIssue{
 			Code:        "RW-A018",
 			Severity:    SeverityCritical,
 			Title:       "Missing ASN Database File",
-			Message:     "ASN allowlisting or blocking is configured, but 'asnDB' is empty. RouteWarden requires an offline JSON routing database to resolve client IPs to ASNs.",
+			Message:     "blockCloudHosts or ASN allow/block lists are configured, but 'asnDB' is empty. RouteWarden requires an offline JSON routing database to resolve client IPs to ASNs.",
 			Field:       "asnDB",
 			Remediation: "Specify the path to your offline ASN routing snapshot in 'asnDB' (e.g. '/etc/routewarden/asn.json').",
 		})
@@ -733,6 +733,18 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 				})
 			}
 		}
+	}
+
+	// ── Rule RW-A032: Cloud Host Blocking without FCrDNS Advisory ──────────
+	if cfg.BlockCloudHosts && !cfg.VerifySearchEngineBots {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A032",
+			Severity:    SeverityInfo,
+			Title:       "Cloud Host Blocking without Search Engine FCrDNS Verification",
+			Message:     "blockCloudHosts is enabled without verifySearchEngineBots. Genuine search engine crawlers operating from cloud hosting infrastructure (e.g. Googlebot on AS15169, Bingbot on AS8075) may be blocked.",
+			Field:       "verifySearchEngineBots",
+			Remediation: "Enable verifySearchEngineBots to permit genuine verified search engine crawlers while blocking unauthorized cloud host scrapers.",
+		})
 	}
 
 	report.finalize(false)

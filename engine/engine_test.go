@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -2149,7 +2150,7 @@ func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
 		"User-Agent":         chromeUA,
 		"Accept-Language":    "en-US,en;q=0.9",
 		"Accept-Encoding":    "gzip, deflate, br",
-		"Sec-CH-UA":          `"Chromium";v="128", "Google Chrome";v="128"`,
+		"Sec-CH-UA":          `"Chromium";v="128", "Not?A_Brand";v="24", "Google Chrome";v="128"`,
 		"Sec-CH-UA-Mobile":   "?0",
 		"Sec-CH-UA-Platform": `"Windows"`,
 		"Sec-Fetch-Site":     "none",
@@ -2158,6 +2159,22 @@ func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
 	})
 	if resLegit.Blocked {
 		t.Errorf("expected genuine Chrome to be allowed, got blocked=%v, reason=%s", resLegit.Blocked, resLegit.Reason)
+	}
+
+	// 2b. Modern Chrome missing GREASE brand -> blocked (browser_spoofed)
+	resNoGrease := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA":          `"Chromium";v="128", "Google Chrome";v="128"`,
+		"Sec-CH-UA-Mobile":   "?0",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	if !resNoGrease.Blocked || resNoGrease.Reason != "browser_spoofed" || resNoGrease.MatchedPattern != "missing_grease_brand" {
+		t.Errorf("expected missing_grease_brand to be blocked, got blocked=%v, reason=%s, pattern=%s", resNoGrease.Blocked, resNoGrease.Reason, resNoGrease.MatchedPattern)
 	}
 
 	// 3. Script client (python-requests)
@@ -2173,7 +2190,7 @@ func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
 		"User-Agent":         chromeUA,
 		"Accept-Language":    "en-US,en;q=0.9",
 		"Accept-Encoding":    "gzip, deflate, br",
-		"Sec-CH-UA":          `"Chromium";v="128", "Google Chrome";v="128"`,
+		"Sec-CH-UA":          `"Chromium";v="128", "Not?A_Brand";v="24", "Google Chrome";v="128"`,
 		"Sec-CH-UA-Mobile":   "?0",
 		"Sec-CH-UA-Platform": `"Windows"`,
 		"Sec-Fetch-Site":     "none",
@@ -2572,6 +2589,84 @@ func TestEngine_EncodedDelimitersAndWhitespaceEvasion(t *testing.T) {
 				t.Fatalf("expected blocked=%v, got=%v (reason=%s, candidates=%v)", tc.blocked, res.Blocked, res.Reason, res.CandidatePaths)
 			}
 		})
+	}
+}
+
+func TestEngine_BlockCloudHosts(t *testing.T) {
+	dir := t.TempDir()
+	asnPath := filepath.Join(dir, "cloud_asn.json")
+	dbContent := `{
+		"AS16509": ["3.0.0.0/8"],
+		"AS15169": ["66.249.64.0/19"],
+		"AS64500": ["99.0.0.0/8"]
+	}`
+	if err := os.WriteFile(asnPath, []byte(dbContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &engine.Config{
+		Enabled:                true,
+		Methods:                []string{"GET", "POST"},
+		BlockCloudHosts:        true,
+		ASNDB:                  asnPath,
+		VerifySearchEngineBots: true,
+		AllowPatterns:          []string{"^/api/webhook(/.*)?$"},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	// Mock FCrDNS verifier: genuine Googlebot on 66.249.66.1 resolves to googlebot.com
+	e.SetFCrDNSLookupFuncs(
+		func(ctx context.Context, addr string) ([]string, error) {
+			if addr == "66.249.66.1" {
+				return []string{"crawl-66-249-66-1.googlebot.com."}, nil
+			}
+			return nil, errors.New("no reverse DNS")
+		},
+		func(ctx context.Context, host string) ([]net.IP, error) {
+			if strings.TrimSuffix(host, ".") == "crawl-66-249-66-1.googlebot.com" {
+				return []net.IP{net.ParseIP("66.249.66.1")}, nil
+			}
+			return nil, errors.New("no forward DNS")
+		},
+	)
+
+	// 1. AWS IP claiming Chrome browser -> datacenter_browser_impersonation
+	res1 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	}, "3.1.2.3")
+	if !res1.Blocked || res1.Reason != "datacenter_browser_impersonation" {
+		t.Fatalf("expected datacenter_browser_impersonation for AWS Chrome request, got blocked=%v, reason=%s", res1.Blocked, res1.Reason)
+	}
+
+	// 2. AWS IP with generic scraper UA -> cloud_host_blocked
+	res2 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "CustomScraper/1.0",
+	}, "3.1.2.3")
+	if !res2.Blocked || res2.Reason != "cloud_host_blocked" {
+		t.Fatalf("expected cloud_host_blocked for AWS custom scraper, got blocked=%v, reason=%s", res2.Blocked, res2.Reason)
+	}
+
+	// 3. AWS IP accessing /api/webhook (in allowPatterns) -> allowed (exemption)
+	res3 := e.EvaluateWithClientIP("POST", "/api/webhook/github", "", nil, "3.1.2.3")
+	if !res3.Allowed || res3.Reason != "path_allowed" {
+		t.Fatalf("expected /api/webhook to be allowed, got allowed=%v, reason=%s", res3.Allowed, res3.Reason)
+	}
+
+	// 4. Non-cloud residential IP (99.1.2.3) -> allowed
+	res4 := e.EvaluateWithClientIP("GET", "/index.html", "", nil, "99.1.2.3")
+	if res4.Blocked {
+		t.Fatalf("expected residential IP to be allowed, got blocked=%v, reason=%s", res4.Blocked, res4.Reason)
+	}
+
+	// 5. Genuine Googlebot from GCP (AS15169, 66.249.66.1) -> verified via FCrDNS and allowed!
+	res5 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+	}, "66.249.66.1")
+	if res5.Blocked {
+		t.Fatalf("expected verified Googlebot to pass, got blocked=%v, reason=%s", res5.Blocked, res5.Reason)
 	}
 }
 

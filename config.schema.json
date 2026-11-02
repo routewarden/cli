@@ -431,6 +431,16 @@
       "default": false,
       "description": "Block requests from script clients and headless frameworks (snake_case alias)."
     },
+    "blockCloudHosts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block incoming requests originating from major cloud hosting providers and datacenter ASNs (AWS, GCP, Azure, Hetzner, DigitalOcean, etc.)."
+    },
+    "block_cloud_hosts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from cloud hosting and datacenter ASNs (snake_case alias)."
+    },
     "explicitFields": {
       "type": "array",
       "items": {

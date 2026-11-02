@@ -18,7 +18,7 @@ func TestDetectBrowserImpersonation(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Language":    "en-US,en;q=0.9",
 				"Accept-Encoding":    "gzip, deflate, br",
-				"Sec-CH-UA":          `"Chromium";v="120", "Google Chrome";v="120"`,
+				"Sec-CH-UA":          `"Chromium";v="120", "Google Chrome";v="120", "Not?A_Brand";v="24"`,
 				"Sec-CH-UA-Mobile":   "?0",
 				"Sec-CH-UA-Platform": `"macOS"`,
 				"Sec-Fetch-Site":     "none",
@@ -33,7 +33,7 @@ func TestDetectBrowserImpersonation(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Language":    "en-US,en;q=0.9",
 				"Accept-Encoding":    "gzip, deflate, br",
-				"Sec-CH-UA":          `"Chromium";v="120", "Google Chrome";v="120"`,
+				"Sec-CH-UA":          `"Chromium";v="120", "Google Chrome";v="120", "Not?A_Brand";v="24"`,
 				"Sec-CH-UA-Mobile":   "?1",
 				"Sec-CH-UA-Platform": `"macOS"`,
 				"Sec-Fetch-Site":     "none",
@@ -60,7 +60,7 @@ func TestDetectBrowserImpersonation(t *testing.T) {
 			headers: map[string]string{
 				"Accept-Language":    "en-US,en;q=0.9",
 				"Accept-Encoding":    "gzip, deflate, br",
-				"Sec-CH-UA":          `"Chromium";v="120"`,
+				"Sec-CH-UA":          `"Chromium";v="120", "Not_A Brand";v="24"`,
 				"Sec-CH-UA-Mobile":   "?0",
 				"Sec-CH-UA-Platform": `"Windows"`,
 				"Sec-Fetch-Site":     "same-origin",
@@ -69,6 +69,22 @@ func TestDetectBrowserImpersonation(t *testing.T) {
 			},
 			wantBlock:  true,
 			wantReason: "sec_fetch_mode_mismatch",
+		},
+		{
+			name: "Missing GREASE brand in modern Chromium Sec-CH-UA",
+			ua:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			headers: map[string]string{
+				"Accept-Language":    "en-US,en;q=0.9",
+				"Accept-Encoding":    "gzip, deflate, br",
+				"Sec-CH-UA":          `"Chromium";v="120", "Google Chrome";v="120"`,
+				"Sec-CH-UA-Mobile":   "?0",
+				"Sec-CH-UA-Platform": `"Windows"`,
+				"Sec-Fetch-Site":     "same-origin",
+				"Sec-Fetch-Mode":     "navigate",
+				"Sec-Fetch-Dest":     "document",
+			},
+			wantBlock:  true,
+			wantReason: "missing_grease_brand",
 		},
 		{
 			name: "Missing Accept-Language",
@@ -240,5 +256,30 @@ func TestDetectScriptClient(t *testing.T) {
 				t.Errorf("expected reason=%s, got %s", tt.wantReason, reason)
 			}
 		})
+	}
+}
+
+func TestDetectBrowserHeaderOrder(t *testing.T) {
+	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+	// 1. Valid Chrome order (Sec-CH-UA before User-Agent and Accept)
+	validOrder := []string{"Host", "Connection", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "User-Agent", "Accept"}
+	blocked, reason := DetectBrowserHeaderOrder(validOrder, ua)
+	if blocked {
+		t.Fatalf("expected valid header order to pass, got blocked=%v, reason=%s", blocked, reason)
+	}
+
+	// 2. Anomaly: User-Agent before Sec-CH-UA
+	spoofedUAFirst := []string{"Host", "User-Agent", "Accept", "sec-ch-ua", "sec-ch-ua-mobile"}
+	blocked, reason = DetectBrowserHeaderOrder(spoofedUAFirst, ua)
+	if !blocked || reason != "header_order_anomaly" {
+		t.Fatalf("expected header_order_anomaly when User-Agent appears before Sec-CH-UA, got blocked=%v, reason=%s", blocked, reason)
+	}
+
+	// 3. Anomaly: Accept before Sec-CH-UA
+	spoofedAcceptFirst := []string{"Host", "Accept", "User-Agent", "sec-ch-ua"}
+	blocked, reason = DetectBrowserHeaderOrder(spoofedAcceptFirst, ua)
+	if !blocked || reason != "header_order_anomaly" {
+		t.Fatalf("expected header_order_anomaly when Accept appears before Sec-CH-UA, got blocked=%v, reason=%s", blocked, reason)
 	}
 }

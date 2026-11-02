@@ -199,6 +199,15 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		}
 	}
 
+	if base.BlockCloudHosts != candidate.BlockCloudHosts {
+		diff.Properties["blockCloudHosts"] = ScalarDiff{Old: base.BlockCloudHosts, New: candidate.BlockCloudHosts}
+		if !candidate.BlockCloudHosts {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HIGH: Datacenter and cloud host blocking (blockCloudHosts) was disabled.")
+		} else {
+			diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: Datacenter and cloud host blocking (blockCloudHosts) was enabled.")
+		}
+	}
+
 	if base.TrapBanDuration != candidate.TrapBanDuration {
 		diff.Properties["trapBanDuration"] = ScalarDiff{Old: base.TrapBanDuration, New: candidate.TrapBanDuration}
 	}
@@ -317,6 +326,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(base.BlockAIBots && !candidate.BlockAIBots) ||
 		(base.DetectBrowserImpersonation && !candidate.DetectBrowserImpersonation) ||
 		(base.BlockScriptClients && !candidate.BlockScriptClients) ||
+		(base.BlockCloudHosts && !candidate.BlockCloudHosts) ||
 		(base.VerifySearchEngineBots && !candidate.VerifySearchEngineBots) ||
 		(base.EnableRobotsTxtHoneypot && !candidate.EnableRobotsTxtHoneypot) ||
 		len(diff.BlockPatterns.Removed) > 0 ||
@@ -339,6 +349,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(!base.BlockAIBots && candidate.BlockAIBots) ||
 		(!base.DetectBrowserImpersonation && candidate.DetectBrowserImpersonation) ||
 		(!base.BlockScriptClients && candidate.BlockScriptClients) ||
+		(!base.BlockCloudHosts && candidate.BlockCloudHosts) ||
 		(!base.VerifySearchEngineBots && candidate.VerifySearchEngineBots) ||
 		(!base.EnableRobotsTxtHoneypot && candidate.EnableRobotsTxtHoneypot) ||
 		len(diff.BlockPatterns.Added) > 0 ||

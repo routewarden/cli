@@ -93,6 +93,7 @@ type Config struct {
 	VerifySearchEngineBots     bool            `json:"verifySearchEngineBots,omitempty"`
 	DetectBrowserImpersonation bool            `json:"detectBrowserImpersonation,omitempty"`
 	BlockScriptClients         bool            `json:"blockScriptClients,omitempty"`
+	BlockCloudHosts            bool            `json:"blockCloudHosts,omitempty"`
 	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
 	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
 	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
@@ -310,6 +311,8 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		DetectBrowserImpersonationSnake *bool           `json:"detect_browser_impersonation"`
 		BlockScriptClients              *bool           `json:"blockScriptClients"`
 		BlockScriptClientsSnake         *bool           `json:"block_script_clients"`
+		BlockCloudHosts                 *bool           `json:"blockCloudHosts"`
+		BlockCloudHostsSnake            *bool           `json:"block_cloud_hosts"`
 		BlockUserAgents                 []string        `json:"blockUserAgents"`
 		BlockUserAgentsSnake            []string        `json:"block_user_agents"`
 		AllowUserAgents                 []string        `json:"allowUserAgents"`
@@ -468,6 +471,12 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		cfg.BlockScriptClients = *raw.BlockScriptClients
 	} else if raw.BlockScriptClientsSnake != nil {
 		cfg.BlockScriptClients = *raw.BlockScriptClientsSnake
+	}
+
+	if raw.BlockCloudHosts != nil {
+		cfg.BlockCloudHosts = *raw.BlockCloudHosts
+	} else if raw.BlockCloudHostsSnake != nil {
+		cfg.BlockCloudHosts = *raw.BlockCloudHostsSnake
 	}
 
 	if raw.BlockUserAgents != nil {
@@ -1060,6 +1069,9 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		if cfg.isExplicit("blockScriptClients", "block_script_clients") || cfg.BlockScriptClients {
 			fileCfg.BlockScriptClients = cfg.BlockScriptClients
 		}
+		if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") || cfg.BlockCloudHosts {
+			fileCfg.BlockCloudHosts = cfg.BlockCloudHosts
+		}
 		if len(cfg.BlockUserAgents) > 0 {
 			fileCfg.BlockUserAgents = cfg.BlockUserAgents
 		}
@@ -1248,7 +1260,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		compiledBody = append(compiledBody, re)
 	}
 
-	asn, err := NewASNFilterEx(cfg.AllowedASNs, cfg.BlockedASNs, cfg.ASNDB)
+	asn, err := NewASNFilterEx(cfg.AllowedASNs, cfg.BlockedASNs, cfg.ASNDB, cfg.BlockCloudHosts)
 	if err != nil {
 		return nil, err
 	}
@@ -1766,6 +1778,22 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		}
 	}
 
+	// Datacenter & Cloud Hosting IP Classifier
+	if !uaAllowed && e.Config.BlockCloudHosts && e.ASN != nil {
+		if isCloud, cloudASN, provider := e.ASN.IsCloudHost(asnIP); isCloud {
+			result.Allowed = false
+			result.Blocked = true
+			if reBrowserLike.MatchString(ua) {
+				result.Reason = "datacenter_browser_impersonation"
+			} else {
+				result.Reason = "cloud_host_blocked"
+			}
+			result.MatchedPattern = fmt.Sprintf("AS%d (%s)", cloudASN, provider)
+			result.MatchedTarget = asnIP
+			return result
+		}
+	}
+
 	// Check block patterns
 	for _, p := range candidatePaths {
 		for _, re := range e.BlockRegexes {
@@ -2131,6 +2159,11 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("          blockScriptClients: true\n")
 	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("          blockCloudHosts: false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("          blockCloudHosts: true\n")
+	}
 	var explicitFalseYAML []string
 	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
 		explicitFalseYAML = append(explicitFalseYAML, "blockAIBots")
@@ -2143,6 +2176,9 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	}
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseYAML = append(explicitFalseYAML, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseYAML = append(explicitFalseYAML, "blockCloudHosts")
 	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		explicitFalseYAML = append(explicitFalseYAML, "enableRobotsTxtHoneypot")
@@ -2373,6 +2409,11 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("  blockScriptClients = true\n")
 	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("  blockCloudHosts = false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("  blockCloudHosts = true\n")
+	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		b.WriteString("  enableRobotsTxtHoneypot = false\n")
 	} else if cfg.EnableRobotsTxtHoneypot {
@@ -2393,6 +2434,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	}
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseTOML = append(explicitFalseTOML, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseTOML = append(explicitFalseTOML, "blockCloudHosts")
 	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		explicitFalseTOML = append(explicitFalseTOML, "enableRobotsTxtHoneypot")
@@ -2624,6 +2668,11 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=true\"\n")
 	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockCloudHosts=false\"\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockCloudHosts=true\"\n")
+	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableRobotsTxtHoneypot=false\"\n")
 	} else if cfg.EnableRobotsTxtHoneypot {
@@ -2644,6 +2693,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	}
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseLabels = append(explicitFalseLabels, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseLabels = append(explicitFalseLabels, "blockCloudHosts")
 	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		explicitFalseLabels = append(explicitFalseLabels, "enableRobotsTxtHoneypot")
@@ -2834,6 +2886,11 @@ func (cfg *Config) GenerateCaddyfile() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients true\n")
 	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts true\n")
+	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		b.WriteString("    enable_robots_txt_honeypot false\n")
 	} else if cfg.EnableRobotsTxtHoneypot {
@@ -3006,6 +3063,11 @@ func (cfg *Config) GenerateNginxLua() string {
 		b.WriteString("    block_script_clients = false,\n")
 	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients = true,\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts = false,\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts = true,\n")
 	}
 	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
 		b.WriteString("    enable_robots_txt_honeypot = false,\n")
