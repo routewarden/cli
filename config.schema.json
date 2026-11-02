@@ -23,10 +23,20 @@
       "default": true,
       "description": "Enable built-in sensitive path patterns (.env, .git, .aws, keys, credentials, db dumps, actuator, container configs, wp-config, etc.)."
     },
+    "enable_default_patterns": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable built-in sensitive path patterns (snake_case alias)."
+    },
     "enableDefaultAllowPatterns": {
       "type": "boolean",
       "default": true,
       "description": "Enable built-in whitelist rules (/robots.txt, /sitemap*.xml, /ads.txt, /security.txt, /.well-known/*)."
+    },
+    "enable_default_allow_patterns": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable built-in whitelist rules (snake_case alias)."
     },
     "blockPatterns": {
       "type": "array",
@@ -35,12 +45,26 @@
       },
       "description": "Custom regular expressions for paths to block."
     },
+    "block_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Custom regular expressions for paths to block (snake_case alias)."
+    },
     "allowPatterns": {
       "type": "array",
       "items": {
         "type": "string"
       },
       "description": "Whitelisted regular expressions that take precedence over block patterns."
+    },
+    "allow_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Whitelisted regular expressions (snake_case alias)."
     },
     "allowedIps": {
       "type": "array",
@@ -49,12 +73,26 @@
       },
       "description": "List of client IP addresses or CIDR blocks exempted from all security rules."
     },
+    "allowed_ips": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of client IP addresses or CIDR blocks exempted from all security rules (snake_case alias)."
+    },
     "trustedProxies": {
       "type": "array",
       "items": {
         "type": "string"
       },
       "description": "List of trusted upstream reverse proxies or CIDRs whose X-Forwarded-For headers are honoured."
+    },
+    "trusted_proxies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of trusted upstream reverse proxies or CIDRs (snake_case alias)."
     },
     "methods": {
       "type": "array",
@@ -71,6 +109,11 @@
       "default": false,
       "description": "Inspect URL query strings and individual query parameters against block patterns."
     },
+    "check_query": {
+      "type": "boolean",
+      "default": false,
+      "description": "Inspect URL query strings and parameters (snake_case alias)."
+    },
     "checkHeaders": {
       "type": "array",
       "items": {
@@ -78,16 +121,34 @@
       },
       "description": "Optional list of HTTP request headers to inspect for path smuggling (e.g. X-Forwarded-Uri, X-Rewrite-URL, X-Original-URL)."
     },
+    "check_headers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional list of HTTP request headers to inspect (snake_case alias)."
+    },
     "checkBody": {
       "type": "boolean",
       "default": false,
       "description": "Inspect HTTP request bodies against checkBodyPatterns or blockPatterns."
+    },
+    "check_body": {
+      "type": "boolean",
+      "default": false,
+      "description": "Inspect HTTP request bodies (snake_case alias)."
     },
     "checkBodyMaxBytes": {
       "type": "integer",
       "default": 65536,
       "minimum": 1,
       "description": "Maximum number of request body bytes to buffer and inspect."
+    },
+    "check_body_max_bytes": {
+      "type": "integer",
+      "default": 65536,
+      "minimum": 1,
+      "description": "Maximum number of request body bytes to buffer and inspect (snake_case alias)."
     },
     "checkBodyPatterns": {
       "type": "array",
@@ -96,6 +157,13 @@
       },
       "description": "Optional list of regular expression patterns to match specifically against request body payloads."
     },
+    "check_body_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional list of regular expression patterns for request body payloads (snake_case alias)."
+    },
     "statusCode": {
       "type": "integer",
       "minimum": 100,
@@ -103,9 +171,20 @@
       "default": 403,
       "description": "Default HTTP status code when blocking a request."
     },
+    "status_code": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599,
+      "default": 403,
+      "description": "Default HTTP status code when blocking a request (snake_case alias)."
+    },
     "customResponseText": {
       "type": "string",
       "description": "Custom response body text when blocking requests."
+    },
+    "custom_response_text": {
+      "type": "string",
+      "description": "Custom response body text when blocking requests (snake_case alias)."
     },
     "mode": {
       "type": "string",
@@ -122,7 +201,15 @@
         "rateLimitChallenge",
         "proxy",
         "infiniteStream",
-        "xml"
+        "xml",
+        "aiPoison",
+        "markovTarpit",
+        "powChallenge",
+        "pow_challenge",
+        "pow",
+        "proofOfWork",
+        "proof_of_work",
+        "hashcash"
       ],
       "description": "Shorthand alias for response.mode action."
     },
@@ -136,6 +223,11 @@
       "default": true,
       "description": "Emit structured CrowdSec/SIEM-compatible JSON log events on every block event."
     },
+    "security_log": {
+      "type": "boolean",
+      "default": true,
+      "description": "Emit structured JSON log events on every block event (snake_case alias)."
+    },
     "response": {
       "$ref": "#/$defs/ResponseConfig"
     },
@@ -147,9 +239,227 @@
       },
       "description": "ASNs whose client addresses bypass HTTP inspection; requires asnDB."
     },
+    "allowed_asns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(AS|as)?[0-9]+$"
+      },
+      "description": "ASNs whose client addresses bypass HTTP inspection (snake_case alias)."
+    },
+    "blockedASNs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(AS|as)?[0-9]+$"
+      },
+      "description": "ASNs whose client addresses are strictly blocked from accessing any endpoints; requires asnDB."
+    },
+    "blocked_asns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(AS|as)?[0-9]+$"
+      },
+      "description": "ASNs whose client addresses are strictly blocked (snake_case alias)."
+    },
     "asnDB": {
       "type": "string",
       "description": "Path to local JSON ASN-to-CIDR routing snapshot."
+    },
+    "asn_db": {
+      "type": "string",
+      "description": "Path to local JSON ASN-to-CIDR routing snapshot (snake_case alias)."
+    },
+    "botDefenseLevel": {
+      "type": "string",
+      "enum": [
+        "off",
+        "light",
+        "relaxed",
+        "standard",
+        "moderate",
+        "strict",
+        "aggressive",
+        "paranoia"
+      ],
+      "default": "off",
+      "description": "Preset bot defense tier enabling curated combinations of AI bot blocking, script client rejection, browser impersonation detection, and search engine verification."
+    },
+    "bot_defense_level": {
+      "type": "string",
+      "enum": [
+        "off",
+        "light",
+        "relaxed",
+        "standard",
+        "moderate",
+        "strict",
+        "aggressive",
+        "paranoia"
+      ],
+      "default": "off",
+      "description": "Alias for botDefenseLevel in snake_case."
+    },
+    "blockAIBots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block known AI training scrapers and automated LLM data harvesters."
+    },
+    "block_ai_bots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block known AI training scrapers and automated LLM data harvesters (snake_case alias)."
+    },
+    "aiBotProfile": {
+      "type": "string",
+      "enum": [
+        "all",
+        "train_only",
+        "search_only",
+        "agents_only",
+        "aggressive",
+        "custom"
+      ],
+      "default": "train_only",
+      "description": "AI bot blocking profile: train_only (allows citation search bots), search_only (blocks AI search citation scrapers), agents_only (blocks agentic AI scrapers/tools), all (blocks all AI bots), or aggressive (e.g. Bytespider)."
+    },
+    "ai_bot_profile": {
+      "type": "string",
+      "enum": [
+        "all",
+        "train_only",
+        "search_only",
+        "agents_only",
+        "aggressive",
+        "custom"
+      ],
+      "default": "train_only",
+      "description": "AI bot blocking profile (snake_case alias)."
+    },
+    "blockUserAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Custom regular expressions of User-Agent headers to block."
+    },
+    "block_user_agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Custom regular expressions of User-Agent headers to block (snake_case alias)."
+    },
+    "allowUserAgents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Whitelisted User-Agent regular expressions that take precedence over blockUserAgents and AI bot rules."
+    },
+    "allow_user_agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Whitelisted User-Agent regular expressions (snake_case alias)."
+    },
+    "honeypotTrapPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Hidden spider trap endpoints (e.g. /hidden-trap, /crawler-trap/) that instantly ban offending crawlers."
+    },
+    "honeypot_trap_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Hidden spider trap endpoints (snake_case alias)."
+    },
+    "enableRobotsTxtHoneypot": {
+      "type": "boolean",
+      "default": false,
+      "description": "Dynamically inject deterministic daily rotating Disallow honeypot trap entries into /robots.txt and ban scrapers that request them."
+    },
+    "enable_robots_txt_honeypot": {
+      "type": "boolean",
+      "default": false,
+      "description": "Dynamically inject deterministic daily rotating Disallow honeypot trap entries into /robots.txt (snake_case alias)."
+    },
+    "robotsTxtHoneypotSecret": {
+      "type": "string",
+      "description": "Secret seed used to derive deterministic HMAC-SHA256 daily rotating honeypot tokens for robots.txt injection."
+    },
+    "robots_txt_honeypot_secret": {
+      "type": "string",
+      "description": "Secret seed used to derive deterministic HMAC-SHA256 daily rotating honeypot tokens (snake_case alias)."
+    },
+    "trapBanDuration": {
+      "type": "string",
+      "default": "24h",
+      "description": "Sliding window duration to ban an IP after triggering a honeypot spider trap (e.g. 24h, 1h, 86400)."
+    },
+    "trap_ban_duration": {
+      "type": "string",
+      "default": "24h",
+      "description": "Sliding window ban duration (snake_case alias)."
+    },
+    "verifySearchEngineBots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Verify search engine crawlers (Googlebot, Bingbot, Applebot) via Forward-Confirmed Reverse DNS (FCrDNS) to detect and block spoofed scrapers."
+    },
+    "verify_search_engine_bots": {
+      "type": "boolean",
+      "default": false,
+      "description": "Verify search engine crawlers via FCrDNS (snake_case alias)."
+    },
+    "detectBrowserImpersonation": {
+      "type": "boolean",
+      "default": false,
+      "description": "Detect and block automated bots impersonating modern desktop/mobile browsers by inspecting Client Hints and companion headers."
+    },
+    "detect_browser_impersonation": {
+      "type": "boolean",
+      "default": false,
+      "description": "Detect and block browser impersonators (snake_case alias)."
+    },
+    "blockScriptClients": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from automated HTTP client libraries (e.g. python-requests, axios, Go-http-client) and headless scraping frameworks."
+    },
+    "block_script_clients": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from script clients and headless frameworks (snake_case alias)."
+    },
+    "blockCloudHosts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block incoming requests originating from major cloud hosting providers and datacenter ASNs (AWS, GCP, Azure, Hetzner, DigitalOcean, etc.)."
+    },
+    "block_cloud_hosts": {
+      "type": "boolean",
+      "default": false,
+      "description": "Block requests from cloud hosting and datacenter ASNs (snake_case alias)."
+    },
+    "explicitFields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of configuration field names explicitly specified by the user to prevent preset wipeouts."
+    },
+    "explicit_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of explicit fields (snake_case alias)."
     }
   },
   "$defs": {
@@ -172,7 +482,15 @@
             "rateLimitChallenge",
             "proxy",
             "infiniteStream",
-            "xml"
+            "xml",
+            "aiPoison",
+            "markovTarpit",
+            "powChallenge",
+            "pow_challenge",
+            "pow",
+            "proofOfWork",
+            "proof_of_work",
+            "hashcash"
           ],
           "description": "Response action when a request is blocked."
         },
@@ -182,9 +500,19 @@
           "maximum": 599,
           "description": "HTTP status code to return."
         },
+        "status_code": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599,
+          "description": "HTTP status code to return (snake_case alias)."
+        },
         "contentType": {
           "type": "string",
           "description": "Custom Content-Type header override."
+        },
+        "content_type": {
+          "type": "string",
+          "description": "Custom Content-Type header override (snake_case alias)."
         },
         "body": {
           "type": "string",
@@ -201,9 +529,17 @@
           "type": "string",
           "description": "Target URL when mode is 'redirect'."
         },
+        "redirect_url": {
+          "type": "string",
+          "description": "Target URL when mode is 'redirect' (snake_case alias)."
+        },
         "proxyUrl": {
           "type": "string",
           "description": "Honeypot upstream backend URL when mode is 'proxy'."
+        },
+        "proxy_url": {
+          "type": "string",
+          "description": "Honeypot upstream backend URL when mode is 'proxy' (snake_case alias)."
         },
         "captcha": {
           "$ref": "#/$defs/CaptchaConfig"
@@ -214,11 +550,23 @@
           "exclusiveMinimum": 0,
           "description": "Decompressed size in megabytes for gzipBomb mode (supports decimal values, e.g. 0.5)."
         },
+        "gzip_bomb_mb": {
+          "type": "number",
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "description": "Decompressed size in megabytes for gzipBomb mode (snake_case alias)."
+        },
         "retryAfterSeconds": {
           "type": "integer",
           "default": 300,
           "minimum": 1,
           "description": "Retry-After header duration in seconds for rateLimitChallenge mode."
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Retry-After header duration in seconds (snake_case alias)."
         },
         "tarpitDelayMs": {
           "type": "integer",
@@ -226,17 +574,69 @@
           "minimum": 10,
           "description": "Delay in milliseconds between bytes for tarpit mode."
         },
+        "tarpit_delay_ms": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 10,
+          "description": "Delay in milliseconds between bytes for tarpit mode (snake_case alias)."
+        },
         "tarpitMaxDurationSeconds": {
           "type": "integer",
           "default": 60,
           "minimum": 1,
           "description": "Maximum connection duration in seconds for tarpit mode."
         },
+        "tarpit_max_duration_seconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 1,
+          "description": "Maximum connection duration in seconds for tarpit mode (snake_case alias)."
+        },
         "streamSizeMB": {
           "type": "integer",
           "default": 100,
           "minimum": 1,
           "description": "Maximum payload size in megabytes for infiniteStream mode."
+        },
+        "stream_size_mb": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 1,
+          "description": "Maximum payload size in megabytes for infiniteStream mode (snake_case alias)."
+        },
+        "powDifficulty": {
+          "type": "integer",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Proof-of-work zero-bit difficulty target for powChallenge mode."
+        },
+        "pow_difficulty": {
+          "type": "integer",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Proof-of-work zero-bit difficulty target for powChallenge mode (snake_case alias)."
+        },
+        "powSecret": {
+          "type": "string",
+          "description": "Cryptographic HMAC secret used to sign proof-of-work challenges."
+        },
+        "pow_secret": {
+          "type": "string",
+          "description": "Cryptographic HMAC secret used to sign proof-of-work challenges (snake_case alias)."
+        },
+        "powTimeoutSeconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Validity window in seconds for proof-of-work challenges and solution tokens."
+        },
+        "pow_timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Validity window in seconds for proof-of-work challenges and solution tokens (snake_case alias)."
         }
       }
     },
@@ -257,6 +657,10 @@
         "siteKey": {
           "type": "string",
           "description": "Public site key for the captcha widget."
+        },
+        "site_key": {
+          "type": "string",
+          "description": "Public site key for the captcha widget (snake_case alias)."
         },
         "title": {
           "type": "string",

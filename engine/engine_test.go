@@ -1,7 +1,10 @@
 package engine_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,6 +252,8 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			{mode: "infiniteStream"},
 			{mode: "garbagestream"},
 			{mode: "xml"},
+			{mode: "aiPoison"},
+			{mode: "markovTarpit"},
 		}
 
 		for _, vm := range validModes {
@@ -281,6 +286,9 @@ func TestEngine_NewEngineEdgeCases(t *testing.T) {
 			{mode: "bomb", expectedStatus: 200},
 			{mode: "fakeSuccess", expectedStatus: 200},
 			{mode: "decoy", expectedStatus: 200},
+			{mode: "aiPoison", expectedStatus: 200},
+			{mode: "poison", expectedStatus: 200},
+			{mode: "markovTarpit", expectedStatus: 200},
 			{mode: "rateLimitChallenge", expectedStatus: 429},
 			{mode: "rateLimit", expectedStatus: 429},
 			{mode: "backoff", expectedStatus: 429},
@@ -388,6 +396,48 @@ func TestEngine_ExtractCandidatePaths(t *testing.T) {
 			requestURI: "/admin\x00/page",
 			wantPaths:  []string{"/admin/page"},
 		},
+		{
+			name:       "NTFS Alternate Data Stream (::$DATA)",
+			rawPath:    "",
+			pathStr:    "/wp-config.php::$DATA",
+			requestURI: "/wp-config.php::$DATA",
+			wantPaths:  []string{"/wp-config.php"},
+		},
+		{
+			name:       "Trailing dot on sensitive file extension",
+			rawPath:    "",
+			pathStr:    "/settings.py.",
+			requestURI: "/settings.py.",
+			wantPaths:  []string{"/settings.py"},
+		},
+		{
+			name:       "Trailing dot on path segment",
+			rawPath:    "",
+			pathStr:    "/sub./.env",
+			requestURI: "/sub./.env",
+			wantPaths:  []string{"/sub/.env"},
+		},
+		{
+			name:       "Absolute URI in requestURI",
+			rawPath:    "",
+			pathStr:    "/wp-config.php",
+			requestURI: "http://example.com/wp-config.php",
+			wantPaths:  []string{"/wp-config.php"},
+		},
+		{
+			name:       "Absolute URI with Windows backslash",
+			rawPath:    "",
+			pathStr:    `http://example.com\.env`,
+			requestURI: `http://example.com\.env`,
+			wantPaths:  []string{"/.env"},
+		},
+		{
+			name:       "Multi-layer encoded rawPath",
+			rawPath:    "/%252e%252e/.env",
+			pathStr:    "/public/test",
+			requestURI: "/public/test",
+			wantPaths:  []string{"/.env"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -407,6 +457,169 @@ func TestEngine_ExtractCandidatePaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPathNormalizer_EdgeCases covers edge cases P-1 through P-5 in CLI engine.
+func TestPathNormalizer_EdgeCases(t *testing.T) {
+	// P-1: Repeated percent signs (%%%%2eenv) – should not panic; result must be well-formed
+	t.Run("P-1 repeated percent signs", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%%%%2eenv", "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for %%%%2eenv path")
+		}
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("candidate %q does not start with '/'", c)
+			}
+		}
+	})
+
+	// P-2: Exact "/" path
+	t.Run("P-2 exact root path", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/", "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for '/'")
+		}
+		found := false
+		for _, c := range candidates {
+			if c == "/" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected '/' to be in candidates, got: %v", candidates)
+		}
+	})
+
+	// P-3: Very long path (>16 KB) must not panic or OOM
+	t.Run("P-3 very long path", func(t *testing.T) {
+		longPath := "/" + string(make([]byte, 16*1024+1))
+		for i := range longPath[1:] {
+			longPath = longPath[:i+1] + "a" + longPath[i+2:]
+		}
+		candidates := engine.ExtractCandidatePaths("", longPath, "")
+		if len(candidates) == 0 {
+			t.Fatal("expected at least one candidate for very long path")
+		}
+	})
+
+	// P-4: Unicode NFD path – normalizer must not panic; result must be well-formed
+	t.Run("P-4 unicode NFC/NFD path", func(t *testing.T) {
+		nfdPath := "/caf\u00e9/menu"
+		candidates := engine.ExtractCandidatePaths("", nfdPath, "")
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("unicode candidate %q does not start with '/'", c)
+			}
+		}
+	})
+
+	// P-5: Path with embedded fragment (#anchor) – fragment must not pollute path candidates
+	t.Run("P-5 embedded fragment", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/api/v1#admin", "/api/v1#admin")
+		foundBase := false
+		for _, c := range candidates {
+			if len(c) > 0 && c[0] != '/' {
+				t.Errorf("fragment candidate %q does not start with '/'", c)
+			}
+			if c == "/api/v1" {
+				foundBase = true
+			}
+		}
+		if !foundBase {
+			t.Errorf("expected candidates to contain stripped base path '/api/v1', got %v", candidates)
+		}
+	})
+
+	// P-6: Malformed percent-encoding (%zz or trailing %) with multi-layer traversal
+	t.Run("P-6 lenient multi-layer percent decoding", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%252e%252e/.env%zz", "/%252e%252e/.env%zz")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env%zz" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env%%zz', got %v", candidates)
+		}
+
+		cfg := engine.CreateConfig()
+		cfg.BlockPatterns = []string{`(?i)(^|/)\.env($|[/?#])`}
+		cfg.CheckQuery = true
+		cfg.CheckBody = true
+		eng, err := engine.NewEngine(cfg)
+		if err != nil {
+			t.Fatalf("failed to create engine: %v", err)
+		}
+
+		// Blocked via path
+		res := eng.Evaluate("GET", "/%252e%252e/.env%zz", "", nil)
+		if !res.Blocked {
+			t.Errorf("expected /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+
+		// Blocked via query string with malformed percent-encoding
+		resQuery := eng.Evaluate("GET", "/search", "target=/%252e%252e/.env%zz", nil)
+		if !resQuery.Blocked {
+			t.Errorf("expected query with /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+
+		// Blocked via body with malformed percent-encoding
+		resBody := eng.EvaluateWithBody("POST", "/submit", "", nil, "127.0.0.1", "field=/%252e%252e/.env%zz")
+		if !resBody.Blocked {
+			t.Errorf("expected body with /%%252e%%252e/.env%%zz to be blocked, got allowed")
+		}
+	})
+
+	// P-7: Quadruple percent-encoded traversal (/%2525252e%2525252e/.env)
+	t.Run("P-7 quadruple percent-encoded traversal", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "/%2525252e%2525252e/.env", "/%2525252e%2525252e/.env")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env' after 4 unescaping passes, got %v", candidates)
+		}
+	})
+
+	// P-8: Absolute URI with multi-layer percent-encoded traversal and backslashes
+	t.Run("P-8 absolute URI with multi-layer traversal", func(t *testing.T) {
+		candidates := engine.ExtractCandidatePaths("", "http://example.com/%252e%252e/.env", "http://example.com/%252e%252e/.env")
+		foundEnv := false
+		for _, c := range candidates {
+			if c == "/.env" {
+				foundEnv = true
+				break
+			}
+		}
+		if !foundEnv {
+			t.Errorf("expected candidates to contain '/.env' from absolute URI, got %v", candidates)
+		}
+
+		// Verify evaluation blocks absolute URI targeting sensitive file
+		cfg := engine.CreateConfig()
+		cfg.EnableDefaultPatterns = true
+		eng, err := engine.NewEngine(cfg)
+		if err != nil {
+			t.Fatalf("failed to create engine: %v", err)
+		}
+		res := eng.Evaluate("GET", "http://example.com/%252e%252e/.env", "", nil)
+		if !res.Blocked {
+			t.Errorf("expected absolute URI http://example.com/%%252e%%252e/.env to be blocked, got allowed")
+		}
+
+		// Also check absolute URI with backslash
+		resBackslash := eng.Evaluate("GET", "http://example.com\\admin\\.env", "", nil)
+		if !resBackslash.Blocked {
+			t.Errorf("expected absolute URI http://example.com\\admin\\.env to be blocked, got allowed")
+		}
+	})
 }
 
 func TestEngine_CheckDockerInstalled(t *testing.T) {
@@ -638,6 +851,29 @@ func TestEngine_CheckBody(t *testing.T) {
 	res4 := engFallback.EvaluateWithBody("POST", "/api/submit", "", nil, "127.0.0.1", "payload=sql%5Finjection")
 	if !res4.Blocked {
 		t.Errorf("expected URL-encoded request body to be detected and blocked")
+	}
+
+	// 5. Form parameter unpacking with end-anchored pattern
+	cfgForm := engine.CreateConfig()
+	cfgForm.Methods = []string{"POST"}
+	cfgForm.CheckBody = true
+	cfgForm.BlockPatterns = []string{`(?i)\.key$`}
+
+	engForm, err := engine.NewEngine(cfgForm)
+	if err != nil {
+		t.Fatalf("unexpected NewEngine error: %v", err)
+	}
+
+	// In raw form string "other=1&cert=server.key&final=ok", raw body ends in "ok", not ".key"
+	res5 := engForm.EvaluateWithBody("POST", "/upload", "", nil, "127.0.0.1", "other=1&cert=server.key&final=ok")
+	if !res5.Blocked {
+		t.Errorf("expected form parameter server.key to be extracted and blocked by end-anchored pattern")
+	}
+
+	// 6. JSON payload unpacking with end-anchored pattern
+	res6 := engForm.EvaluateWithBody("POST", "/upload", "", nil, "127.0.0.1", `{"config": {"private_key": "id_rsa.key"}, "status": "active"}`)
+	if !res6.Blocked {
+		t.Errorf("expected JSON string id_rsa.key to be extracted and blocked by end-anchored pattern")
 	}
 }
 
@@ -1727,5 +1963,715 @@ func TestEngine_BracketedIPv6CIDR_AllowedIPs(t *testing.T) {
 		t.Errorf("expected 2001:dba::1 accessing /.env to be blocked")
 	}
 }
+
+func TestEngine_AIBotsAndHoneypotSpiderTrap(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.EnableDefaultPatterns = false
+	cfg.BlockAIBots = true
+	cfg.AIBotProfile = "train_only"
+	cfg.BlockUserAgents = []string{`(?i)CustomScraperBot`}
+	cfg.AllowUserAgents = []string{`(?i)PartnerBot`}
+	cfg.HoneypotTrapPaths = []string{"/secret-spider-trap", "/crawler-trap/"}
+	cfg.TrapBanDuration = "1h"
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	clientIP := "198.51.100.22"
+
+	// 1. Legitimate request passes
+	res1 := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if res1.Blocked {
+		t.Errorf("expected legitimate request to pass, got blocked: %s", res1.Reason)
+	}
+
+	// 2. GPTBot blocked under train_only profile
+	resGPT := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)"}, "203.0.113.1")
+	if !resGPT.Blocked || resGPT.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked with ai_bot_blocked, got blocked=%v, reason=%s", resGPT.Blocked, resGPT.Reason)
+	}
+
+	// 3. Allowed User-Agent bypasses AI bot block
+	resAllowed := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "PartnerBot GPTBot/1.0"}, "203.0.113.2")
+	if resAllowed.Blocked {
+		t.Errorf("expected PartnerBot to bypass bot blocking, got blocked: %s", resAllowed.Reason)
+	}
+
+	// 4. Custom blocked User-Agent
+	resCustom := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "CustomScraperBot/2.0"}, "203.0.113.3")
+	if !resCustom.Blocked || resCustom.Reason != "user_agent_blocked" {
+		t.Errorf("expected CustomScraperBot to be blocked with user_agent_blocked, got blocked=%v, reason=%s", resCustom.Blocked, resCustom.Reason)
+	}
+
+	// 5. Honeypot Spider Trap triggers ban
+	resTrap := eng.EvaluateWithClientIP("GET", "/secret-spider-trap", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if !resTrap.Blocked || resTrap.Reason != "honeypot_trap_triggered" {
+		t.Fatalf("expected trap to be blocked with honeypot_trap_triggered, got blocked=%v, reason=%s", resTrap.Blocked, resTrap.Reason)
+	}
+
+	// 6. Subsequent request from same IP is blocked via ban table
+	resBanned := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientIP)
+	if !resBanned.Blocked || resBanned.Reason != "ip_banned" {
+		t.Errorf("expected banned client to be blocked with ip_banned, got blocked=%v, reason=%s", resBanned.Blocked, resBanned.Reason)
+	}
+
+	// 7. Subpath of trap without trailing slash (/secret-spider-trap/deep/link) triggers trap
+	clientSub := "198.51.100.88"
+	resSubTrap := eng.EvaluateWithClientIP("GET", "/secret-spider-trap/deep/link", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientSub)
+	if !resSubTrap.Blocked || resSubTrap.Reason != "honeypot_trap_triggered" {
+		t.Fatalf("expected subpath trap to be blocked with honeypot_trap_triggered, got blocked=%v, reason=%s", resSubTrap.Blocked, resSubTrap.Reason)
+	}
+
+	// 8. Legitimate request to prefix-collision path (/secret-spider-trapdoor) must NOT trigger trap
+	clientPrefixSafe := "198.51.100.89"
+	resPrefixSafe := eng.EvaluateWithClientIP("GET", "/secret-spider-trapdoor", "", map[string]string{"User-Agent": "Mozilla/5.0"}, clientPrefixSafe)
+	if resPrefixSafe.Blocked {
+		t.Errorf("expected prefix-collision path /secret-spider-trapdoor to pass, got blocked: %s", resPrefixSafe.Reason)
+	}
+
+	// 9. Honeypot trap configured WITHOUT leading slash (e.g. "no-slash-trap")
+	cfgNoSlash := engine.CreateConfig()
+	cfgNoSlash.EnableDefaultPatterns = false
+	cfgNoSlash.HoneypotTrapPaths = []string{"no-slash-trap"}
+	cfgNoSlash.TrapBanDuration = "1h"
+	engNoSlash, err := engine.NewEngine(cfgNoSlash)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resNoSlash := engNoSlash.EvaluateWithClientIP("GET", "/no-slash-trap", "", nil, "198.51.100.91")
+	if !resNoSlash.Blocked || resNoSlash.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected trap path without leading slash to trigger, got blocked=%v, reason=%s", resNoSlash.Blocked, resNoSlash.Reason)
+	}
+
+	// 10. Case-insensitive matching: uppercase/mixed-case requests must trigger trap
+	resCase1 := eng.EvaluateWithClientIP("GET", "/SECRET-SPIDER-TRAP", "", map[string]string{"User-Agent": "Mozilla/5.0"}, "198.51.100.92")
+	if !resCase1.Blocked || resCase1.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected /SECRET-SPIDER-TRAP to trigger honeypot trap case-insensitively, got blocked=%v, reason=%s", resCase1.Blocked, resCase1.Reason)
+	}
+	resCase2 := eng.EvaluateWithClientIP("GET", "/Crawler-Trap/Deep/Link", "", map[string]string{"User-Agent": "Mozilla/5.0"}, "198.51.100.93")
+	if !resCase2.Blocked || resCase2.Reason != "honeypot_trap_triggered" {
+		t.Errorf("expected /Crawler-Trap/Deep/Link to trigger honeypot trap case-insensitively, got blocked=%v, reason=%s", resCase2.Blocked, resCase2.Reason)
+	}
+
+	// 11. Root honeypot trap path safeguard: "/" must be ignored and not block root
+	cfgRoot := engine.CreateConfig()
+	cfgRoot.EnableDefaultPatterns = false
+	cfgRoot.HoneypotTrapPaths = []string{"/", "   "}
+	cfgRoot.TrapBanDuration = "1h"
+	engRoot, err := engine.NewEngine(cfgRoot)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resRoot := engRoot.EvaluateWithClientIP("GET", "/", "", nil, "198.51.100.94")
+	if resRoot.Blocked {
+		t.Errorf("expected root request to NOT be blocked when honeypotTrapPaths contains '/', got blocked=%v, reason=%s", resRoot.Blocked, resRoot.Reason)
+	}
+}
+
+func TestEngine_VerifySearchEngineBots(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.BlockAIBots = true
+	cfg.VerifySearchEngineBots = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	eng.SetFCrDNSLookupFuncs(
+		func(ctx context.Context, addr string) ([]string, error) {
+			if addr == "66.249.66.1" {
+				return []string{"crawl-66-249-66-1.googlebot.com."}, nil
+			}
+			return []string{"attacker.com."}, nil
+		},
+		func(ctx context.Context, host string) ([]net.IP, error) {
+			if host == "crawl-66-249-66-1.googlebot.com." || host == "crawl-66-249-66-1.googlebot.com" {
+				return []net.IP{net.ParseIP("66.249.66.1")}, nil
+			}
+			return []net.IP{net.ParseIP("198.51.100.2")}, nil
+		},
+	)
+
+	googleUA := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+	// 1. Spoofed Googlebot
+	resSpoofed := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": googleUA}, "198.51.100.2")
+	if !resSpoofed.Blocked || resSpoofed.Reason != "search_engine_spoofed" {
+		t.Errorf("expected spoofed Googlebot to be blocked with search_engine_spoofed, got blocked=%v, reason=%s", resSpoofed.Blocked, resSpoofed.Reason)
+	}
+
+	// 2. Legitimate Googlebot
+	resLegit := eng.EvaluateWithClientIP("GET", "/home", "", map[string]string{"User-Agent": googleUA}, "66.249.66.1")
+	if resLegit.Blocked {
+		t.Errorf("expected genuine Googlebot to be allowed, got blocked=%v, reason=%s", resLegit.Blocked, resLegit.Reason)
+	}
+
+	// 3. Generators include verifySearchEngineBots
+	yamlOut := cfg.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, "verifySearchEngineBots: true") {
+		t.Errorf("expected Traefik YAML to contain verifySearchEngineBots: true, got:\n%s", yamlOut)
+	}
+	caddyOut := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "verify_search_engine_bots true") {
+		t.Errorf("expected Caddyfile to contain verify_search_engine_bots true, got:\n%s", caddyOut)
+	}
+	nginxOut := cfg.GenerateNginxLua()
+	if !strings.Contains(nginxOut, "verify_search_engine_bots = true") {
+		t.Errorf("expected Nginx Lua to contain verify_search_engine_bots = true, got:\n%s", nginxOut)
+	}
+}
+
+func TestEngine_BrowserImpersonationAndScriptClients(t *testing.T) {
+	cfg := engine.CreateConfig()
+	cfg.DetectBrowserImpersonation = true
+	cfg.BlockScriptClients = true
+
+	eng, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	chromeUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+	// 1. Spoofed Chrome (missing Accept-Language)
+	resSpoofed := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":      chromeUA,
+		"Accept-Encoding": "gzip, deflate, br",
+	})
+	if !resSpoofed.Blocked || resSpoofed.Reason != "browser_spoofed" || resSpoofed.MatchedPattern != "missing_accept_language" {
+		t.Errorf("expected missing_accept_language browser_spoofed, got blocked=%v, reason=%s, pattern=%s", resSpoofed.Blocked, resSpoofed.Reason, resSpoofed.MatchedPattern)
+	}
+
+	// 2. Legitimate Chrome with companion headers
+	resLegit := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA":          `"Chromium";v="128", "Not?A_Brand";v="24", "Google Chrome";v="128"`,
+		"Sec-CH-UA-Mobile":   "?0",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	if resLegit.Blocked {
+		t.Errorf("expected genuine Chrome to be allowed, got blocked=%v, reason=%s", resLegit.Blocked, resLegit.Reason)
+	}
+
+	// 2b. Modern Chrome missing GREASE brand -> blocked (browser_spoofed)
+	resNoGrease := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA":          `"Chromium";v="128", "Google Chrome";v="128"`,
+		"Sec-CH-UA-Mobile":   "?0",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+	})
+	if !resNoGrease.Blocked || resNoGrease.Reason != "browser_spoofed" || resNoGrease.MatchedPattern != "missing_grease_brand" {
+		t.Errorf("expected missing_grease_brand to be blocked, got blocked=%v, reason=%s, pattern=%s", resNoGrease.Blocked, resNoGrease.Reason, resNoGrease.MatchedPattern)
+	}
+
+	// 3. Script client (python-requests)
+	resScript := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resScript.Blocked || resScript.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked with script_client_blocked, got blocked=%v, reason=%s", resScript.Blocked, resScript.Reason)
+	}
+
+	// 4. Script client via headless header
+	resHeadless := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent":         chromeUA,
+		"Accept-Language":    "en-US,en;q=0.9",
+		"Accept-Encoding":    "gzip, deflate, br",
+		"Sec-CH-UA":          `"Chromium";v="128", "Not?A_Brand";v="24", "Google Chrome";v="128"`,
+		"Sec-CH-UA-Mobile":   "?0",
+		"Sec-CH-UA-Platform": `"Windows"`,
+		"Sec-Fetch-Site":     "none",
+		"Sec-Fetch-Mode":     "navigate",
+		"Sec-Fetch-Dest":     "document",
+		"X-Playwright":       "true",
+	})
+	if !resHeadless.Blocked || resHeadless.Reason != "script_client_blocked" || resHeadless.MatchedPattern != "playwright_headless" {
+		t.Errorf("expected playwright to be blocked with script_client_blocked, got blocked=%v, reason=%s, pattern=%s", resHeadless.Blocked, resHeadless.Reason, resHeadless.MatchedPattern)
+	}
+
+	// 4b. Script client via headless header with EMPTY User-Agent
+	resEmptyUAHeadless := eng.Evaluate("GET", "/index.html", "", map[string]string{
+		"X-Playwright": "true",
+	})
+	if !resEmptyUAHeadless.Blocked || resEmptyUAHeadless.Reason != "script_client_blocked" || resEmptyUAHeadless.MatchedPattern != "playwright_headless" {
+		t.Errorf("expected empty UA with X-Playwright to be blocked, got blocked=%v, reason=%s", resEmptyUAHeadless.Blocked, resEmptyUAHeadless.Reason)
+	}
+
+	// 4c. Custom BlockUserAgents with ^$ regex matching empty User-Agent
+	cfgEmptyUA := engine.CreateConfig()
+	cfgEmptyUA.BlockUserAgents = []string{"^$"}
+	engEmptyUA, err := engine.NewEngine(cfgEmptyUA)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resEmptyBlocked := engEmptyUA.Evaluate("GET", "/index.html", "", map[string]string{})
+	if !resEmptyBlocked.Blocked || resEmptyBlocked.Reason != "user_agent_blocked" {
+		t.Errorf("expected empty UA to be blocked by ^$ pattern, got blocked=%v, reason=%s", resEmptyBlocked.Blocked, resEmptyBlocked.Reason)
+	}
+
+	// 5. Check generators
+	yamlOut := cfg.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, "detectBrowserImpersonation: true") || !strings.Contains(yamlOut, "blockScriptClients: true") {
+		t.Errorf("expected Traefik YAML to contain new fields, got:\n%s", yamlOut)
+	}
+	tomlOut := cfg.GenerateTraefikTOML()
+	if !strings.Contains(tomlOut, "detectBrowserImpersonation = true") || !strings.Contains(tomlOut, "blockScriptClients = true") {
+		t.Errorf("expected Traefik TOML to contain new fields, got:\n%s", tomlOut)
+	}
+	labelsOut := cfg.GenerateTraefikLabels()
+	if !strings.Contains(labelsOut, "detectBrowserImpersonation=true") || !strings.Contains(labelsOut, "blockScriptClients=true") {
+		t.Errorf("expected Traefik labels to contain new fields, got:\n%s", labelsOut)
+	}
+	caddyOut := cfg.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "detect_browser_impersonation true") || !strings.Contains(caddyOut, "block_script_clients true") {
+		t.Errorf("expected Caddyfile to contain new fields, got:\n%s", caddyOut)
+	}
+	nginxOut := cfg.GenerateNginxLua()
+	if !strings.Contains(nginxOut, "detect_browser_impersonation = true") || !strings.Contains(nginxOut, "block_script_clients = true") {
+		t.Errorf("expected Nginx Lua to contain new fields, got:\n%s", nginxOut)
+	}
+}
+
+func TestEngine_BotDefenseLevelPresets(t *testing.T) {
+	// 1. Standard Level
+	cfgStandard := engine.CreateConfig()
+	cfgStandard.BotDefenseLevel = "standard"
+	engStandard, err := engine.NewEngine(cfgStandard)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	// GPTBot blocked
+	resGPT := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPT.Blocked || resGPT.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under standard level, got blocked=%v, reason=%s", resGPT.Blocked, resGPT.Reason)
+	}
+
+	// python-requests blocked
+	resPy := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resPy.Blocked || resPy.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked under standard level, got blocked=%v, reason=%s", resPy.Blocked, resPy.Reason)
+	}
+
+	// Spoofed Chrome (missing Accept-Language) blocked
+	chromeUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+	resSpoofed := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if !resSpoofed.Blocked || resSpoofed.Reason != "browser_spoofed" {
+		t.Errorf("expected spoofed Chrome to be blocked under standard level, got blocked=%v, reason=%s", resSpoofed.Blocked, resSpoofed.Reason)
+	}
+
+	// Search bot (PerplexityBot) allowed under standard (train_only default)
+	resPerp := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+	})
+	if resPerp.Blocked {
+		t.Errorf("expected PerplexityBot to pass under standard level, got blocked=%v, reason=%s", resPerp.Blocked, resPerp.Reason)
+	}
+
+	// 2. Strict Level -> blocks search bot (PerplexityBot)
+	cfgStrict := engine.CreateConfig()
+	cfgStrict.BotDefenseLevel = "strict"
+	engStrict, err := engine.NewEngine(cfgStrict)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resPerpStrict := engStrict.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)",
+	})
+	if !resPerpStrict.Blocked || resPerpStrict.Reason != "ai_bot_blocked" {
+		t.Errorf("expected PerplexityBot to be blocked under strict level, got blocked=%v, reason=%s", resPerpStrict.Blocked, resPerpStrict.Reason)
+	}
+
+	// 3. Light Level -> allows spoofed Chrome (browser impersonation off), blocks python-requests
+	cfgLight := engine.CreateConfig()
+	cfgLight.BotDefenseLevel = "light"
+	engLight, err := engine.NewEngine(cfgLight)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resSpoofedLight := engLight.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedLight.Blocked {
+		t.Errorf("expected spoofed Chrome to pass under light level, got blocked=%v, reason=%s", resSpoofedLight.Blocked, resSpoofedLight.Reason)
+	}
+	resPyLight := engLight.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "python-requests/2.31.0",
+	})
+	if !resPyLight.Blocked || resPyLight.Reason != "script_client_blocked" {
+		t.Errorf("expected python-requests to be blocked under light level, got blocked=%v, reason=%s", resPyLight.Blocked, resPyLight.Reason)
+	}
+
+	// 4. JSON Config File with override
+	tmpDir := t.TempDir()
+	confPath := filepath.Join(tmpDir, "routewarden.json")
+	overrideJSON := `{
+		"botDefenseLevel": "standard",
+		"detectBrowserImpersonation": false
+	}`
+	if err := os.WriteFile(confPath, []byte(overrideJSON), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfgOverride := engine.CreateConfig()
+	cfgOverride.ConfigFile = confPath
+	engOverride, err := engine.NewEngine(cfgOverride)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	// Spoofed Chrome should pass because detectBrowserImpersonation is overridden to false
+	resSpoofedOverride := engOverride.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedOverride.Blocked {
+		t.Errorf("expected spoofed Chrome to pass with explicit override, got blocked=%v, reason=%s", resSpoofedOverride.Blocked, resSpoofedOverride.Reason)
+	}
+	// GPTBot still blocked because standard level enabled blockAIBots
+	resGPTOverride := engOverride.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPTOverride.Blocked || resGPTOverride.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under standard level in file, got blocked=%v, reason=%s", resGPTOverride.Blocked, resGPTOverride.Reason)
+	}
+
+	// 4b. Direct JSON Unmarshal without ConfigFile, verifying explicit override is preserved in NewEngine
+	var cfgDirect engine.Config
+	if err := json.Unmarshal([]byte(overrideJSON), &cfgDirect); err != nil {
+		t.Fatalf("failed to unmarshal direct JSON: %v", err)
+	}
+	engDirect, err := engine.NewEngine(&cfgDirect)
+	if err != nil {
+		t.Fatalf("failed to create direct engine: %v", err)
+	}
+	resSpoofedDirect := engDirect.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": chromeUA,
+	})
+	if resSpoofedDirect.Blocked {
+		t.Errorf("expected spoofed Chrome to pass with direct json unmarshal override, got blocked=%v, reason=%s", resSpoofedDirect.Blocked, resSpoofedDirect.Reason)
+	}
+	resGPTDirect := engDirect.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 AppleWebKit/537.36 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+	})
+	if !resGPTDirect.Blocked || resGPTDirect.Reason != "ai_bot_blocked" {
+		t.Errorf("expected GPTBot to be blocked under direct json unmarshal, got blocked=%v, reason=%s", resGPTDirect.Blocked, resGPTDirect.Reason)
+	}
+
+	// 4c. Bug audit tests: Amazonbot and Anthropic UA matching
+	resAmazon := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)",
+	})
+	if !resAmazon.Blocked || resAmazon.Reason != "ai_bot_blocked" {
+		t.Errorf("expected Amazonbot to be blocked under standard level, got blocked=%v, reason=%s", resAmazon.Blocked, resAmazon.Reason)
+	}
+	resAnthropic := engStandard.Evaluate("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Anthropic/1.0",
+	})
+	if !resAnthropic.Blocked || resAnthropic.Reason != "ai_bot_blocked" {
+		t.Errorf("expected Anthropic/1.0 to be blocked under standard level, got blocked=%v, reason=%s", resAnthropic.Blocked, resAnthropic.Reason)
+	}
+
+	// 5. Generator tests
+	yamlOut := cfgStandard.GenerateTraefikYAML()
+	if !strings.Contains(yamlOut, `botDefenseLevel: "standard"`) {
+		t.Errorf("expected Traefik YAML to contain botDefenseLevel, got:\n%s", yamlOut)
+	}
+	tomlOut := cfgStandard.GenerateTraefikTOML()
+	if !strings.Contains(tomlOut, `botDefenseLevel = "standard"`) {
+		t.Errorf("expected Traefik TOML to contain botDefenseLevel, got:\n%s", tomlOut)
+	}
+	labelsOut := cfgStandard.GenerateTraefikLabels()
+	if !strings.Contains(labelsOut, `botDefenseLevel=standard`) {
+		t.Errorf("expected Traefik labels to contain botDefenseLevel, got:\n%s", labelsOut)
+	}
+	caddyOut := cfgStandard.GenerateCaddyfile()
+	if !strings.Contains(caddyOut, "bot_defense_level standard") {
+		t.Errorf("expected Caddyfile to contain bot_defense_level, got:\n%s", caddyOut)
+	}
+	nginxOut := cfgStandard.GenerateNginxLua()
+	if !strings.Contains(nginxOut, `bot_defense_level = "standard"`) {
+		t.Errorf("expected Nginx Lua to contain bot_defense_level, got:\n%s", nginxOut)
+	}
+
+	// 5b. Generator tests with explicit false overrides
+	cfgExplicitFalse := engine.CreateConfig()
+	overrideFalseJSON := `{
+		"botDefenseLevel": "standard",
+		"detectBrowserImpersonation": false
+	}`
+	if err := json.Unmarshal([]byte(overrideFalseJSON), cfgExplicitFalse); err != nil {
+		t.Fatalf("failed to unmarshal explicit false json: %v", err)
+	}
+
+	yamlFalse := cfgExplicitFalse.GenerateTraefikYAML()
+	if !strings.Contains(yamlFalse, "detectBrowserImpersonation: false") {
+		t.Errorf("expected Traefik YAML to serialize detectBrowserImpersonation: false, got:\n%s", yamlFalse)
+	}
+
+	tomlFalse := cfgExplicitFalse.GenerateTraefikTOML()
+	if !strings.Contains(tomlFalse, "detectBrowserImpersonation = false") {
+		t.Errorf("expected Traefik TOML to serialize detectBrowserImpersonation = false, got:\n%s", tomlFalse)
+	}
+
+	labelsFalse := cfgExplicitFalse.GenerateTraefikLabels()
+	if !strings.Contains(labelsFalse, "detectBrowserImpersonation=false") {
+		t.Errorf("expected Traefik Labels to serialize detectBrowserImpersonation=false, got:\n%s", labelsFalse)
+	}
+
+	caddyFalse := cfgExplicitFalse.GenerateCaddyfile()
+	if !strings.Contains(caddyFalse, "detect_browser_impersonation false") {
+		t.Errorf("expected Caddyfile to serialize detect_browser_impersonation false, got:\n%s", caddyFalse)
+	}
+
+	nginxFalse := cfgExplicitFalse.GenerateNginxLua()
+	if !strings.Contains(nginxFalse, "detect_browser_impersonation = false") {
+		t.Errorf("expected Nginx Lua to serialize detect_browser_impersonation = false, got:\n%s", nginxFalse)
+	}
+}
+
+func TestEngine_TrailingSlashMatching(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: false,
+		BlockPatterns:         []string{`(?i)^/admin/$`},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	// 1. Request with trailing slash
+	resWithSlash := e.Evaluate("GET", "/admin/", "", nil)
+	if !resWithSlash.Blocked {
+		t.Fatalf("expected /admin/ to be blocked by ^/admin/$")
+	}
+
+	// 2. Request without trailing slash
+	resNoSlash := e.Evaluate("GET", "/admin", "", nil)
+	if !resNoSlash.Blocked {
+		t.Fatalf("expected /admin to be blocked by ^/admin/$ (candidate trailing slash)")
+	}
+
+	// 3. Subpath should not match exact ^/admin/$
+	resSubpath := e.Evaluate("GET", "/admin/users", "", nil)
+	if resSubpath.Blocked {
+		t.Fatalf("expected /admin/users NOT to be blocked by ^/admin/$")
+	}
+}
+
+func TestEngine_CheckHeaders_WhitespaceAndQuotes(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: true,
+		CheckHeaders:          []string{"X-Forwarded-Prefix", "X-Rewrite-URL"},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		headers map[string]string
+		blocked bool
+	}{
+		{
+			name:    "Header with whitespace",
+			headers: map[string]string{"X-Forwarded-Prefix": "  /.env  "},
+			blocked: true,
+		},
+		{
+			name:    "Header wrapped in double quotes",
+			headers: map[string]string{"X-Forwarded-Prefix": `"/wp-config.php"`},
+			blocked: true,
+		},
+		{
+			name:    "Header wrapped in single quotes",
+			headers: map[string]string{"X-Rewrite-URL": `'/.env'`},
+			blocked: true,
+		},
+		{
+			name:    "Comma-separated header with quotes and spaces",
+			headers: map[string]string{"X-Forwarded-Prefix": `" /safe ", " /.env "`},
+			blocked: true,
+		},
+		{
+			name:    "Safe header",
+			headers: map[string]string{"X-Forwarded-Prefix": `"/dashboard"`},
+			blocked: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := e.Evaluate("GET", "/api/data", "", tc.headers)
+			if res.Blocked != tc.blocked {
+				t.Fatalf("expected blocked=%v, got=%v (reason=%s)", tc.blocked, res.Blocked, res.Reason)
+			}
+		})
+	}
+}
+
+func TestEngine_EncodedDelimitersAndWhitespaceEvasion(t *testing.T) {
+	cfg := &engine.Config{
+		Enabled:               true,
+		EnableDefaultPatterns: true,
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		path    string
+		blocked bool
+	}{
+		{
+			name:    "Encoded question mark in sensitive extension (?param)",
+			path:    "/backup.sql%3fparam=value",
+			blocked: true,
+		},
+		{
+			name:    "Encoded fragment in sensitive file (#section)",
+			path:    "/database.sql%23section",
+			blocked: true,
+		},
+		{
+			name:    "Encoded query and fragment combined (%3f and %23)",
+			path:    "/server.key%3ffoo%23bar",
+			blocked: true,
+		},
+		{
+			name:    "Encoded carriage return (%0d)",
+			path:    "/.env%0d",
+			blocked: true,
+		},
+		{
+			name:    "Encoded newline (%0a)",
+			path:    "/.env%0a",
+			blocked: true,
+		},
+		{
+			name:    "Encoded horizontal tab (%09)",
+			path:    "/.env%09",
+			blocked: true,
+		},
+		{
+			name:    "Clean harmless request",
+			path:    "/index.html",
+			blocked: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := e.Evaluate("GET", tc.path, "", nil)
+			if res.Blocked != tc.blocked {
+				t.Fatalf("expected blocked=%v, got=%v (reason=%s, candidates=%v)", tc.blocked, res.Blocked, res.Reason, res.CandidatePaths)
+			}
+		})
+	}
+}
+
+func TestEngine_BlockCloudHosts(t *testing.T) {
+	dir := t.TempDir()
+	asnPath := filepath.Join(dir, "cloud_asn.json")
+	dbContent := `{
+		"AS16509": ["3.0.0.0/8"],
+		"AS15169": ["66.249.64.0/19"],
+		"AS64500": ["99.0.0.0/8"]
+	}`
+	if err := os.WriteFile(asnPath, []byte(dbContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &engine.Config{
+		Enabled:                true,
+		Methods:                []string{"GET", "POST"},
+		BlockCloudHosts:        true,
+		ASNDB:                  asnPath,
+		VerifySearchEngineBots: true,
+		AllowPatterns:          []string{"^/api/webhook(/.*)?$"},
+	}
+	e, err := engine.NewEngine(cfg)
+	if err != nil {
+		t.Fatalf("failed to compile engine: %v", err)
+	}
+
+	// Mock FCrDNS verifier: genuine Googlebot on 66.249.66.1 resolves to googlebot.com
+	e.SetFCrDNSLookupFuncs(
+		func(ctx context.Context, addr string) ([]string, error) {
+			if addr == "66.249.66.1" {
+				return []string{"crawl-66-249-66-1.googlebot.com."}, nil
+			}
+			return nil, errors.New("no reverse DNS")
+		},
+		func(ctx context.Context, host string) ([]net.IP, error) {
+			if strings.TrimSuffix(host, ".") == "crawl-66-249-66-1.googlebot.com" {
+				return []net.IP{net.ParseIP("66.249.66.1")}, nil
+			}
+			return nil, errors.New("no forward DNS")
+		},
+	)
+
+	// 1. AWS IP claiming Chrome browser -> datacenter_browser_impersonation
+	res1 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	}, "3.1.2.3")
+	if !res1.Blocked || res1.Reason != "datacenter_browser_impersonation" {
+		t.Fatalf("expected datacenter_browser_impersonation for AWS Chrome request, got blocked=%v, reason=%s", res1.Blocked, res1.Reason)
+	}
+
+	// 2. AWS IP with generic scraper UA -> cloud_host_blocked
+	res2 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "CustomScraper/1.0",
+	}, "3.1.2.3")
+	if !res2.Blocked || res2.Reason != "cloud_host_blocked" {
+		t.Fatalf("expected cloud_host_blocked for AWS custom scraper, got blocked=%v, reason=%s", res2.Blocked, res2.Reason)
+	}
+
+	// 3. AWS IP accessing /api/webhook (in allowPatterns) -> allowed (exemption)
+	res3 := e.EvaluateWithClientIP("POST", "/api/webhook/github", "", nil, "3.1.2.3")
+	if !res3.Allowed || res3.Reason != "path_allowed" {
+		t.Fatalf("expected /api/webhook to be allowed, got allowed=%v, reason=%s", res3.Allowed, res3.Reason)
+	}
+
+	// 4. Non-cloud residential IP (99.1.2.3) -> allowed
+	res4 := e.EvaluateWithClientIP("GET", "/index.html", "", nil, "99.1.2.3")
+	if res4.Blocked {
+		t.Fatalf("expected residential IP to be allowed, got blocked=%v, reason=%s", res4.Blocked, res4.Reason)
+	}
+
+	// 5. Genuine Googlebot from GCP (AS15169, 66.249.66.1) -> verified via FCrDNS and allowed!
+	res5 := e.EvaluateWithClientIP("GET", "/index.html", "", map[string]string{
+		"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+	}, "66.249.66.1")
+	if res5.Blocked {
+		t.Fatalf("expected verified Googlebot to pass, got blocked=%v, reason=%s", res5.Blocked, res5.Reason)
+	}
+}
+
+
+
+
 
 

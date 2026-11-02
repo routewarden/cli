@@ -29,7 +29,7 @@ import (
 )
 
 // Version represents the active version of RouteWarden Observability & Dashboard engine.
-var Version = "5.4.0"
+var Version = "5.5.0"
 
 var (
 	verboseLogging   bool

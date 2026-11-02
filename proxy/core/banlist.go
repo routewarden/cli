@@ -185,7 +185,7 @@ func (b *BanList) migrateLegacyJSON() {
 		}
 
 		if err := tx.Commit(); err == nil {
-			DefaultLogger().Info("✓  [BanList] migrated %d ban(s) from legacy %s into SQLite via GORM", len(toInsert), legacyPath)
+			DefaultLogger().Info("✓  [BanList] migrated %d ban(s) from legacy %s into SQLite", len(toInsert), legacyPath)
 			_ = os.Rename(legacyPath, legacyPath+".migrated.bak")
 		} else {
 			DefaultLogger().Warn("[BanList] migration commit error: %v", err)

@@ -73,7 +73,7 @@ func TestDiffConfigs_BodyPatternsAndResponse(t *testing.T) {
 	}
 
 	candidate := CreateConfig()
-	candidate.CheckBody = false // relaxed
+	candidate.CheckBody = false                                // relaxed
 	candidate.CheckBodyPatterns = []string{`(?i)drop\s+table`} // removed union select
 	candidate.CheckBodyMaxBytes = 131072
 	candidate.CustomResponseText = "Custom WAF Block"
@@ -141,5 +141,156 @@ func TestDiffConfigs_DeduplicateSlices(t *testing.T) {
 	}
 	if len(diff.BlockPatterns.Removed) != 1 || diff.BlockPatterns.Removed[0] != `(?i)\.env` {
 		t.Errorf("expected exactly 1 deduplicated removed pattern, got %+v", diff.BlockPatterns.Removed)
+	}
+}
+
+func TestDiffConfigs_BotDefenseAndCrawlers(t *testing.T) {
+	base := CreateConfig()
+	base.BotDefenseLevel = "off"
+	base.BlockAIBots = false
+
+	candidate := CreateConfig()
+	candidate.BotDefenseLevel = "standard"
+	candidate.BlockAIBots = true
+	candidate.DetectBrowserImpersonation = true
+	candidate.BlockScriptClients = true
+	candidate.HoneypotTrapPaths = []string{"/hidden-trap"}
+	candidate.BlockedASNs = []string{"AS64501"}
+	candidate.BlockUserAgents = []string{"(?i)BadCrawler"}
+
+	diff := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if !diff.HasDifferences {
+		t.Fatal("expected differences for bot defense changes")
+	}
+	if diff.Impact != DiffImpactHardened {
+		t.Errorf("expected HARDENED impact, got %s", diff.Impact)
+	}
+	if _, ok := diff.Properties["botDefenseLevel"]; !ok {
+		t.Errorf("expected diff in botDefenseLevel")
+	}
+	if _, ok := diff.Properties["blockAIBots"]; !ok {
+		t.Errorf("expected diff in blockAIBots")
+	}
+	if len(diff.HoneypotTrapPaths.Added) != 1 {
+		t.Errorf("expected 1 added honeypot trap path, got %d", len(diff.HoneypotTrapPaths.Added))
+	}
+	if len(diff.BlockedASNs.Added) != 1 {
+		t.Errorf("expected 1 added blocked ASN, got %d", len(diff.BlockedASNs.Added))
+	}
+	if len(diff.BlockUserAgents.Added) != 1 {
+		t.Errorf("expected 1 added block user agent, got %d", len(diff.BlockUserAgents.Added))
+	}
+
+	// Relaxing case: disable bot defense in candidate
+	diffRelax := DiffConfigs(candidate, base, "candidate.json", "base.json")
+	if !diffRelax.HasDifferences {
+		t.Fatal("expected differences when bot defense is disabled")
+	}
+	if diffRelax.Impact != DiffImpactRelaxed {
+		t.Errorf("expected RELAXED impact, got %s", diffRelax.Impact)
+	}
+}
+
+func TestDiffConfigs_ASNMethodAndIPCanonicalization(t *testing.T) {
+	base := CreateConfig()
+	base.AllowedASNs = []string{"AS64500", "as64502"}
+	base.BlockedASNs = []string{"64501"}
+	base.Methods = []string{"GET", "post"}
+	base.AllowedIPs = []string{"192.0.2.1", "[2001:db8::1]"}
+	base.TrustedProxies = []string{"10.0.0.1"}
+
+	candidate := CreateConfig()
+	// Equivalent representations with different casing, prefixing, and bracketing
+	candidate.AllowedASNs = []string{"64500", "AS64502"}
+	candidate.BlockedASNs = []string{"AS64501"}
+	candidate.Methods = []string{"get", "POST"}
+	candidate.AllowedIPs = []string{"192.0.2.1", "2001:db8::1"}
+	candidate.TrustedProxies = []string{"10.0.0.1"}
+
+	diff := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if diff.HasDifferences {
+		t.Errorf("expected no differences between semantically identical ASN, Method, and IP representations, got %+v", diff)
+	}
+	if diff.Impact != DiffImpactNeutral {
+		t.Errorf("expected NEUTRAL impact, got %s", diff.Impact)
+	}
+
+	// Now introduce an actual change
+	candidate.AllowedASNs = append(candidate.AllowedASNs, "AS64503")
+	diffActual := DiffConfigs(base, candidate, "base.json", "candidate.json")
+	if !diffActual.HasDifferences {
+		t.Error("expected difference when new ASN is added")
+	}
+	if len(diffActual.AllowedASNs.Added) != 1 || diffActual.AllowedASNs.Added[0] != "AS64503" {
+		t.Errorf("expected added AS64503, got %+v", diffActual.AllowedASNs.Added)
+	}
+}
+
+func TestDiffConfigs_AllowedIPsAndAllowPatternsImpact(t *testing.T) {
+	// 1. Adding allowedIps relaxes posture
+	base := CreateConfig()
+	candidateRelaxed := CreateConfig()
+	candidateRelaxed.AllowedIPs = []string{"10.0.0.0/8"}
+	diff1 := DiffConfigs(base, candidateRelaxed, "base.json", "candidate.json")
+	if diff1.Impact != DiffImpactRelaxed {
+		t.Errorf("expected adding allowedIps to be RELAXED, got %s", diff1.Impact)
+	}
+
+	// 2. Removing allowedIps hardens posture
+	diff2 := DiffConfigs(candidateRelaxed, base, "base.json", "candidate.json")
+	if diff2.Impact != DiffImpactHardened {
+		t.Errorf("expected removing allowedIps to be HARDENED, got %s", diff2.Impact)
+	}
+
+	// 3. Removing allowPatterns hardens posture
+	baseAllow := CreateConfig()
+	baseAllow.AllowPatterns = []string{"/safe/bypass"}
+	diff3 := DiffConfigs(baseAllow, base, "base.json", "candidate.json")
+	if diff3.Impact != DiffImpactHardened {
+		t.Errorf("expected removing allowPatterns to be HARDENED, got %s", diff3.Impact)
+	}
+
+	// 4. Adding ASNDB hardens posture
+	candASN := CreateConfig()
+	candASN.ASNDB = "/data/GeoLite2-ASN.mmdb"
+	diff4 := DiffConfigs(base, candASN, "base.json", "candidate.json")
+	if diff4.Impact != DiffImpactHardened {
+		t.Errorf("expected configuring ASNDB to be HARDENED, got %s", diff4.Impact)
+	}
+
+	// 5. Removing ASNDB relaxes posture
+	diff5 := DiffConfigs(candASN, base, "base.json", "candidate.json")
+	if diff5.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing ASNDB to be RELAXED, got %s", diff5.Impact)
+	}
+
+	// 6. Adding CheckHeaders hardens posture
+	candHeaders := CreateConfig()
+	candHeaders.CheckHeaders = []string{"X-Forwarded-Prefix"}
+	diff6 := DiffConfigs(base, candHeaders, "base.json", "candidate.json")
+	if diff6.Impact != DiffImpactHardened {
+		t.Errorf("expected adding checkHeaders to be HARDENED, got %s", diff6.Impact)
+	}
+
+	// 7. Removing CheckHeaders relaxes posture
+	diff7 := DiffConfigs(candHeaders, base, "base.json", "candidate.json")
+	if diff7.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing checkHeaders to be RELAXED, got %s", diff7.Impact)
+	}
+
+	// 8. Adding Methods hardens posture
+	baseMethods := CreateConfig()
+	baseMethods.Methods = []string{"GET"}
+	candMethods := CreateConfig()
+	candMethods.Methods = []string{"GET", "POST"}
+	diff8 := DiffConfigs(baseMethods, candMethods, "base.json", "candidate.json")
+	if diff8.Impact != DiffImpactHardened {
+		t.Errorf("expected adding methods to be HARDENED, got %s", diff8.Impact)
+	}
+
+	// 9. Removing Methods relaxes posture
+	diff9 := DiffConfigs(candMethods, baseMethods, "base.json", "candidate.json")
+	if diff9.Impact != DiffImpactRelaxed {
+		t.Errorf("expected removing methods to be RELAXED, got %s", diff9.Impact)
 	}
 }
