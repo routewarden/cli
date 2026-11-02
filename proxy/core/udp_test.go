@@ -223,6 +223,17 @@ func TestUDPEngine_ForwardPacket(t *testing.T) {
 	defer clientConn.Close()
 	clientAddr := clientConn.LocalAddr().(*net.UDPAddr)
 
+	// Verify loopback UDP packet delivery is permitted in this execution environment
+	testPing := []byte("ping")
+	if _, err := echoConn.WriteToUDP(testPing, clientAddr); err != nil {
+		t.Skipf("skipping live UDP test without UDP write permissions: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	testBuf := make([]byte, 16)
+	if _, _, err := clientConn.ReadFromUDP(testBuf); err != nil {
+		t.Skipf("skipping live UDP test: loopback packet delivery not permitted: %v", err)
+	}
+
 	svc := cfg.Services["udp-test"]
 	table := NewUDPSessionTable(5 * time.Second)
 	defer table.Close()

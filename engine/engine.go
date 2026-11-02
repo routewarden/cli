@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -8,9 +9,11 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultBlockPatterns contains well-known sensitive endpoints and file extensions.
@@ -69,6 +72,9 @@ type ResponseConfig struct {
 	TarpitDelayMs            int               `json:"tarpitDelayMs,omitempty"`
 	TarpitMaxDurationSeconds int               `json:"tarpitMaxDurationSeconds,omitempty"`
 	StreamSizeMB             int               `json:"streamSizeMB,omitempty"`
+	PoWDifficulty            int               `json:"powDifficulty,omitempty" yaml:"powDifficulty,omitempty"`
+	PoWSecret                string            `json:"powSecret,omitempty" yaml:"powSecret,omitempty"`
+	PoWTimeoutSeconds        int               `json:"powTimeoutSeconds,omitempty" yaml:"powTimeoutSeconds,omitempty"`
 }
 
 // Config holds the RouteWarden configuration.
@@ -81,7 +87,22 @@ type Config struct {
 	BlockPatterns              []string        `json:"blockPatterns,omitempty"`
 	AllowPatterns              []string        `json:"allowPatterns,omitempty"`
 	AllowedASNs                []string        `json:"allowedASNs,omitempty"`
+	BlockedASNs                []string        `json:"blockedASNs,omitempty"`
 	ASNDB                      string          `json:"asnDB,omitempty"`
+	BotDefenseLevel            string          `json:"botDefenseLevel,omitempty"`
+	BotDefenseLevelSnake       string          `json:"bot_defense_level,omitempty"`
+	BlockAIBots                bool            `json:"blockAIBots,omitempty"`
+	AIBotProfile               string          `json:"aiBotProfile,omitempty"`
+	VerifySearchEngineBots     bool            `json:"verifySearchEngineBots,omitempty"`
+	DetectBrowserImpersonation bool            `json:"detectBrowserImpersonation,omitempty"`
+	BlockScriptClients         bool            `json:"blockScriptClients,omitempty"`
+	BlockCloudHosts            bool            `json:"blockCloudHosts,omitempty"`
+	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
+	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
+	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
+	EnableRobotsTxtHoneypot    bool            `json:"enableRobotsTxtHoneypot,omitempty"`
+	RobotsTxtHoneypotSecret    string          `json:"robotsTxtHoneypotSecret,omitempty"`
+	TrapBanDuration            string          `json:"trapBanDuration,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
 	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
 	Methods                    []string        `json:"methods,omitempty"`
@@ -96,6 +117,31 @@ type Config struct {
 	Debug                      bool            `json:"debug,omitempty"`
 	SecurityLog                bool            `json:"securityLog,omitempty"`
 	Response                   *ResponseConfig `json:"response,omitempty"`
+	ExplicitFields             []string        `json:"explicitFields,omitempty"`
+}
+
+func (cfg *Config) MarkExplicit(field string) {
+	if slices.Contains(cfg.ExplicitFields, field) {
+		return
+	}
+	cfg.ExplicitFields = append(cfg.ExplicitFields, field)
+}
+
+func (cfg *Config) IsExplicit(fields ...string) bool {
+	for _, f := range fields {
+		if slices.Contains(cfg.ExplicitFields, f) {
+			return true
+		}
+	}
+	return false
+}
+
+func (cfg *Config) markExplicit(field string) {
+	cfg.MarkExplicit(field)
+}
+
+func (cfg *Config) isExplicit(fields ...string) bool {
+	return cfg.IsExplicit(fields...)
 }
 
 // UnmarshalJSON implements flexible unmarshaling supporting both camelCase and snake_case tags.
@@ -175,6 +221,12 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 		StreamSizeMB                  int               `json:"streamSizeMB"`
 		StreamSizeMBSnake             int               `json:"stream_size_mb"`
 		StreamSizeMb                  int               `json:"streamSizeMb"`
+		PoWDifficulty                 int               `json:"powDifficulty"`
+		PoWDifficultySnake            int               `json:"pow_difficulty"`
+		PoWSecret                     string            `json:"powSecret"`
+		PoWSecretSnake                string            `json:"pow_secret"`
+		PoWTimeoutSeconds             int               `json:"powTimeoutSeconds"`
+		PoWTimeoutSecondsSnake        int               `json:"pow_timeout_seconds"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -232,6 +284,21 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 	} else if raw.StreamSizeMb != 0 {
 		r.StreamSizeMB = raw.StreamSizeMb
 	}
+	if raw.PoWDifficulty != 0 {
+		r.PoWDifficulty = raw.PoWDifficulty
+	} else if raw.PoWDifficultySnake != 0 {
+		r.PoWDifficulty = raw.PoWDifficultySnake
+	}
+	if raw.PoWSecret != "" {
+		r.PoWSecret = raw.PoWSecret
+	} else {
+		r.PoWSecret = raw.PoWSecretSnake
+	}
+	if raw.PoWTimeoutSeconds != 0 {
+		r.PoWTimeoutSeconds = raw.PoWTimeoutSeconds
+	} else if raw.PoWTimeoutSecondsSnake != 0 {
+		r.PoWTimeoutSeconds = raw.PoWTimeoutSecondsSnake
+	}
 	return nil
 }
 
@@ -252,8 +319,36 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		AllowPatternsSnake              []string        `json:"allow_patterns"`
 		AllowedASNs                     []string        `json:"allowedASNs"`
 		AllowedASNsSnake                []string        `json:"allowed_asns"`
+		BlockedASNs                     []string        `json:"blockedASNs"`
+		BlockedASNsSnake                []string        `json:"blocked_asns"`
 		ASNDB                           string          `json:"asnDB"`
 		ASNDBSnake                      string          `json:"asn_db"`
+		BotDefenseLevel                 string          `json:"botDefenseLevel"`
+		BotDefenseLevelSnake            string          `json:"bot_defense_level"`
+		BlockAIBots                     *bool           `json:"blockAIBots"`
+		BlockAIBotsSnake                *bool           `json:"block_ai_bots"`
+		AIBotProfile                    string          `json:"aiBotProfile"`
+		AIBotProfileSnake               string          `json:"ai_bot_profile"`
+		VerifySearchEngineBots          *bool           `json:"verifySearchEngineBots"`
+		VerifySearchEngineBotsSnake     *bool           `json:"verify_search_engine_bots"`
+		DetectBrowserImpersonation      *bool           `json:"detectBrowserImpersonation"`
+		DetectBrowserImpersonationSnake *bool           `json:"detect_browser_impersonation"`
+		BlockScriptClients              *bool           `json:"blockScriptClients"`
+		BlockScriptClientsSnake         *bool           `json:"block_script_clients"`
+		BlockCloudHosts                 *bool           `json:"blockCloudHosts"`
+		BlockCloudHostsSnake            *bool           `json:"block_cloud_hosts"`
+		BlockUserAgents                 []string        `json:"blockUserAgents"`
+		BlockUserAgentsSnake            []string        `json:"block_user_agents"`
+		AllowUserAgents                 []string        `json:"allowUserAgents"`
+		AllowUserAgentsSnake            []string        `json:"allow_user_agents"`
+		HoneypotTrapPaths               []string        `json:"honeypotTrapPaths"`
+		HoneypotTrapPathsSnake          []string        `json:"honeypot_trap_paths"`
+		EnableRobotsTxtHoneypot         *bool           `json:"enableRobotsTxtHoneypot"`
+		EnableRobotsTxtHoneypotSnake    *bool           `json:"enable_robots_txt_honeypot"`
+		RobotsTxtHoneypotSecret         *string         `json:"robotsTxtHoneypotSecret"`
+		RobotsTxtHoneypotSecretSnake    *string         `json:"robots_txt_honeypot_secret"`
+		TrapBanDuration                 string          `json:"trapBanDuration"`
+		TrapBanDurationSnake            string          `json:"trap_ban_duration"`
 		AllowedIPs                      []string        `json:"allowedIps"`
 		AllowedIPsSnake                 []string        `json:"allowed_ips"`
 		TrustedProxies                  []string        `json:"trustedProxies"`
@@ -281,6 +376,13 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err == nil {
+		for k := range rawMap {
+			cfg.markExplicit(k)
+		}
 	}
 
 	// 1. Config file
@@ -346,10 +448,97 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 	if raw.AllowedASNsSnake != nil {
 		cfg.AllowedASNs = raw.AllowedASNsSnake
 	}
+	cfg.BlockedASNs = raw.BlockedASNs
+	if raw.BlockedASNsSnake != nil {
+		cfg.BlockedASNs = raw.BlockedASNsSnake
+	}
 	cfg.ASNDB = raw.ASNDB
 	if raw.ASNDBSnake != "" {
 		cfg.ASNDB = raw.ASNDBSnake
 	}
+
+	if raw.BotDefenseLevel != "" {
+		cfg.BotDefenseLevel = raw.BotDefenseLevel
+	} else if raw.BotDefenseLevelSnake != "" {
+		cfg.BotDefenseLevel = raw.BotDefenseLevelSnake
+	}
+	cfg.BotDefenseLevelSnake = cfg.BotDefenseLevel
+	if cfg.BotDefenseLevel != "" {
+		cfg.applyBotDefense(cfg.BotDefenseLevel)
+	}
+
+	if raw.BlockAIBots != nil {
+		cfg.BlockAIBots = *raw.BlockAIBots
+	} else if raw.BlockAIBotsSnake != nil {
+		cfg.BlockAIBots = *raw.BlockAIBotsSnake
+	}
+
+	if raw.AIBotProfile != "" {
+		cfg.AIBotProfile = raw.AIBotProfile
+	} else if raw.AIBotProfileSnake != "" {
+		cfg.AIBotProfile = raw.AIBotProfileSnake
+	}
+
+	if raw.VerifySearchEngineBots != nil {
+		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBots
+	} else if raw.VerifySearchEngineBotsSnake != nil {
+		cfg.VerifySearchEngineBots = *raw.VerifySearchEngineBotsSnake
+	}
+
+	if raw.DetectBrowserImpersonation != nil {
+		cfg.DetectBrowserImpersonation = *raw.DetectBrowserImpersonation
+	} else if raw.DetectBrowserImpersonationSnake != nil {
+		cfg.DetectBrowserImpersonation = *raw.DetectBrowserImpersonationSnake
+	}
+
+	if raw.BlockScriptClients != nil {
+		cfg.BlockScriptClients = *raw.BlockScriptClients
+	} else if raw.BlockScriptClientsSnake != nil {
+		cfg.BlockScriptClients = *raw.BlockScriptClientsSnake
+	}
+
+	if raw.BlockCloudHosts != nil {
+		cfg.BlockCloudHosts = *raw.BlockCloudHosts
+	} else if raw.BlockCloudHostsSnake != nil {
+		cfg.BlockCloudHosts = *raw.BlockCloudHostsSnake
+	}
+
+	if raw.BlockUserAgents != nil {
+		cfg.BlockUserAgents = raw.BlockUserAgents
+	} else if raw.BlockUserAgentsSnake != nil {
+		cfg.BlockUserAgents = raw.BlockUserAgentsSnake
+	}
+
+	if raw.AllowUserAgents != nil {
+		cfg.AllowUserAgents = raw.AllowUserAgents
+	} else if raw.AllowUserAgentsSnake != nil {
+		cfg.AllowUserAgents = raw.AllowUserAgentsSnake
+	}
+
+	if raw.HoneypotTrapPaths != nil {
+		cfg.HoneypotTrapPaths = raw.HoneypotTrapPaths
+	} else if raw.HoneypotTrapPathsSnake != nil {
+		cfg.HoneypotTrapPaths = raw.HoneypotTrapPathsSnake
+	}
+
+	if raw.EnableRobotsTxtHoneypot != nil {
+		cfg.EnableRobotsTxtHoneypot = *raw.EnableRobotsTxtHoneypot
+	} else if raw.EnableRobotsTxtHoneypotSnake != nil {
+		cfg.EnableRobotsTxtHoneypot = *raw.EnableRobotsTxtHoneypotSnake
+	}
+
+	if raw.RobotsTxtHoneypotSecret != nil {
+		cfg.RobotsTxtHoneypotSecret = *raw.RobotsTxtHoneypotSecret
+	} else if raw.RobotsTxtHoneypotSecretSnake != nil {
+		cfg.RobotsTxtHoneypotSecret = *raw.RobotsTxtHoneypotSecretSnake
+	}
+
+	if raw.TrapBanDuration != "" {
+		cfg.TrapBanDuration = raw.TrapBanDuration
+	} else if raw.TrapBanDurationSnake != "" {
+		cfg.TrapBanDuration = raw.TrapBanDurationSnake
+	}
+
 	if raw.AllowedIPs != nil {
 		cfg.AllowedIPs = raw.AllowedIPs
 	} else if raw.AllowedIPsSnake != nil {
@@ -453,6 +642,108 @@ func (cfg *Config) GetConfigFile() string {
 	return cfg.ConfigFileSnake
 }
 
+func applyBotDefenseLevel(level string, blockAIBots *bool, aiBotProfile *string, detectBrowser *bool, blockScripts *bool, verifySearch *bool) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "light", "relaxed":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "train_only"
+		}
+		*blockScripts = true
+		*verifySearch = true
+	case "standard", "moderate":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "train_only"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	case "strict":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "all"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	case "aggressive", "paranoia":
+		*blockAIBots = true
+		if *aiBotProfile == "" {
+			*aiBotProfile = "aggressive"
+		}
+		*blockScripts = true
+		*detectBrowser = true
+		*verifySearch = true
+	}
+}
+
+func (cfg *Config) applyBotDefense(level string) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "light", "relaxed":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "train_only"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "standard", "moderate":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "train_only"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "strict":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "all"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	case "aggressive", "paranoia":
+		if !cfg.isExplicit("blockAIBots", "block_ai_bots") {
+			cfg.BlockAIBots = true
+		}
+		if !cfg.isExplicit("aiBotProfile", "ai_bot_profile") && cfg.AIBotProfile == "" {
+			cfg.AIBotProfile = "aggressive"
+		}
+		if !cfg.isExplicit("blockScriptClients", "block_script_clients") {
+			cfg.BlockScriptClients = true
+		}
+		if !cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") {
+			cfg.DetectBrowserImpersonation = true
+		}
+		if !cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") {
+			cfg.VerifySearchEngineBots = true
+		}
+	}
+}
+
 // CreateConfig creates default RouteWarden configuration.
 func CreateConfig() *Config {
 	return &Config{
@@ -481,6 +772,59 @@ func CreateConfig() *Config {
 }
 
 // ExtractCandidatePaths normalizes and extracts all representations of a request URI path.
+func isHex(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+func unhex(c byte) byte {
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0'
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10
+	case 'A' <= c && c <= 'F':
+		return c - 'A' + 10
+	}
+	return 0
+}
+
+func lenientPathUnescape(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			val := unhex(s[i+1])<<4 | unhex(s[i+2])
+			b.WriteByte(val)
+			i += 2
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+func lenientQueryUnescape(s string) string {
+	if u, err := url.QueryUnescape(s); err == nil {
+		return u
+	}
+	s = strings.ReplaceAll(s, "+", " ")
+	return lenientPathUnescape(s)
+}
+
+func stripSchemeAndAuthority(s string) (string, bool) {
+	if idx := strings.Index(s, "://"); idx != -1 {
+		rest := s[idx+3:]
+		if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
+			return rest[slashIdx:], true
+		}
+		return "/", true
+	}
+	return s, false
+}
+
 func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 	pathsToCheck := []string{path.Clean(pathStr)}
 
@@ -495,18 +839,40 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 		pathsToCheck = append(pathsToCheck, path.Clean(rawURIPath))
 	}
 
+	// 1a. Extract path from absolute URIs (e.g. http://example.com/path, http://example.com\path)
+	initials := make([]string, 0, 8)
+	for _, initial := range []string{pathStr, rawURIPath, rawPath} {
+		if initial == "" {
+			continue
+		}
+		initials = append(initials, initial)
+		if extracted, ok := stripSchemeAndAuthority(initial); ok {
+			initials = append(initials, extracted)
+			pathsToCheck = append(pathsToCheck, path.Clean(extracted))
+		}
+	}
+
 	if rawPath != "" && rawPath != pathStr {
 		pathsToCheck = append(pathsToCheck, path.Clean(rawPath))
 	}
 
-	curPath := pathStr
-	for i := 0; i < 3; i++ {
-		unescaped, err := url.PathUnescape(curPath)
-		if err != nil || unescaped == curPath {
-			break
+	// 2. Perform iterative unescaping to prevent multi-layer URL encoding evasion (e.g. %252e%252e)
+	for _, initial := range initials {
+		if initial == "" {
+			continue
 		}
-		pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
-		curPath = unescaped
+		curPath := initial
+		for i := 0; i < 5; i++ {
+			unescaped := lenientPathUnescape(curPath)
+			if unescaped == curPath {
+				break
+			}
+			pathsToCheck = append(pathsToCheck, path.Clean(unescaped))
+			if extracted, ok := stripSchemeAndAuthority(unescaped); ok {
+				pathsToCheck = append(pathsToCheck, path.Clean(extracted))
+			}
+			curPath = unescaped
+		}
 	}
 
 	for _, p := range append([]string{}, pathsToCheck...) {
@@ -537,29 +903,105 @@ func ExtractCandidatePaths(rawPath, pathStr, requestURI string) []string {
 
 	for _, p := range append([]string{}, pathsToCheck...) {
 		if strings.ContainsRune(p, '\x00') {
+			if before, _, found := strings.Cut(p, "\x00"); found {
+				pathsToCheck = append(pathsToCheck, path.Clean(before))
+			}
 			pathsToCheck = append(pathsToCheck, path.Clean(strings.ReplaceAll(p, "\x00", "")))
 		}
 	}
 
+	// 7. Strip embedded URI query (?) and fragments (#) to prevent regex anchor evasion
 	for _, p := range append([]string{}, pathsToCheck...) {
-		if before, _, found := strings.Cut(p, "#"); found {
-			pathsToCheck = append(pathsToCheck, path.Clean(before))
+		cut := p
+		hasDelim := false
+		if before, _, found := strings.Cut(cut, "?"); found {
+			cut = before
+			hasDelim = true
+		}
+		if before, _, found := strings.Cut(cut, "#"); found {
+			cut = before
+			hasDelim = true
+		}
+		if hasDelim && cut != "" {
+			pathsToCheck = append(pathsToCheck, path.Clean(cut))
 		}
 	}
 
-	candidatePaths := make([]string, 0, len(pathsToCheck))
-	seen := make(map[string]struct{}, len(pathsToCheck))
+	// 8. Strip Windows NTFS Alternate Data Streams (::$DATA) evasion
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.Contains(strings.ToLower(p), "::$data") {
+			var b strings.Builder
+			i := 0
+			for {
+				idx := strings.Index(strings.ToLower(p[i:]), "::$data")
+				if idx == -1 {
+					b.WriteString(p[i:])
+					break
+				}
+				b.WriteString(p[i : i+idx])
+				i += idx + len("::$data")
+			}
+			cleaned := path.Clean(b.String())
+			if cleaned != "" {
+				pathsToCheck = append(pathsToCheck, cleaned)
+			}
+		}
+	}
+
+	// 9. Strip trailing dots and spaces from path segments (Windows/IIS Win32 API evasion)
+	for _, p := range append([]string{}, pathsToCheck...) {
+		if strings.ContainsAny(p, ". \t\r\n") {
+			parts := strings.Split(p, "/")
+			modified := false
+			for i, seg := range parts {
+				if seg == "." || seg == ".." || seg == "" {
+					continue
+				}
+				trimmed := strings.TrimRight(seg, ". \t\r\n")
+				if trimmed != seg && trimmed != "" {
+					parts[i] = trimmed
+					modified = true
+				}
+			}
+			if modified {
+				pathsToCheck = append(pathsToCheck, path.Clean(strings.Join(parts, "/")))
+			}
+		}
+	}
+
+	candidatePaths := make([]string, 0, len(pathsToCheck)*2)
+	seen := make(map[string]struct{}, len(pathsToCheck)*2)
 	for _, p := range pathsToCheck {
 		if p == "" {
 			continue
+		}
+		if extracted, ok := stripSchemeAndAuthority(p); ok {
+			p = extracted
 		}
 		if !strings.HasPrefix(p, "/") {
 			p = "/" + p
 		}
 		p = path.Clean(p)
+		if strings.HasPrefix(p, "/http:/") || strings.HasPrefix(p, "/https:/") {
+			if secondSlash := strings.Index(p[1:], "/"); secondSlash != -1 {
+				rest := p[1+secondSlash+1:]
+				if slashIdx := strings.IndexAny(rest, "/\\"); slashIdx != -1 {
+					p = path.Clean(rest[slashIdx:])
+				} else {
+					p = "/"
+				}
+			}
+		}
 		if _, exists := seen[p]; !exists {
 			seen[p] = struct{}{}
 			candidatePaths = append(candidatePaths, p)
+		}
+		if p != "/" && !strings.HasSuffix(p, "/") {
+			pSlash := p + "/"
+			if _, exists := seen[pSlash]; !exists {
+				seen[pSlash] = struct{}{}
+				candidatePaths = append(candidatePaths, pSlash)
+			}
 		}
 	}
 
@@ -574,6 +1016,11 @@ type Engine struct {
 	BlockRegexes     []*regexp.Regexp
 	AllowRegexes     []*regexp.Regexp
 	BodyRegexes      []*regexp.Regexp
+	BlockUARegexes   []*regexp.Regexp
+	AllowUARegexes   []*regexp.Regexp
+	FCrDNS           *FCrDNSVerifier
+	BanTable         *BanTable
+	TrapBanDuration  time.Duration
 	AllowedIPs       []net.IP
 	AllowedNets      []*net.IPNet
 	TrustedProxyIPs  []net.IP
@@ -621,8 +1068,51 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		if cfg.AllowedASNs != nil {
 			fileCfg.AllowedASNs = cfg.AllowedASNs
 		}
+		if cfg.BlockedASNs != nil {
+			fileCfg.BlockedASNs = cfg.BlockedASNs
+		}
 		if cfg.ASNDB != "" {
 			fileCfg.ASNDB = cfg.ASNDB
+		}
+		if cfg.BotDefenseLevel != "" {
+			fileCfg.BotDefenseLevel = cfg.BotDefenseLevel
+			fileCfg.applyBotDefense(cfg.BotDefenseLevel)
+		}
+		if cfg.isExplicit("blockAIBots", "block_ai_bots") || cfg.BlockAIBots {
+			fileCfg.BlockAIBots = cfg.BlockAIBots
+		}
+		if cfg.isExplicit("aiBotProfile", "ai_bot_profile") || cfg.AIBotProfile != "" {
+			fileCfg.AIBotProfile = cfg.AIBotProfile
+		}
+		if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") || cfg.VerifySearchEngineBots {
+			fileCfg.VerifySearchEngineBots = cfg.VerifySearchEngineBots
+		}
+		if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") || cfg.DetectBrowserImpersonation {
+			fileCfg.DetectBrowserImpersonation = cfg.DetectBrowserImpersonation
+		}
+		if cfg.isExplicit("blockScriptClients", "block_script_clients") || cfg.BlockScriptClients {
+			fileCfg.BlockScriptClients = cfg.BlockScriptClients
+		}
+		if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") || cfg.BlockCloudHosts {
+			fileCfg.BlockCloudHosts = cfg.BlockCloudHosts
+		}
+		if len(cfg.BlockUserAgents) > 0 {
+			fileCfg.BlockUserAgents = cfg.BlockUserAgents
+		}
+		if len(cfg.AllowUserAgents) > 0 {
+			fileCfg.AllowUserAgents = cfg.AllowUserAgents
+		}
+		if len(cfg.HoneypotTrapPaths) > 0 {
+			fileCfg.HoneypotTrapPaths = cfg.HoneypotTrapPaths
+		}
+		if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") || cfg.EnableRobotsTxtHoneypot {
+			fileCfg.EnableRobotsTxtHoneypot = cfg.EnableRobotsTxtHoneypot
+		}
+		if cfg.isExplicit("robotsTxtHoneypotSecret", "robots_txt_honeypot_secret") || cfg.RobotsTxtHoneypotSecret != "" {
+			fileCfg.RobotsTxtHoneypotSecret = cfg.RobotsTxtHoneypotSecret
+		}
+		if cfg.TrapBanDuration != "" {
+			fileCfg.TrapBanDuration = cfg.TrapBanDuration
 		}
 		if len(cfg.AllowedIPs) > 0 {
 			fileCfg.AllowedIPs = cfg.AllowedIPs
@@ -711,6 +1201,8 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 		fileCfg.ConfigFile = filePath
 		cfg = fileCfg
+	} else if cfg.BotDefenseLevel != "" {
+		cfg.applyBotDefense(cfg.BotDefenseLevel)
 	}
 
 	methodsMap := make(map[string]struct{})
@@ -792,7 +1284,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		compiledBody = append(compiledBody, re)
 	}
 
-	asn, err := NewASNFilter(cfg.AllowedASNs, cfg.ASNDB)
+	asn, err := NewASNFilterEx(cfg.AllowedASNs, cfg.BlockedASNs, cfg.ASNDB, cfg.BlockCloudHosts)
 	if err != nil {
 		return nil, err
 	}
@@ -869,6 +1361,8 @@ func NewEngine(cfg *Config) (*Engine, error) {
 				"redirect": {}, "silentdrop": {}, "drop": {}, "gzipbomb": {},
 				"tarpit": {}, "fakesuccess": {}, "ratelimit": {}, "ratelimitchallenge": {},
 				"proxy": {}, "infinitestream": {}, "garbagestream": {}, "xml": {},
+				"aipoison": {}, "poison": {}, "markovtarpit": {}, "markov": {}, "tokenbleed": {},
+				"powchallenge": {}, "pow_challenge": {}, "pow": {}, "proofofwork": {}, "proof_of_work": {}, "hashcash": {},
 			}
 			if _, ok := validModes[strings.ToLower(cfg.Response.Mode)]; !ok {
 				return nil, fmt.Errorf("unsupported response.mode %q", cfg.Response.Mode)
@@ -917,12 +1411,52 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		}
 	}
 
+	compiledBlockUA := make([]*regexp.Regexp, 0, len(cfg.BlockUserAgents))
+	for _, p := range cfg.BlockUserAgents {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid block user agent regex %q: %w", p, err)
+		}
+		compiledBlockUA = append(compiledBlockUA, re)
+	}
+
+	compiledAllowUA := make([]*regexp.Regexp, 0, len(cfg.AllowUserAgents))
+	for _, p := range cfg.AllowUserAgents {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid allow user agent regex %q: %w", p, err)
+		}
+		compiledAllowUA = append(compiledAllowUA, re)
+	}
+
+	var banTable *BanTable
+	banDuration := ParseBanDuration(cfg.TrapBanDuration)
+	if len(cfg.HoneypotTrapPaths) > 0 || cfg.EnableRobotsTxtHoneypot {
+		banTable = NewBanTable(10000)
+	}
+
+	var fcrdns *FCrDNSVerifier
+	if cfg.VerifySearchEngineBots {
+		fcrdns = NewFCrDNSVerifier(6*time.Hour, 500*time.Millisecond)
+	}
+
 	return &Engine{
 		Config:           cfg,
 		Methods:          methodsMap,
 		BlockRegexes:     compiledBlock,
 		AllowRegexes:     compiledAllow,
 		BodyRegexes:      compiledBody,
+		BlockUARegexes:   compiledBlockUA,
+		AllowUARegexes:   compiledAllowUA,
+		FCrDNS:           fcrdns,
+		BanTable:         banTable,
+		TrapBanDuration:  banDuration,
 		ASN:              asn,
 		AllowedIPs:       ips,
 		AllowedNets:      nets,
@@ -933,13 +1467,15 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 // EvaluationResult represents the inspection outcome of a request.
 type EvaluationResult struct {
-	Allowed        bool
-	Bypassed       bool
-	Blocked        bool
-	CandidatePaths []string
-	MatchedPattern string
-	MatchedTarget  string
-	Reason         string
+	Allowed           bool
+	Bypassed          bool
+	Blocked           bool
+	PoWVerified       bool
+	CandidatePaths    []string
+	MatchedPattern    string
+	MatchedTarget     string
+	Reason            string
+	InjectedRobotsTxt string
 }
 
 // Evaluate inspects a simulated request against compiled rules without client IP.
@@ -984,6 +1520,12 @@ func cleanIP(raw string) string {
 	if idx := strings.IndexByte(raw, '%'); idx != -1 {
 		raw = raw[:idx]
 	}
+	if parsed := net.ParseIP(raw); parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			return v4.String()
+		}
+		return parsed.String()
+	}
 	return raw
 }
 
@@ -1026,6 +1568,38 @@ func (e *Engine) EvaluateWithClientIP(method, requestPath, queryString string, h
 	return e.EvaluateWithBody(method, requestPath, queryString, headers, clientIPStr, "")
 }
 
+// SetFCrDNSLookupFuncs overrides the DNS lookup functions for testing or custom resolvers.
+func (e *Engine) SetFCrDNSLookupFuncs(
+	lookupAddr func(ctx context.Context, addr string) ([]string, error),
+	lookupIP func(ctx context.Context, host string) ([]net.IP, error),
+) {
+	if e.FCrDNS != nil {
+		e.FCrDNS.SetLookupFuncs(lookupAddr, lookupIP)
+	}
+}
+
+func extractPoWToken(headers map[string]string) string {
+	if headers == nil {
+		return ""
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "X-RW-PoW") && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "Cookie") && strings.TrimSpace(v) != "" {
+			for _, part := range strings.Split(v, ";") {
+				part = strings.TrimSpace(part)
+				if strings.HasPrefix(part, "__rw_pow=") {
+					return strings.TrimPrefix(part, "__rw_pow=")
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // EvaluateWithBody inspects a simulated request against compiled rules including client IP and body check.
 func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, headers map[string]string, clientIPStr string, body string) *EvaluationResult {
 	result := &EvaluationResult{
@@ -1062,6 +1636,13 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		result.Reason = "asn_whitelisted"
 		return result
 	}
+	if blocked, blockedASN := e.ASN.IsBlocked(asnIP); blocked {
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = "asn_blocked"
+		result.MatchedPattern = fmt.Sprintf("AS%d", blockedASN)
+		return result
+	}
 
 	// Check client IP whitelist
 	effectiveIPStr := e.ExtractClientIP(headers, clientIPStr)
@@ -1084,8 +1665,151 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		}
 	}
 
+	// Check active IP ban
+	if e.BanTable != nil && effectiveIPStr != "" && e.BanTable.IsBanned(effectiveIPStr) {
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = "ip_banned"
+		result.MatchedPattern = "ban_table"
+		result.MatchedTarget = effectiveIPStr
+		return result
+	}
+
+	// Check PoW solution cookie (__rw_pow) or header (X-RW-PoW)
+	powToken := extractPoWToken(headers)
+	isPoWValid := false
+	if powToken != "" {
+		powSecret := DefaultPoWSecret
+		powTimeout := DefaultPoWTimeoutSeconds
+		if e.Config.Response != nil {
+			if e.Config.Response.PoWSecret != "" {
+				powSecret = e.Config.Response.PoWSecret
+			}
+			if e.Config.Response.PoWTimeoutSeconds > 0 {
+				powTimeout = e.Config.Response.PoWTimeoutSeconds
+			}
+		}
+		isPoWValid, _ = VerifyPoWSolution(effectiveIPStr, powSecret, powToken, powTimeout, time.Now())
+	}
+
+	block := func(reason, pattern, target string) *EvaluationResult {
+		if isPoWValid {
+			result.Allowed = true
+			result.PoWVerified = true
+			result.Reason = "pow_verified"
+			return result
+		}
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = reason
+		result.MatchedPattern = pattern
+		result.MatchedTarget = target
+		return result
+	}
+
+	// User-Agent & AI Bot check
+	ua := ""
+	if headers != nil {
+		for k, v := range headers {
+			if strings.EqualFold(k, "User-Agent") {
+				ua = v
+				break
+			}
+		}
+	}
+	uaAllowed := false
+	for _, re := range e.AllowUARegexes {
+		if re.MatchString(ua) {
+			uaAllowed = true
+			break
+		}
+	}
+
+	// Search engine bot impersonation verification (FCrDNS)
+	if !uaAllowed && e.FCrDNS != nil && e.Config.VerifySearchEngineBots {
+		if claimsBot, engine := DetectSearchEngineBot(ua); claimsBot {
+			if !e.FCrDNS.Verify(context.Background(), effectiveIPStr, engine) {
+				return block("search_engine_spoofed", string(engine)+"_spoofed", ua)
+			}
+			uaAllowed = true
+		}
+	}
+
+	if !uaAllowed {
+		if ua != "" {
+			for _, re := range e.BlockUARegexes {
+				if re.MatchString(ua) {
+					return block("user_agent_blocked", re.String(), ua)
+				}
+			}
+			if e.Config.BlockAIBots {
+				if matched, botType := MatchAIBot(ua, e.Config.AIBotProfile); matched {
+					return block("ai_bot_blocked", botType, ua)
+				}
+			}
+
+			if e.Config.DetectBrowserImpersonation {
+				if isSpoofed, reason := DetectBrowserImpersonation(ua, headers); isSpoofed {
+					return block("browser_spoofed", reason, ua)
+				}
+			}
+		} else {
+			for _, re := range e.BlockUARegexes {
+				if re.MatchString("") {
+					return block("user_agent_blocked", re.String(), "[empty]")
+				}
+			}
+		}
+
+		if e.Config.BlockScriptClients {
+			if isScript, clientType := DetectScriptClient(ua, headers); isScript {
+				return block("script_client_blocked", clientType, ua)
+			}
+		}
+	}
+
 	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
 	result.CandidatePaths = candidatePaths
+
+	// Honeypot spider trap check (static and dynamic robots.txt traps)
+	var activeTraps []string
+	if len(e.Config.HoneypotTrapPaths) > 0 {
+		activeTraps = append(activeTraps, e.Config.HoneypotTrapPaths...)
+	}
+	if e.Config.EnableRobotsTxtHoneypot {
+		_, dynPrefixes := GetActiveRobotsHoneypotTraps(e.Config.RobotsTxtHoneypotSecret, time.Now())
+		activeTraps = append(activeTraps, dynPrefixes...)
+	}
+
+	if len(activeTraps) > 0 {
+		for _, p := range candidatePaths {
+			for _, trapPath := range activeTraps {
+				cleanTrap := strings.TrimSpace(trapPath)
+				if cleanTrap != "" && !strings.HasPrefix(cleanTrap, "/") {
+					cleanTrap = "/" + cleanTrap
+				}
+				baseTrap := strings.TrimRight(cleanTrap, "/")
+				if baseTrap == "" {
+					continue
+				}
+				prefixTrap := baseTrap + "/"
+				lowerP := strings.ToLower(p)
+				lowerBase := strings.ToLower(baseTrap)
+				lowerPrefix := strings.ToLower(prefixTrap)
+				if lowerP == lowerBase || strings.HasPrefix(lowerP, lowerPrefix) {
+					if e.BanTable != nil && effectiveIPStr != "" {
+						e.BanTable.Ban(effectiveIPStr, e.TrapBanDuration)
+					}
+					result.Allowed = false
+					result.Blocked = true
+					result.Reason = "honeypot_trap_triggered"
+					result.MatchedPattern = cleanTrap
+					result.MatchedTarget = p
+					return result
+				}
+			}
+		}
+	}
 
 	// Check allow patterns first
 	for _, p := range candidatePaths {
@@ -1095,8 +1819,23 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				result.MatchedPattern = re.String()
 				result.MatchedTarget = p
 				result.Reason = "path_allowed"
+				if e.Config.EnableRobotsTxtHoneypot && IsRobotsTxtPath(p) {
+					activeTrap, _ := GetActiveRobotsHoneypotTraps(e.Config.RobotsTxtHoneypotSecret, time.Now())
+					result.InjectedRobotsTxt = string(InjectRobotsTxtTrap(nil, activeTrap))
+				}
 				return result
 			}
+		}
+	}
+
+	// Datacenter & Cloud Hosting IP Classifier
+	if !uaAllowed && e.Config.BlockCloudHosts && e.ASN != nil {
+		if isCloud, cloudASN, provider := e.ASN.IsCloudHost(asnIP); isCloud {
+			reason := "cloud_host_blocked"
+			if reBrowserLike.MatchString(ua) {
+				reason = "datacenter_browser_impersonation"
+			}
+			return block(reason, fmt.Sprintf("AS%d (%s)", cloudASN, provider), asnIP)
 		}
 	}
 
@@ -1104,21 +1843,14 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	for _, p := range candidatePaths {
 		for _, re := range e.BlockRegexes {
 			if re.MatchString(p) {
-				result.Blocked = true
-				result.MatchedPattern = re.String()
-				result.MatchedTarget = p
-				result.Reason = "path_blocked"
-				return result
+				return block("path_blocked", re.String(), p)
 			}
 		}
 	}
 
 	// Check query string
 	if e.Config.CheckQuery && queryString != "" {
-		unescapedQuery, err := url.QueryUnescape(queryString)
-		if err != nil {
-			unescapedQuery = queryString
-		}
+		unescapedQuery := lenientQueryUnescape(queryString)
 
 		queryCandidates := []string{queryString, unescapedQuery}
 		parsed, _ := url.ParseQuery(queryString)
@@ -1130,26 +1862,29 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
 			}
 		}
-		// Also split raw query string on '&' and ';' to catch keys/values even when malformed encodings cause ParseQuery to error
-		for _, pair := range strings.FieldsFunc(queryString, func(r rune) bool { return r == '&' || r == ';' }) {
-			if k, v, ok := strings.Cut(pair, "="); ok {
-				queryCandidates = append(queryCandidates, k, v)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", k, k)...)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
-			} else if pair != "" {
-				queryCandidates = append(queryCandidates, pair)
-				queryCandidates = append(queryCandidates, ExtractCandidatePaths("", pair, pair)...)
+		// Also split raw and unescaped query strings on '&' and ';' to catch keys/values even when
+		// malformed encodings, semicolons, or encoded delimiters (%26, %3b) cause ParseQuery to error
+		queriesToParse := []string{queryString}
+		if unescapedQuery != queryString {
+			queriesToParse = append(queriesToParse, unescapedQuery)
+		}
+		for _, qStr := range queriesToParse {
+			for _, pair := range strings.FieldsFunc(qStr, func(r rune) bool { return r == '&' || r == ';' }) {
+				if k, v, ok := strings.Cut(pair, "="); ok {
+					queryCandidates = append(queryCandidates, k, v)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", k, k)...)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", v, v)...)
+				} else if pair != "" {
+					queryCandidates = append(queryCandidates, pair)
+					queryCandidates = append(queryCandidates, ExtractCandidatePaths("", pair, pair)...)
+				}
 			}
 		}
 
 		for _, q := range queryCandidates {
 			for _, re := range e.BlockRegexes {
 				if re.MatchString(q) {
-					result.Blocked = true
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = q
-					result.Reason = "query_blocked"
-					return result
+					return block("query_blocked", re.String(), q)
 				}
 			}
 		}
@@ -1160,11 +1895,28 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, hdrName := range e.Config.CheckHeaders {
 			for k, v := range headers {
 				if strings.EqualFold(k, hdrName) && strings.TrimSpace(v) != "" {
-					rawVals := []string{v}
-					if strings.Contains(v, ",") {
-						for _, part := range strings.Split(v, ",") {
+					trimmedV := strings.TrimSpace(v)
+					rawVals := []string{trimmedV}
+					if strings.HasPrefix(trimmedV, "\"") && strings.HasSuffix(trimmedV, "\"") && len(trimmedV) >= 2 {
+						unquoted := strings.TrimSpace(trimmedV[1 : len(trimmedV)-1])
+						if unquoted != "" && unquoted != trimmedV {
+							rawVals = append(rawVals, unquoted)
+						}
+					} else if strings.HasPrefix(trimmedV, "'") && strings.HasSuffix(trimmedV, "'") && len(trimmedV) >= 2 {
+						unquoted := strings.TrimSpace(trimmedV[1 : len(trimmedV)-1])
+						if unquoted != "" && unquoted != trimmedV {
+							rawVals = append(rawVals, unquoted)
+						}
+					}
+					if strings.Contains(trimmedV, ",") {
+						for _, part := range strings.Split(trimmedV, ",") {
 							part = strings.TrimSpace(part)
-							if part != "" && part != v {
+							if strings.HasPrefix(part, "\"") && strings.HasSuffix(part, "\"") && len(part) >= 2 {
+								part = strings.TrimSpace(part[1 : len(part)-1])
+							} else if strings.HasPrefix(part, "'") && strings.HasSuffix(part, "'") && len(part) >= 2 {
+								part = strings.TrimSpace(part[1 : len(part)-1])
+							}
+							if part != "" {
 								rawVals = append(rawVals, part)
 							}
 						}
@@ -1174,11 +1926,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 						for _, hc := range hdrCandidates {
 							for _, re := range e.BlockRegexes {
 								if re.MatchString(hc) {
-									result.Blocked = true
-									result.MatchedPattern = re.String()
-									result.MatchedTarget = hc
-									result.Reason = "header_blocked"
-									return result
+									return block("header_blocked", re.String(), hc)
 								}
 							}
 						}
@@ -1200,14 +1948,64 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 			bodyBytes = bodyBytes[:maxBytes]
 		}
 		bodyStr := string(bodyBytes)
-		unescapedBody, err := url.QueryUnescape(bodyStr)
-		if err != nil {
-			unescapedBody = bodyStr
-		}
+		unescapedBody := lenientQueryUnescape(bodyStr)
 
 		bodyCandidates := []string{bodyStr}
 		if unescapedBody != bodyStr {
 			bodyCandidates = append(bodyCandidates, unescapedBody)
+		}
+
+		// Form urlencoded parameters extraction (&, ;)
+		if parsedValues, err := url.ParseQuery(bodyStr); err == nil && len(parsedValues) > 0 {
+			for k, vs := range parsedValues {
+				bodyCandidates = append(bodyCandidates, k)
+				bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+				for _, v := range vs {
+					bodyCandidates = append(bodyCandidates, v)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", v, v)...)
+				}
+			}
+		}
+		bodiesToParse := []string{bodyStr}
+		if unescapedBody != bodyStr {
+			bodiesToParse = append(bodiesToParse, unescapedBody)
+		}
+		for _, bStr := range bodiesToParse {
+			for _, pair := range strings.FieldsFunc(bStr, func(r rune) bool { return r == '&' || r == ';' }) {
+				if k, v, ok := strings.Cut(pair, "="); ok {
+					bodyCandidates = append(bodyCandidates, k, v)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+					bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", v, v)...)
+				}
+			}
+		}
+
+		// JSON payload string values extraction
+		trimmedBody := strings.TrimSpace(bodyStr)
+		if (strings.HasPrefix(trimmedBody, "{") && strings.HasSuffix(trimmedBody, "}")) ||
+			(strings.HasPrefix(trimmedBody, "[") && strings.HasSuffix(trimmedBody, "]")) {
+			var jsonVal any
+			if err := json.Unmarshal([]byte(trimmedBody), &jsonVal); err == nil {
+				var extractJSON func(v any)
+				extractJSON = func(v any) {
+					switch val := v.(type) {
+					case string:
+						bodyCandidates = append(bodyCandidates, val)
+						bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", val, val)...)
+					case []any:
+						for _, item := range val {
+							extractJSON(item)
+						}
+					case map[string]any:
+						for k, item := range val {
+							bodyCandidates = append(bodyCandidates, k)
+							bodyCandidates = append(bodyCandidates, ExtractCandidatePaths("", k, k)...)
+							extractJSON(item)
+						}
+					}
+				}
+				extractJSON(jsonVal)
+			}
 		}
 
 		patternsToCheck := e.BodyRegexes
@@ -1218,17 +2016,16 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, bCand := range bodyCandidates {
 			for _, re := range patternsToCheck {
 				if re.MatchString(bCand) {
-					result.Blocked = true
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = "[body payload]"
-					result.Reason = "body_blocked"
-					return result
+					return block("body_blocked", re.String(), "[body payload]")
 				}
 			}
 		}
 	}
 
 	result.Allowed = true
+	if isPoWValid {
+		result.PoWVerified = true
+	}
 	result.Reason = "passed_inspection"
 	return result
 }
@@ -1291,7 +2088,13 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 			status = 200
 		case "fakesuccess", "decoy":
 			status = 200
+		case "aipoison", "ai_poison", "poison":
+			status = 200
+		case "markovtarpit", "markov_tarpit", "markov", "tokenbleed":
+			status = 200
 		case "ratelimit", "ratelimitchallenge", "backoff":
+			status = 429
+		case "powchallenge", "pow_challenge", "pow", "proofofwork", "proof_of_work", "hashcash":
 			status = 429
 		case "redirect":
 			status = 302
@@ -1351,8 +2154,101 @@ func (cfg *Config) GenerateTraefikYAML() string {
 			fmt.Fprintf(&b, "            - %q\n", asn)
 		}
 	}
+	if cfg.BlockedASNs != nil {
+		if len(cfg.BlockedASNs) == 0 {
+			b.WriteString("          blockedASNs: []\n")
+		} else {
+			b.WriteString("          blockedASNs:\n")
+		}
+		for _, asn := range cfg.BlockedASNs {
+			fmt.Fprintf(&b, "            - %q\n", asn)
+		}
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "          asnDB: %q\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "          botDefenseLevel: %q\n", cfg.BotDefenseLevel)
+	}
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("          blockAIBots: false\n")
+	} else if cfg.BlockAIBots {
+		b.WriteString("          blockAIBots: true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "          aiBotProfile: %q\n", cfg.AIBotProfile)
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("          verifySearchEngineBots: false\n")
+	} else if cfg.VerifySearchEngineBots {
+		b.WriteString("          verifySearchEngineBots: true\n")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("          detectBrowserImpersonation: false\n")
+	} else if cfg.DetectBrowserImpersonation {
+		b.WriteString("          detectBrowserImpersonation: true\n")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("          blockScriptClients: false\n")
+	} else if cfg.BlockScriptClients {
+		b.WriteString("          blockScriptClients: true\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("          blockCloudHosts: false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("          blockCloudHosts: true\n")
+	}
+	var explicitFalseYAML []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseYAML = append(explicitFalseYAML, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseYAML = append(explicitFalseYAML, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseYAML = append(explicitFalseYAML, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseYAML = append(explicitFalseYAML, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseYAML = append(explicitFalseYAML, "blockCloudHosts")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseYAML = append(explicitFalseYAML, "enableRobotsTxtHoneypot")
+	}
+	if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("          enableRobotsTxtHoneypot: true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "          robotsTxtHoneypotSecret: %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
+	if len(explicitFalseYAML) > 0 {
+		b.WriteString("          explicitFields:\n")
+		for _, ef := range explicitFalseYAML {
+			fmt.Fprintf(&b, "            - %q\n", ef)
+		}
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("          blockUserAgents:\n")
+		for _, ua := range cfg.BlockUserAgents {
+			fmt.Fprintf(&b, "            - %q\n", ua)
+		}
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("          allowUserAgents:\n")
+		for _, ua := range cfg.AllowUserAgents {
+			fmt.Fprintf(&b, "            - %q\n", ua)
+		}
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("          honeypotTrapPaths:\n")
+		for _, trap := range cfg.HoneypotTrapPaths {
+			fmt.Fprintf(&b, "            - %q\n", trap)
+		}
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "          trapBanDuration: %q\n", cfg.TrapBanDuration)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("          allowedIps:\n")
@@ -1425,6 +2321,15 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		}
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "            streamSizeMB: %d\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "            powDifficulty: %d\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "            powSecret: %q\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "            powTimeoutSeconds: %d\n", cfg.Response.PoWTimeoutSeconds)
 		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("            captcha:\n")
@@ -1508,8 +2413,116 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		}
 		b.WriteString("]\n")
 	}
+	if cfg.BlockedASNs != nil {
+		b.WriteString("  blockedASNs = [")
+		for i, asn := range cfg.BlockedASNs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", asn)
+		}
+		b.WriteString("]\n")
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  asnDB = %q\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "  botDefenseLevel = %q\n", cfg.BotDefenseLevel)
+	}
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("  blockAIBots = false\n")
+	} else if cfg.BlockAIBots {
+		b.WriteString("  blockAIBots = true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "  aiBotProfile = %q\n", cfg.AIBotProfile)
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("  verifySearchEngineBots = false\n")
+	} else if cfg.VerifySearchEngineBots {
+		b.WriteString("  verifySearchEngineBots = true\n")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("  detectBrowserImpersonation = false\n")
+	} else if cfg.DetectBrowserImpersonation {
+		b.WriteString("  detectBrowserImpersonation = true\n")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("  blockScriptClients = false\n")
+	} else if cfg.BlockScriptClients {
+		b.WriteString("  blockScriptClients = true\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("  blockCloudHosts = false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("  blockCloudHosts = true\n")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  enableRobotsTxtHoneypot = false\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  enableRobotsTxtHoneypot = true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "  robotsTxtHoneypotSecret = %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
+	var explicitFalseTOML []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseTOML = append(explicitFalseTOML, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseTOML = append(explicitFalseTOML, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseTOML = append(explicitFalseTOML, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseTOML = append(explicitFalseTOML, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseTOML = append(explicitFalseTOML, "blockCloudHosts")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseTOML = append(explicitFalseTOML, "enableRobotsTxtHoneypot")
+	}
+	if len(explicitFalseTOML) > 0 {
+		var quoted []string
+		for _, ef := range explicitFalseTOML {
+			quoted = append(quoted, fmt.Sprintf("%q", ef))
+		}
+		fmt.Fprintf(&b, "  explicitFields = [%s]\n", strings.Join(quoted, ", "))
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("  blockUserAgents = [")
+		for i, ua := range cfg.BlockUserAgents {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", ua)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("  allowUserAgents = [")
+		for i, ua := range cfg.AllowUserAgents {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", ua)
+		}
+		b.WriteString("]\n")
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("  honeypotTrapPaths = [")
+		for i, trap := range cfg.HoneypotTrapPaths {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", trap)
+		}
+		b.WriteString("]\n")
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "  trapBanDuration = %q\n", cfg.TrapBanDuration)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("  allowedIps = [")
@@ -1603,6 +2616,15 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "  streamSizeMB = %d\n", cfg.Response.StreamSizeMB)
 		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "  powDifficulty = %d\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "  powSecret = %q\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "  powTimeoutSeconds = %d\n", cfg.Response.PoWTimeoutSeconds)
+		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response.captcha]\n")
 			if cfg.Response.Captcha.Provider != "" {
@@ -1666,8 +2688,84 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	if cfg.AllowedASNs != nil {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.allowedASNs="+strings.Join(cfg.AllowedASNs, ","))
 	}
+	if cfg.BlockedASNs != nil {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockedASNs="+strings.Join(cfg.BlockedASNs, ","))
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.asnDB="+cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.botDefenseLevel="+cfg.BotDefenseLevel)
+	}
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=false\"\n")
+	} else if cfg.BlockAIBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockAIBots=true\"\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.aiBotProfile="+cfg.AIBotProfile)
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=false\"\n")
+	} else if cfg.VerifySearchEngineBots {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.verifySearchEngineBots=true\"\n")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.detectBrowserImpersonation=false\"\n")
+	} else if cfg.DetectBrowserImpersonation {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.detectBrowserImpersonation=true\"\n")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=false\"\n")
+	} else if cfg.BlockScriptClients {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=true\"\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockCloudHosts=false\"\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockCloudHosts=true\"\n")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableRobotsTxtHoneypot=false\"\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableRobotsTxtHoneypot=true\"\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.robotsTxtHoneypotSecret="+cfg.RobotsTxtHoneypotSecret)
+	}
+	var explicitFalseLabels []string
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		explicitFalseLabels = append(explicitFalseLabels, "blockAIBots")
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		explicitFalseLabels = append(explicitFalseLabels, "verifySearchEngineBots")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		explicitFalseLabels = append(explicitFalseLabels, "detectBrowserImpersonation")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		explicitFalseLabels = append(explicitFalseLabels, "blockScriptClients")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		explicitFalseLabels = append(explicitFalseLabels, "blockCloudHosts")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseLabels = append(explicitFalseLabels, "enableRobotsTxtHoneypot")
+	}
+	if len(explicitFalseLabels) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.explicitFields="+strings.Join(explicitFalseLabels, ","))
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.blockUserAgents="+strings.Join(cfg.BlockUserAgents, ","))
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.allowUserAgents="+strings.Join(cfg.AllowUserAgents, ","))
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.honeypotTrapPaths="+strings.Join(cfg.HoneypotTrapPaths, ","))
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.trapBanDuration="+cfg.TrapBanDuration)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.allowedIps=%s\"\n", strings.Join(cfg.AllowedIPs, ","))
@@ -1731,6 +2829,16 @@ func (cfg *Config) GenerateTraefikLabels() string {
 		}
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.streamSizeMB=%d\"\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powDifficulty=%d\"\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.PoWSecret, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powSecret=%s\"\n", esc)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powTimeoutSeconds=%d\"\n", cfg.Response.PoWTimeoutSeconds)
 		}
 		if cfg.Response.Captcha != nil {
 			if cfg.Response.Captcha.Provider != "" {
@@ -1808,8 +2916,62 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.AllowedASNs != nil {
 		fmt.Fprintf(&b, "    allowed_asns %s\n", strings.Join(cfg.AllowedASNs, " "))
 	}
+	if cfg.BlockedASNs != nil {
+		fmt.Fprintf(&b, "    blocked_asns %s\n", strings.Join(cfg.BlockedASNs, " "))
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db %q\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "    bot_defense_level %s\n", cfg.BotDefenseLevel)
+	}
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots false\n")
+	} else if cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots true\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "    ai_bot_profile %s\n", cfg.AIBotProfile)
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots false\n")
+	} else if cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots true\n")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation false\n")
+	} else if cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation true\n")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients false\n")
+	} else if cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients true\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts false\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts true\n")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot false\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "    robots_txt_honeypot_secret %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
+	for _, ua := range cfg.BlockUserAgents {
+		fmt.Fprintf(&b, "    block_user_agents %q\n", ua)
+	}
+	for _, ua := range cfg.AllowUserAgents {
+		fmt.Fprintf(&b, "    allow_user_agents %q\n", ua)
+	}
+	for _, trap := range cfg.HoneypotTrapPaths {
+		fmt.Fprintf(&b, "    honeypot_trap_paths %q\n", trap)
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "    trap_ban_duration %s\n", cfg.TrapBanDuration)
 	}
 	for _, ip := range cfg.AllowedIPs {
 		fmt.Fprintf(&b, "    allowed_ips %s\n", ip)
@@ -1825,7 +2987,8 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.Response != nil {
 		hasExtended = cfg.Response.ContentType != "" || cfg.Response.RedirectURL != "" || cfg.Response.ProxyURL != "" ||
 			cfg.Response.GzipBombMB > 0 || cfg.Response.RetryAfterSeconds > 0 || cfg.Response.TarpitDelayMs > 0 ||
-			cfg.Response.TarpitMaxDurationSeconds > 0 || cfg.Response.StreamSizeMB > 0 || cfg.Response.Captcha != nil || len(cfg.Response.Headers) > 0
+			cfg.Response.TarpitMaxDurationSeconds > 0 || cfg.Response.StreamSizeMB > 0 || cfg.Response.Captcha != nil || len(cfg.Response.Headers) > 0 ||
+			cfg.Response.PoWDifficulty > 0 || cfg.Response.PoWSecret != "" || cfg.Response.PoWTimeoutSeconds > 0
 	}
 	if mode != "" || status != 403 || body != "" || hasExtended {
 		b.WriteString("    response {\n")
@@ -1862,6 +3025,15 @@ func (cfg *Config) GenerateCaddyfile() string {
 			}
 			if cfg.Response.StreamSizeMB > 0 {
 				fmt.Fprintf(&b, "        stream_size_mb %d\n", cfg.Response.StreamSizeMB)
+			}
+			if cfg.Response.PoWDifficulty > 0 {
+				fmt.Fprintf(&b, "        pow_difficulty %d\n", cfg.Response.PoWDifficulty)
+			}
+			if cfg.Response.PoWSecret != "" {
+				fmt.Fprintf(&b, "        pow_secret %q\n", cfg.Response.PoWSecret)
+			}
+			if cfg.Response.PoWTimeoutSeconds > 0 {
+				fmt.Fprintf(&b, "        pow_timeout_seconds %d\n", cfg.Response.PoWTimeoutSeconds)
 			}
 			if cfg.Response.Captcha != nil {
 				if cfg.Response.Captcha.Title != "" {
@@ -1928,8 +3100,78 @@ func (cfg *Config) GenerateNginxLua() string {
 		}
 		b.WriteString("},\n")
 	}
+	if cfg.BlockedASNs != nil {
+		b.WriteString("    blocked_asns = { ")
+		for _, asn := range cfg.BlockedASNs {
+			fmt.Fprintf(&b, "%q, ", asn)
+		}
+		b.WriteString("},\n")
+	}
 	if cfg.ASNDB != "" {
 		fmt.Fprintf(&b, "    asn_db = %q,\n", cfg.ASNDB)
+	}
+	if cfg.BotDefenseLevel != "" {
+		fmt.Fprintf(&b, "    bot_defense_level = %q,\n", cfg.BotDefenseLevel)
+	}
+	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots = false,\n")
+	} else if cfg.BlockAIBots {
+		b.WriteString("    block_ai_bots = true,\n")
+	}
+	if cfg.AIBotProfile != "" {
+		fmt.Fprintf(&b, "    ai_bot_profile = %q,\n", cfg.AIBotProfile)
+	}
+	if cfg.isExplicit("verifySearchEngineBots", "verify_search_engine_bots") && !cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots = false,\n")
+	} else if cfg.VerifySearchEngineBots {
+		b.WriteString("    verify_search_engine_bots = true,\n")
+	}
+	if cfg.isExplicit("detectBrowserImpersonation", "detect_browser_impersonation") && !cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation = false,\n")
+	} else if cfg.DetectBrowserImpersonation {
+		b.WriteString("    detect_browser_impersonation = true,\n")
+	}
+	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients = false,\n")
+	} else if cfg.BlockScriptClients {
+		b.WriteString("    block_script_clients = true,\n")
+	}
+	if cfg.isExplicit("blockCloudHosts", "block_cloud_hosts") && !cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts = false,\n")
+	} else if cfg.BlockCloudHosts {
+		b.WriteString("    block_cloud_hosts = true,\n")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot = false,\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot = true,\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "    robots_txt_honeypot_secret = %q,\n", cfg.RobotsTxtHoneypotSecret)
+	}
+	if len(cfg.BlockUserAgents) > 0 {
+		b.WriteString("    block_user_agents = {\n")
+		for _, ua := range cfg.BlockUserAgents {
+			fmt.Fprintf(&b, "        %q,\n", ua)
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.AllowUserAgents) > 0 {
+		b.WriteString("    allow_user_agents = {\n")
+		for _, ua := range cfg.AllowUserAgents {
+			fmt.Fprintf(&b, "        %q,\n", ua)
+		}
+		b.WriteString("    },\n")
+	}
+	if len(cfg.HoneypotTrapPaths) > 0 {
+		b.WriteString("    honeypot_trap_paths = {\n")
+		for _, trap := range cfg.HoneypotTrapPaths {
+			fmt.Fprintf(&b, "        %q,\n", trap)
+		}
+		b.WriteString("    },\n")
+	}
+	if cfg.TrapBanDuration != "" {
+		fmt.Fprintf(&b, "    trap_ban_duration = %q,\n", cfg.TrapBanDuration)
 	}
 	if len(cfg.AllowedIPs) > 0 {
 		b.WriteString("    allowed_ips = {\n")
@@ -2011,6 +3253,15 @@ func (cfg *Config) GenerateNginxLua() string {
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "        stream_size_mb = %d,\n", cfg.Response.StreamSizeMB)
 		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "        pow_difficulty = %d,\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "        pow_secret = %q,\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "        pow_timeout_seconds = %d,\n", cfg.Response.PoWTimeoutSeconds)
+		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("        captcha = {\n")
 			if cfg.Response.Captcha.Provider != "" {
@@ -2068,6 +3319,16 @@ func (cfg *Config) GenerateTCPWardenYAML() string {
 			b.WriteString("  allowed_asns:\n")
 		}
 		for _, asn := range cfg.AllowedASNs {
+			fmt.Fprintf(&b, "    - %q\n", asn)
+		}
+	}
+	if cfg.BlockedASNs != nil {
+		if len(cfg.BlockedASNs) == 0 {
+			b.WriteString("  blocked_asns: []\n")
+		} else {
+			b.WriteString("  blocked_asns:\n")
+		}
+		for _, asn := range cfg.BlockedASNs {
 			fmt.Fprintf(&b, "    - %q\n", asn)
 		}
 	}

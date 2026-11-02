@@ -28,7 +28,7 @@ var embeddedSchemaJSON string
 //go:embed tcp-warden.schema.json
 var embeddedTCPSchemaJSON string
 
-var version = "5.4.0"
+var version = "5.5.0"
 
 type stringSlice []string
 
@@ -542,9 +542,9 @@ func handleGenerate(args []string) {
 		os.Exit(1)
 	}
 
-	cfg := engine.CreateConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+	cfg, err := engine.ParseConfig(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing configuration: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -934,9 +934,9 @@ func handleValidate(args []string) {
 		return
 	}
 
-	cfg := engine.CreateConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration: %v\n", err)
+	cfg, err := engine.ParseConfig(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing configuration: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -993,6 +993,12 @@ func handleTest(args []string) {
 	fs.StringVar(configPath, "c", "", "Alias for --config")
 	checkQuery := fs.Bool("check-query", true, "Enable query string inspection")
 	checkBody := fs.Bool("check-body", false, "Enable request body inspection")
+	botDefenseLevel := fs.String("bot-defense-level", "", "Bot defense preset level (off, light, standard, strict, aggressive)")
+	blockAIBots := fs.Bool("block-ai-bots", false, "Enable AI bot blocking")
+	aiBotProfile := fs.String("ai-bot-profile", "", "AI bot profile (train_only, all, aggressive, custom)")
+	detectBrowser := fs.Bool("detect-browser-impersonation", false, "Enable browser impersonation detection")
+	blockScripts := fs.Bool("block-script-clients", false, "Enable script client and headless framework blocking")
+	verifySearch := fs.Bool("verify-search-engine-bots", false, "Enable search engine bot FCrDNS verification")
 
 	var headerList stringSlice
 	fs.Var(&headerList, "header", "Header in Key:Value format to test (repeatable)")
@@ -1053,6 +1059,29 @@ func handleTest(args []string) {
 			if f.Name == "check-body" {
 				bodyFlagPassed = true
 			}
+			if f.Name == "bot-defense-level" {
+				cfg.BotDefenseLevel = *botDefenseLevel
+			}
+			if f.Name == "block-ai-bots" {
+				cfg.BlockAIBots = *blockAIBots
+				cfg.MarkExplicit("blockAIBots")
+			}
+			if f.Name == "ai-bot-profile" {
+				cfg.AIBotProfile = *aiBotProfile
+				cfg.MarkExplicit("aiBotProfile")
+			}
+			if f.Name == "detect-browser-impersonation" {
+				cfg.DetectBrowserImpersonation = *detectBrowser
+				cfg.MarkExplicit("detectBrowserImpersonation")
+			}
+			if f.Name == "block-script-clients" {
+				cfg.BlockScriptClients = *blockScripts
+				cfg.MarkExplicit("blockScriptClients")
+			}
+			if f.Name == "verify-search-engine-bots" {
+				cfg.VerifySearchEngineBots = *verifySearch
+				cfg.MarkExplicit("verifySearchEngineBots")
+			}
 		})
 		if queryFlagPassed {
 			cfg.CheckQuery = *checkQuery
@@ -1063,6 +1092,27 @@ func handleTest(args []string) {
 	} else {
 		cfg.CheckQuery = *checkQuery
 		cfg.CheckBody = *checkBody
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "bot-defense-level":
+				cfg.BotDefenseLevel = *botDefenseLevel
+			case "block-ai-bots":
+				cfg.BlockAIBots = *blockAIBots
+				cfg.MarkExplicit("blockAIBots")
+			case "ai-bot-profile":
+				cfg.AIBotProfile = *aiBotProfile
+				cfg.MarkExplicit("aiBotProfile")
+			case "detect-browser-impersonation":
+				cfg.DetectBrowserImpersonation = *detectBrowser
+				cfg.MarkExplicit("detectBrowserImpersonation")
+			case "block-script-clients":
+				cfg.BlockScriptClients = *blockScripts
+				cfg.MarkExplicit("blockScriptClients")
+			case "verify-search-engine-bots":
+				cfg.VerifySearchEngineBots = *verifySearch
+				cfg.MarkExplicit("verifySearchEngineBots")
+			}
+		})
 	}
 
 	if *testBody != "" && !cfg.CheckBody && len(cfg.CheckBodyPatterns) == 0 {
@@ -1076,7 +1126,9 @@ func handleTest(args []string) {
 			hdrKey := strings.TrimSpace(parts[0])
 			hdrVal := strings.TrimSpace(parts[1])
 			headers[hdrKey] = hdrVal
-			cfg.CheckHeaders = append(cfg.CheckHeaders, hdrKey)
+			if *configPath == "" && !strings.EqualFold(hdrKey, "user-agent") && !strings.EqualFold(hdrKey, "accept-language") && !strings.EqualFold(hdrKey, "accept-encoding") {
+				cfg.CheckHeaders = append(cfg.CheckHeaders, hdrKey)
+			}
 		}
 	}
 

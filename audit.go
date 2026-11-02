@@ -41,9 +41,9 @@ func handleAudit(args []string) {
 		os.Exit(1)
 	}
 
-	cfg := engine.CreateConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON configuration %s: %v\n", filename, err)
+	cfg, err := engine.ParseConfig(data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing configuration %s: %v\n", filename, err)
 		os.Exit(1)
 	}
 

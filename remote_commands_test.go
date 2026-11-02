@@ -18,6 +18,13 @@ func newLocalTestServer(t *testing.T, handler http.Handler) *httptest.Server {
 		t.Skipf("skipping test in sandbox: socket bind not permitted: %v", err)
 		return nil
 	}
+	conn, err := net.Dial("tcp4", l.Addr().String())
+	if err != nil {
+		l.Close()
+		t.Skipf("skipping test in sandbox: loopback dial not permitted: %v", err)
+		return nil
+	}
+	conn.Close()
 	ts := httptest.NewUnstartedServer(handler)
 	ts.Listener = l
 	ts.Start()
