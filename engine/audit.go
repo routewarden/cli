@@ -422,6 +422,12 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		"markov_tarpit":        true,
 		"markov":               true,
 		"tokenbleed":           true,
+		"powchallenge":         true,
+		"pow_challenge":        true,
+		"pow":                  true,
+		"proofofwork":          true,
+		"proof_of_work":        true,
+		"hashcash":             true,
 		"custom":               true,
 		"default":              true,
 	}
@@ -433,7 +439,7 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 				Title:       "Unrecognized Response Mode",
 				Message:     fmt.Sprintf("Mode %q is not a recognized RouteWarden response mode.", m),
 				Field:       fieldName,
-				Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'proxy', 'infiniteStream', 'xml', 'aiPoison', or 'markovTarpit'.",
+				Remediation: "Use one of: 'text', 'json', 'html', 'captcha', 'redirect', 'silentDrop', 'gzipBomb', 'tarpit', 'fakeSuccess', 'rateLimitChallenge', 'powChallenge', 'proxy', 'infiniteStream', 'xml', 'aiPoison', or 'markovTarpit'.",
 			})
 		}
 	}
@@ -744,6 +750,22 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 			Message:     "blockCloudHosts is enabled without verifySearchEngineBots. Genuine search engine crawlers operating from cloud hosting infrastructure (e.g. Googlebot on AS15169, Bingbot on AS8075) may be blocked.",
 			Field:       "verifySearchEngineBots",
 			Remediation: "Enable verifySearchEngineBots to permit genuine verified search engine crawlers while blocking unauthorized cloud host scrapers.",
+		})
+	}
+
+	// ── Rule RW-A033: Unrecommended PoW Challenge Difficulty Check ──────────
+	powDiff := 0
+	if cfg.Response != nil {
+		powDiff = cfg.Response.PoWDifficulty
+	}
+	if powDiff != 0 && (powDiff < 8 || powDiff > 24) {
+		report.Issues = append(report.Issues, AuditIssue{
+			Code:        "RW-A033",
+			Severity:    SeverityWarning,
+			Title:       "Unrecommended PoW Challenge Difficulty",
+			Message:     fmt.Sprintf("PoW difficulty %d is outside the recommended range (8-24). Difficulties below 8 provide trivial deterrence against automated crawlers, while difficulties above 24 cause unacceptable client-side CPU exhaustion (>1-2s in browser).", powDiff),
+			Field:       "response.powDifficulty",
+			Remediation: "Set response.powDifficulty to a balanced value between 12 and 18 (default is 16, requiring ~65,536 hashes, taking ~25ms in browser).",
 		})
 	}
 

@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -222,6 +223,29 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	}
 	if baseBody != candBody {
 		diff.Properties["response.body"] = ScalarDiff{Old: baseBody, New: candBody}
+	}
+
+	var basePoWDiff, candPoWDiff int
+	var basePoWSec, candPoWSec string
+	var basePoWTimeout, candPoWTimeout int
+	if base.Response != nil {
+		basePoWDiff = base.Response.PoWDifficulty
+		basePoWSec = base.Response.PoWSecret
+		basePoWTimeout = base.Response.PoWTimeoutSeconds
+	}
+	if candidate.Response != nil {
+		candPoWDiff = candidate.Response.PoWDifficulty
+		candPoWSec = candidate.Response.PoWSecret
+		candPoWTimeout = candidate.Response.PoWTimeoutSeconds
+	}
+	if basePoWDiff != candPoWDiff {
+		diff.Properties["response.powDifficulty"] = ScalarDiff{Old: strconv.Itoa(basePoWDiff), New: strconv.Itoa(candPoWDiff)}
+	}
+	if basePoWSec != candPoWSec {
+		diff.Properties["response.powSecret"] = ScalarDiff{Old: "***", New: "***"}
+	}
+	if basePoWTimeout != candPoWTimeout {
+		diff.Properties["response.powTimeoutSeconds"] = ScalarDiff{Old: strconv.Itoa(basePoWTimeout), New: strconv.Itoa(candPoWTimeout)}
 	}
 
 	// ── Evaluate List Changes on Security Posture ───────────────────────────

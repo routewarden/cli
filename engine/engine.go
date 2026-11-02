@@ -72,6 +72,9 @@ type ResponseConfig struct {
 	TarpitDelayMs            int               `json:"tarpitDelayMs,omitempty"`
 	TarpitMaxDurationSeconds int               `json:"tarpitMaxDurationSeconds,omitempty"`
 	StreamSizeMB             int               `json:"streamSizeMB,omitempty"`
+	PoWDifficulty            int               `json:"powDifficulty,omitempty" yaml:"powDifficulty,omitempty"`
+	PoWSecret                string            `json:"powSecret,omitempty" yaml:"powSecret,omitempty"`
+	PoWTimeoutSeconds        int               `json:"powTimeoutSeconds,omitempty" yaml:"powTimeoutSeconds,omitempty"`
 }
 
 // Config holds the RouteWarden configuration.
@@ -218,6 +221,12 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 		StreamSizeMB                  int               `json:"streamSizeMB"`
 		StreamSizeMBSnake             int               `json:"stream_size_mb"`
 		StreamSizeMb                  int               `json:"streamSizeMb"`
+		PoWDifficulty                 int               `json:"powDifficulty"`
+		PoWDifficultySnake            int               `json:"pow_difficulty"`
+		PoWSecret                     string            `json:"powSecret"`
+		PoWSecretSnake                string            `json:"pow_secret"`
+		PoWTimeoutSeconds             int               `json:"powTimeoutSeconds"`
+		PoWTimeoutSecondsSnake        int               `json:"pow_timeout_seconds"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -274,6 +283,21 @@ func (r *ResponseConfig) UnmarshalJSON(data []byte) error {
 		r.StreamSizeMB = raw.StreamSizeMBSnake
 	} else if raw.StreamSizeMb != 0 {
 		r.StreamSizeMB = raw.StreamSizeMb
+	}
+	if raw.PoWDifficulty != 0 {
+		r.PoWDifficulty = raw.PoWDifficulty
+	} else if raw.PoWDifficultySnake != 0 {
+		r.PoWDifficulty = raw.PoWDifficultySnake
+	}
+	if raw.PoWSecret != "" {
+		r.PoWSecret = raw.PoWSecret
+	} else {
+		r.PoWSecret = raw.PoWSecretSnake
+	}
+	if raw.PoWTimeoutSeconds != 0 {
+		r.PoWTimeoutSeconds = raw.PoWTimeoutSeconds
+	} else if raw.PoWTimeoutSecondsSnake != 0 {
+		r.PoWTimeoutSeconds = raw.PoWTimeoutSecondsSnake
 	}
 	return nil
 }
@@ -1338,6 +1362,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 				"tarpit": {}, "fakesuccess": {}, "ratelimit": {}, "ratelimitchallenge": {},
 				"proxy": {}, "infinitestream": {}, "garbagestream": {}, "xml": {},
 				"aipoison": {}, "poison": {}, "markovtarpit": {}, "markov": {}, "tokenbleed": {},
+				"powchallenge": {}, "pow_challenge": {}, "pow": {}, "proofofwork": {}, "proof_of_work": {}, "hashcash": {},
 			}
 			if _, ok := validModes[strings.ToLower(cfg.Response.Mode)]; !ok {
 				return nil, fmt.Errorf("unsupported response.mode %q", cfg.Response.Mode)
@@ -1445,6 +1470,7 @@ type EvaluationResult struct {
 	Allowed           bool
 	Bypassed          bool
 	Blocked           bool
+	PoWVerified       bool
 	CandidatePaths    []string
 	MatchedPattern    string
 	MatchedTarget     string
@@ -1552,6 +1578,28 @@ func (e *Engine) SetFCrDNSLookupFuncs(
 	}
 }
 
+func extractPoWToken(headers map[string]string) string {
+	if headers == nil {
+		return ""
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "X-RW-PoW") && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "Cookie") && strings.TrimSpace(v) != "" {
+			for _, part := range strings.Split(v, ";") {
+				part = strings.TrimSpace(part)
+				if strings.HasPrefix(part, "__rw_pow=") {
+					return strings.TrimPrefix(part, "__rw_pow=")
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // EvaluateWithBody inspects a simulated request against compiled rules including client IP and body check.
 func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, headers map[string]string, clientIPStr string, body string) *EvaluationResult {
 	result := &EvaluationResult{
@@ -1627,6 +1675,38 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		return result
 	}
 
+	// Check PoW solution cookie (__rw_pow) or header (X-RW-PoW)
+	powToken := extractPoWToken(headers)
+	isPoWValid := false
+	if powToken != "" {
+		powSecret := DefaultPoWSecret
+		powTimeout := DefaultPoWTimeoutSeconds
+		if e.Config.Response != nil {
+			if e.Config.Response.PoWSecret != "" {
+				powSecret = e.Config.Response.PoWSecret
+			}
+			if e.Config.Response.PoWTimeoutSeconds > 0 {
+				powTimeout = e.Config.Response.PoWTimeoutSeconds
+			}
+		}
+		isPoWValid, _ = VerifyPoWSolution(effectiveIPStr, powSecret, powToken, powTimeout, time.Now())
+	}
+
+	block := func(reason, pattern, target string) *EvaluationResult {
+		if isPoWValid {
+			result.Allowed = true
+			result.PoWVerified = true
+			result.Reason = "pow_verified"
+			return result
+		}
+		result.Allowed = false
+		result.Blocked = true
+		result.Reason = reason
+		result.MatchedPattern = pattern
+		result.MatchedTarget = target
+		return result
+	}
+
 	// User-Agent & AI Bot check
 	ua := ""
 	if headers != nil {
@@ -1649,12 +1729,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	if !uaAllowed && e.FCrDNS != nil && e.Config.VerifySearchEngineBots {
 		if claimsBot, engine := DetectSearchEngineBot(ua); claimsBot {
 			if !e.FCrDNS.Verify(context.Background(), effectiveIPStr, engine) {
-				result.Allowed = false
-				result.Blocked = true
-				result.Reason = "search_engine_spoofed"
-				result.MatchedPattern = string(engine) + "_spoofed"
-				result.MatchedTarget = ua
-				return result
+				return block("search_engine_spoofed", string(engine)+"_spoofed", ua)
 			}
 			uaAllowed = true
 		}
@@ -1664,56 +1739,31 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		if ua != "" {
 			for _, re := range e.BlockUARegexes {
 				if re.MatchString(ua) {
-					result.Allowed = false
-					result.Blocked = true
-					result.Reason = "user_agent_blocked"
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = ua
-					return result
+					return block("user_agent_blocked", re.String(), ua)
 				}
 			}
 			if e.Config.BlockAIBots {
 				if matched, botType := MatchAIBot(ua, e.Config.AIBotProfile); matched {
-					result.Allowed = false
-					result.Blocked = true
-					result.Reason = "ai_bot_blocked"
-					result.MatchedPattern = botType
-					result.MatchedTarget = ua
-					return result
+					return block("ai_bot_blocked", botType, ua)
 				}
 			}
 
 			if e.Config.DetectBrowserImpersonation {
 				if isSpoofed, reason := DetectBrowserImpersonation(ua, headers); isSpoofed {
-					result.Allowed = false
-					result.Blocked = true
-					result.Reason = "browser_spoofed"
-					result.MatchedPattern = reason
-					result.MatchedTarget = ua
-					return result
+					return block("browser_spoofed", reason, ua)
 				}
 			}
 		} else {
 			for _, re := range e.BlockUARegexes {
 				if re.MatchString("") {
-					result.Allowed = false
-					result.Blocked = true
-					result.Reason = "user_agent_blocked"
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = "[empty]"
-					return result
+					return block("user_agent_blocked", re.String(), "[empty]")
 				}
 			}
 		}
 
 		if e.Config.BlockScriptClients {
 			if isScript, clientType := DetectScriptClient(ua, headers); isScript {
-				result.Allowed = false
-				result.Blocked = true
-				result.Reason = "script_client_blocked"
-				result.MatchedPattern = clientType
-				result.MatchedTarget = ua
-				return result
+				return block("script_client_blocked", clientType, ua)
 			}
 		}
 	}
@@ -1781,16 +1831,11 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	// Datacenter & Cloud Hosting IP Classifier
 	if !uaAllowed && e.Config.BlockCloudHosts && e.ASN != nil {
 		if isCloud, cloudASN, provider := e.ASN.IsCloudHost(asnIP); isCloud {
-			result.Allowed = false
-			result.Blocked = true
+			reason := "cloud_host_blocked"
 			if reBrowserLike.MatchString(ua) {
-				result.Reason = "datacenter_browser_impersonation"
-			} else {
-				result.Reason = "cloud_host_blocked"
+				reason = "datacenter_browser_impersonation"
 			}
-			result.MatchedPattern = fmt.Sprintf("AS%d (%s)", cloudASN, provider)
-			result.MatchedTarget = asnIP
-			return result
+			return block(reason, fmt.Sprintf("AS%d (%s)", cloudASN, provider), asnIP)
 		}
 	}
 
@@ -1798,11 +1843,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	for _, p := range candidatePaths {
 		for _, re := range e.BlockRegexes {
 			if re.MatchString(p) {
-				result.Blocked = true
-				result.MatchedPattern = re.String()
-				result.MatchedTarget = p
-				result.Reason = "path_blocked"
-				return result
+				return block("path_blocked", re.String(), p)
 			}
 		}
 	}
@@ -1843,11 +1884,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, q := range queryCandidates {
 			for _, re := range e.BlockRegexes {
 				if re.MatchString(q) {
-					result.Blocked = true
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = q
-					result.Reason = "query_blocked"
-					return result
+					return block("query_blocked", re.String(), q)
 				}
 			}
 		}
@@ -1889,11 +1926,7 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 						for _, hc := range hdrCandidates {
 							for _, re := range e.BlockRegexes {
 								if re.MatchString(hc) {
-									result.Blocked = true
-									result.MatchedPattern = re.String()
-									result.MatchedTarget = hc
-									result.Reason = "header_blocked"
-									return result
+									return block("header_blocked", re.String(), hc)
 								}
 							}
 						}
@@ -1983,17 +2016,16 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 		for _, bCand := range bodyCandidates {
 			for _, re := range patternsToCheck {
 				if re.MatchString(bCand) {
-					result.Blocked = true
-					result.MatchedPattern = re.String()
-					result.MatchedTarget = "[body payload]"
-					result.Reason = "body_blocked"
-					return result
+					return block("body_blocked", re.String(), "[body payload]")
 				}
 			}
 		}
 	}
 
 	result.Allowed = true
+	if isPoWValid {
+		result.PoWVerified = true
+	}
 	result.Reason = "passed_inspection"
 	return result
 }
@@ -2061,6 +2093,8 @@ func (cfg *Config) ResolveResponse() (string, int, string) {
 		case "markovtarpit", "markov_tarpit", "markov", "tokenbleed":
 			status = 200
 		case "ratelimit", "ratelimitchallenge", "backoff":
+			status = 429
+		case "powchallenge", "pow_challenge", "pow", "proofofwork", "proof_of_work", "hashcash":
 			status = 429
 		case "redirect":
 			status = 302
@@ -2287,6 +2321,15 @@ func (cfg *Config) GenerateTraefikYAML() string {
 		}
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "            streamSizeMB: %d\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "            powDifficulty: %d\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "            powSecret: %q\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "            powTimeoutSeconds: %d\n", cfg.Response.PoWTimeoutSeconds)
 		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("            captcha:\n")
@@ -2573,6 +2616,15 @@ func (cfg *Config) GenerateTraefikTOML() string {
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "  streamSizeMB = %d\n", cfg.Response.StreamSizeMB)
 		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "  powDifficulty = %d\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "  powSecret = %q\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "  powTimeoutSeconds = %d\n", cfg.Response.PoWTimeoutSeconds)
+		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("\n[http.middlewares.routewarden.plugin.routewarden.response.captcha]\n")
 			if cfg.Response.Captcha.Provider != "" {
@@ -2778,6 +2830,16 @@ func (cfg *Config) GenerateTraefikLabels() string {
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.streamSizeMB=%d\"\n", cfg.Response.StreamSizeMB)
 		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powDifficulty=%d\"\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			esc := strings.ReplaceAll(strings.ReplaceAll(cfg.Response.PoWSecret, "\r", ""), "\n", "")
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powSecret=%s\"\n", esc)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.powTimeoutSeconds=%d\"\n", cfg.Response.PoWTimeoutSeconds)
+		}
 		if cfg.Response.Captcha != nil {
 			if cfg.Response.Captcha.Provider != "" {
 				fmt.Fprintf(&b, "  - \"traefik.http.middlewares.warden.plugin.routewarden.response.captcha.provider=%s\"\n", cfg.Response.Captcha.Provider)
@@ -2925,7 +2987,8 @@ func (cfg *Config) GenerateCaddyfile() string {
 	if cfg.Response != nil {
 		hasExtended = cfg.Response.ContentType != "" || cfg.Response.RedirectURL != "" || cfg.Response.ProxyURL != "" ||
 			cfg.Response.GzipBombMB > 0 || cfg.Response.RetryAfterSeconds > 0 || cfg.Response.TarpitDelayMs > 0 ||
-			cfg.Response.TarpitMaxDurationSeconds > 0 || cfg.Response.StreamSizeMB > 0 || cfg.Response.Captcha != nil || len(cfg.Response.Headers) > 0
+			cfg.Response.TarpitMaxDurationSeconds > 0 || cfg.Response.StreamSizeMB > 0 || cfg.Response.Captcha != nil || len(cfg.Response.Headers) > 0 ||
+			cfg.Response.PoWDifficulty > 0 || cfg.Response.PoWSecret != "" || cfg.Response.PoWTimeoutSeconds > 0
 	}
 	if mode != "" || status != 403 || body != "" || hasExtended {
 		b.WriteString("    response {\n")
@@ -2962,6 +3025,15 @@ func (cfg *Config) GenerateCaddyfile() string {
 			}
 			if cfg.Response.StreamSizeMB > 0 {
 				fmt.Fprintf(&b, "        stream_size_mb %d\n", cfg.Response.StreamSizeMB)
+			}
+			if cfg.Response.PoWDifficulty > 0 {
+				fmt.Fprintf(&b, "        pow_difficulty %d\n", cfg.Response.PoWDifficulty)
+			}
+			if cfg.Response.PoWSecret != "" {
+				fmt.Fprintf(&b, "        pow_secret %q\n", cfg.Response.PoWSecret)
+			}
+			if cfg.Response.PoWTimeoutSeconds > 0 {
+				fmt.Fprintf(&b, "        pow_timeout_seconds %d\n", cfg.Response.PoWTimeoutSeconds)
 			}
 			if cfg.Response.Captcha != nil {
 				if cfg.Response.Captcha.Title != "" {
@@ -3180,6 +3252,15 @@ func (cfg *Config) GenerateNginxLua() string {
 		}
 		if cfg.Response.StreamSizeMB > 0 {
 			fmt.Fprintf(&b, "        stream_size_mb = %d,\n", cfg.Response.StreamSizeMB)
+		}
+		if cfg.Response.PoWDifficulty > 0 {
+			fmt.Fprintf(&b, "        pow_difficulty = %d,\n", cfg.Response.PoWDifficulty)
+		}
+		if cfg.Response.PoWSecret != "" {
+			fmt.Fprintf(&b, "        pow_secret = %q,\n", cfg.Response.PoWSecret)
+		}
+		if cfg.Response.PoWTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "        pow_timeout_seconds = %d,\n", cfg.Response.PoWTimeoutSeconds)
 		}
 		if cfg.Response.Captcha != nil {
 			b.WriteString("        captcha = {\n")

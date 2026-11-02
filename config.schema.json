@@ -203,7 +203,13 @@
         "infiniteStream",
         "xml",
         "aiPoison",
-        "markovTarpit"
+        "markovTarpit",
+        "powChallenge",
+        "pow_challenge",
+        "pow",
+        "proofOfWork",
+        "proof_of_work",
+        "hashcash"
       ],
       "description": "Shorthand alias for response.mode action."
     },
@@ -478,7 +484,13 @@
             "infiniteStream",
             "xml",
             "aiPoison",
-            "markovTarpit"
+            "markovTarpit",
+            "powChallenge",
+            "pow_challenge",
+            "pow",
+            "proofOfWork",
+            "proof_of_work",
+            "hashcash"
           ],
           "description": "Response action when a request is blocked."
         },
@@ -591,6 +603,40 @@
           "default": 100,
           "minimum": 1,
           "description": "Maximum payload size in megabytes for infiniteStream mode (snake_case alias)."
+        },
+        "powDifficulty": {
+          "type": "integer",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Proof-of-work zero-bit difficulty target for powChallenge mode."
+        },
+        "pow_difficulty": {
+          "type": "integer",
+          "default": 16,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Proof-of-work zero-bit difficulty target for powChallenge mode (snake_case alias)."
+        },
+        "powSecret": {
+          "type": "string",
+          "description": "Cryptographic HMAC secret used to sign proof-of-work challenges."
+        },
+        "pow_secret": {
+          "type": "string",
+          "description": "Cryptographic HMAC secret used to sign proof-of-work challenges (snake_case alias)."
+        },
+        "powTimeoutSeconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Validity window in seconds for proof-of-work challenges and solution tokens."
+        },
+        "pow_timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "description": "Validity window in seconds for proof-of-work challenges and solution tokens (snake_case alias)."
         }
       }
     },
