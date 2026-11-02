@@ -515,3 +515,37 @@ func TestAuditConfig_SearchEngineVerificationAdvisory(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditConfig_RobotsTxtHoneypotValidation(t *testing.T) {
+	// Case 1: Shadowed trap warning (RW-A031)
+	cfgShadow := CreateConfig()
+	cfgShadow.EnableRobotsTxtHoneypot = true
+	cfgShadow.AllowPatterns = []string{"^/_rw_trap_.*$"}
+	repShadow := AuditConfig(cfgShadow, "shadowed.json")
+
+	found31 := false
+	for _, issue := range repShadow.Issues {
+		if issue.Code == "RW-A031" {
+			found31 = true
+			if issue.Severity != SeverityWarning {
+				t.Errorf("expected RW-A031 to be SeverityWarning, got %v", issue.Severity)
+			}
+			break
+		}
+	}
+	if !found31 {
+		t.Errorf("expected RW-A031 warning when allowPattern shadows '/_rw_trap_'")
+	}
+
+	// Case 2: Clean configuration -> No RW-A031
+	cfgClean := CreateConfig()
+	cfgClean.EnableRobotsTxtHoneypot = true
+	cfgClean.AllowPatterns = []string{"^/api/health$"}
+	repClean := AuditConfig(cfgClean, "clean.json")
+
+	for _, issue := range repClean.Issues {
+		if issue.Code == "RW-A031" {
+			t.Errorf("unexpected RW-A031 for clean config: %s", issue.Message)
+		}
+	}
+}

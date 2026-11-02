@@ -373,6 +373,24 @@
       },
       "description": "Hidden spider trap endpoints (snake_case alias)."
     },
+    "enableRobotsTxtHoneypot": {
+      "type": "boolean",
+      "default": false,
+      "description": "Dynamically inject deterministic daily rotating Disallow honeypot trap entries into /robots.txt and ban scrapers that request them."
+    },
+    "enable_robots_txt_honeypot": {
+      "type": "boolean",
+      "default": false,
+      "description": "Dynamically inject deterministic daily rotating Disallow honeypot trap entries into /robots.txt (snake_case alias)."
+    },
+    "robotsTxtHoneypotSecret": {
+      "type": "string",
+      "description": "Secret seed used to derive deterministic HMAC-SHA256 daily rotating honeypot tokens for robots.txt injection."
+    },
+    "robots_txt_honeypot_secret": {
+      "type": "string",
+      "description": "Secret seed used to derive deterministic HMAC-SHA256 daily rotating honeypot tokens (snake_case alias)."
+    },
     "trapBanDuration": {
       "type": "string",
       "default": "24h",

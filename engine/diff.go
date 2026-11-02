@@ -271,6 +271,12 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 	if len(diff.HoneypotTrapPaths.Removed) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("RELAXED: %d honeypot trap path(s) were removed.", len(diff.HoneypotTrapPaths.Removed)))
 	}
+	if !base.EnableRobotsTxtHoneypot && candidate.EnableRobotsTxtHoneypot {
+		diff.ImpactReasons = append(diff.ImpactReasons, "HARDENED: Dynamic robots.txt honeypot trap injection was enabled.")
+	}
+	if base.EnableRobotsTxtHoneypot && !candidate.EnableRobotsTxtHoneypot {
+		diff.ImpactReasons = append(diff.ImpactReasons, "RELAXED: Dynamic robots.txt honeypot trap injection was disabled.")
+	}
 
 	if len(diff.CheckHeaders.Added) > 0 {
 		diff.ImpactReasons = append(diff.ImpactReasons, fmt.Sprintf("HARDENED: %d monitored header(s) were added: %s", len(diff.CheckHeaders.Added), strings.Join(diff.CheckHeaders.Added, ", ")))
@@ -312,6 +318,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(base.DetectBrowserImpersonation && !candidate.DetectBrowserImpersonation) ||
 		(base.BlockScriptClients && !candidate.BlockScriptClients) ||
 		(base.VerifySearchEngineBots && !candidate.VerifySearchEngineBots) ||
+		(base.EnableRobotsTxtHoneypot && !candidate.EnableRobotsTxtHoneypot) ||
 		len(diff.BlockPatterns.Removed) > 0 ||
 		len(diff.CheckBodyPatterns.Removed) > 0 ||
 		len(diff.BlockedASNs.Removed) > 0 ||
@@ -333,6 +340,7 @@ func DiffConfigs(base, candidate *Config, baseName, candidateName string) *Polic
 		(!base.DetectBrowserImpersonation && candidate.DetectBrowserImpersonation) ||
 		(!base.BlockScriptClients && candidate.BlockScriptClients) ||
 		(!base.VerifySearchEngineBots && candidate.VerifySearchEngineBots) ||
+		(!base.EnableRobotsTxtHoneypot && candidate.EnableRobotsTxtHoneypot) ||
 		len(diff.BlockPatterns.Added) > 0 ||
 		len(diff.CheckBodyPatterns.Added) > 0 ||
 		len(diff.BlockedASNs.Added) > 0 ||

@@ -96,6 +96,8 @@ type Config struct {
 	BlockUserAgents            []string        `json:"blockUserAgents,omitempty"`
 	AllowUserAgents            []string        `json:"allowUserAgents,omitempty"`
 	HoneypotTrapPaths          []string        `json:"honeypotTrapPaths,omitempty"`
+	EnableRobotsTxtHoneypot    bool            `json:"enableRobotsTxtHoneypot,omitempty"`
+	RobotsTxtHoneypotSecret    string          `json:"robotsTxtHoneypotSecret,omitempty"`
 	TrapBanDuration            string          `json:"trapBanDuration,omitempty"`
 	AllowedIPs                 []string        `json:"allowedIps,omitempty"`
 	TrustedProxies             []string        `json:"trustedProxies,omitempty"`
@@ -314,6 +316,10 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		AllowUserAgentsSnake            []string        `json:"allow_user_agents"`
 		HoneypotTrapPaths               []string        `json:"honeypotTrapPaths"`
 		HoneypotTrapPathsSnake          []string        `json:"honeypot_trap_paths"`
+		EnableRobotsTxtHoneypot         *bool           `json:"enableRobotsTxtHoneypot"`
+		EnableRobotsTxtHoneypotSnake    *bool           `json:"enable_robots_txt_honeypot"`
+		RobotsTxtHoneypotSecret         *string         `json:"robotsTxtHoneypotSecret"`
+		RobotsTxtHoneypotSecretSnake    *string         `json:"robots_txt_honeypot_secret"`
 		TrapBanDuration                 string          `json:"trapBanDuration"`
 		TrapBanDurationSnake            string          `json:"trap_ban_duration"`
 		AllowedIPs                      []string        `json:"allowedIps"`
@@ -480,6 +486,18 @@ func (cfg *Config) UnmarshalJSON(data []byte) error {
 		cfg.HoneypotTrapPaths = raw.HoneypotTrapPaths
 	} else if raw.HoneypotTrapPathsSnake != nil {
 		cfg.HoneypotTrapPaths = raw.HoneypotTrapPathsSnake
+	}
+
+	if raw.EnableRobotsTxtHoneypot != nil {
+		cfg.EnableRobotsTxtHoneypot = *raw.EnableRobotsTxtHoneypot
+	} else if raw.EnableRobotsTxtHoneypotSnake != nil {
+		cfg.EnableRobotsTxtHoneypot = *raw.EnableRobotsTxtHoneypotSnake
+	}
+
+	if raw.RobotsTxtHoneypotSecret != nil {
+		cfg.RobotsTxtHoneypotSecret = *raw.RobotsTxtHoneypotSecret
+	} else if raw.RobotsTxtHoneypotSecretSnake != nil {
+		cfg.RobotsTxtHoneypotSecret = *raw.RobotsTxtHoneypotSecretSnake
 	}
 
 	if raw.TrapBanDuration != "" {
@@ -1051,6 +1069,12 @@ func NewEngine(cfg *Config) (*Engine, error) {
 		if len(cfg.HoneypotTrapPaths) > 0 {
 			fileCfg.HoneypotTrapPaths = cfg.HoneypotTrapPaths
 		}
+		if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") || cfg.EnableRobotsTxtHoneypot {
+			fileCfg.EnableRobotsTxtHoneypot = cfg.EnableRobotsTxtHoneypot
+		}
+		if cfg.isExplicit("robotsTxtHoneypotSecret", "robots_txt_honeypot_secret") || cfg.RobotsTxtHoneypotSecret != "" {
+			fileCfg.RobotsTxtHoneypotSecret = cfg.RobotsTxtHoneypotSecret
+		}
 		if cfg.TrapBanDuration != "" {
 			fileCfg.TrapBanDuration = cfg.TrapBanDuration
 		}
@@ -1376,7 +1400,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 	var banTable *BanTable
 	banDuration := ParseBanDuration(cfg.TrapBanDuration)
-	if len(cfg.HoneypotTrapPaths) > 0 {
+	if len(cfg.HoneypotTrapPaths) > 0 || cfg.EnableRobotsTxtHoneypot {
 		banTable = NewBanTable(10000)
 	}
 
@@ -1406,13 +1430,14 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 // EvaluationResult represents the inspection outcome of a request.
 type EvaluationResult struct {
-	Allowed        bool
-	Bypassed       bool
-	Blocked        bool
-	CandidatePaths []string
-	MatchedPattern string
-	MatchedTarget  string
-	Reason         string
+	Allowed           bool
+	Bypassed          bool
+	Blocked           bool
+	CandidatePaths    []string
+	MatchedPattern    string
+	MatchedTarget     string
+	Reason            string
+	InjectedRobotsTxt string
 }
 
 // Evaluate inspects a simulated request against compiled rules without client IP.
@@ -1684,10 +1709,19 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 	candidatePaths := ExtractCandidatePaths("", requestPath, requestPath)
 	result.CandidatePaths = candidatePaths
 
-	// Honeypot spider trap check
+	// Honeypot spider trap check (static and dynamic robots.txt traps)
+	var activeTraps []string
 	if len(e.Config.HoneypotTrapPaths) > 0 {
+		activeTraps = append(activeTraps, e.Config.HoneypotTrapPaths...)
+	}
+	if e.Config.EnableRobotsTxtHoneypot {
+		_, dynPrefixes := GetActiveRobotsHoneypotTraps(e.Config.RobotsTxtHoneypotSecret, time.Now())
+		activeTraps = append(activeTraps, dynPrefixes...)
+	}
+
+	if len(activeTraps) > 0 {
 		for _, p := range candidatePaths {
-			for _, trapPath := range e.Config.HoneypotTrapPaths {
+			for _, trapPath := range activeTraps {
 				cleanTrap := strings.TrimSpace(trapPath)
 				if cleanTrap != "" && !strings.HasPrefix(cleanTrap, "/") {
 					cleanTrap = "/" + cleanTrap
@@ -1723,6 +1757,10 @@ func (e *Engine) EvaluateWithBody(method, requestPath, queryString string, heade
 				result.MatchedPattern = re.String()
 				result.MatchedTarget = p
 				result.Reason = "path_allowed"
+				if e.Config.EnableRobotsTxtHoneypot && IsRobotsTxtPath(p) {
+					activeTrap, _ := GetActiveRobotsHoneypotTraps(e.Config.RobotsTxtHoneypotSecret, time.Now())
+					result.InjectedRobotsTxt = string(InjectRobotsTxtTrap(nil, activeTrap))
+				}
 				return result
 			}
 		}
@@ -2106,6 +2144,15 @@ func (cfg *Config) GenerateTraefikYAML() string {
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseYAML = append(explicitFalseYAML, "blockScriptClients")
 	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseYAML = append(explicitFalseYAML, "enableRobotsTxtHoneypot")
+	}
+	if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("          enableRobotsTxtHoneypot: true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "          robotsTxtHoneypotSecret: %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
 	if len(explicitFalseYAML) > 0 {
 		b.WriteString("          explicitFields:\n")
 		for _, ef := range explicitFalseYAML {
@@ -2326,6 +2373,14 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("  blockScriptClients = true\n")
 	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  enableRobotsTxtHoneypot = false\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  enableRobotsTxtHoneypot = true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "  robotsTxtHoneypotSecret = %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
 	var explicitFalseTOML []string
 	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
 		explicitFalseTOML = append(explicitFalseTOML, "blockAIBots")
@@ -2338,6 +2393,9 @@ func (cfg *Config) GenerateTraefikTOML() string {
 	}
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseTOML = append(explicitFalseTOML, "blockScriptClients")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseTOML = append(explicitFalseTOML, "enableRobotsTxtHoneypot")
 	}
 	if len(explicitFalseTOML) > 0 {
 		var quoted []string
@@ -2566,6 +2624,14 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.blockScriptClients=true\"\n")
 	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableRobotsTxtHoneypot=false\"\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("  - \"traefik.http.middlewares.warden.plugin.routewarden.enableRobotsTxtHoneypot=true\"\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.robotsTxtHoneypotSecret="+cfg.RobotsTxtHoneypotSecret)
+	}
 	var explicitFalseLabels []string
 	if cfg.isExplicit("blockAIBots", "block_ai_bots") && !cfg.BlockAIBots {
 		explicitFalseLabels = append(explicitFalseLabels, "blockAIBots")
@@ -2578,6 +2644,9 @@ func (cfg *Config) GenerateTraefikLabels() string {
 	}
 	if cfg.isExplicit("blockScriptClients", "block_script_clients") && !cfg.BlockScriptClients {
 		explicitFalseLabels = append(explicitFalseLabels, "blockScriptClients")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		explicitFalseLabels = append(explicitFalseLabels, "enableRobotsTxtHoneypot")
 	}
 	if len(explicitFalseLabels) > 0 {
 		fmt.Fprintf(&b, "  - %q\n", "traefik.http.middlewares.warden.plugin.routewarden.explicitFields="+strings.Join(explicitFalseLabels, ","))
@@ -2765,6 +2834,14 @@ func (cfg *Config) GenerateCaddyfile() string {
 	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients true\n")
 	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot false\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot true\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "    robots_txt_honeypot_secret %q\n", cfg.RobotsTxtHoneypotSecret)
+	}
 	for _, ua := range cfg.BlockUserAgents {
 		fmt.Fprintf(&b, "    block_user_agents %q\n", ua)
 	}
@@ -2929,6 +3006,14 @@ func (cfg *Config) GenerateNginxLua() string {
 		b.WriteString("    block_script_clients = false,\n")
 	} else if cfg.BlockScriptClients {
 		b.WriteString("    block_script_clients = true,\n")
+	}
+	if cfg.isExplicit("enableRobotsTxtHoneypot", "enable_robots_txt_honeypot") && !cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot = false,\n")
+	} else if cfg.EnableRobotsTxtHoneypot {
+		b.WriteString("    enable_robots_txt_honeypot = true,\n")
+	}
+	if cfg.RobotsTxtHoneypotSecret != "" {
+		fmt.Fprintf(&b, "    robots_txt_honeypot_secret = %q,\n", cfg.RobotsTxtHoneypotSecret)
 	}
 	if len(cfg.BlockUserAgents) > 0 {
 		b.WriteString("    block_user_agents = {\n")

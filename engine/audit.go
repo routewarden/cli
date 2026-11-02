@@ -718,6 +718,23 @@ func AuditConfig(cfg *Config, filename string) *AuditReport {
 		})
 	}
 
+	// ── Rule RW-A031: Dynamic Robots.txt Honeypot Advisory ──────────────────
+	if cfg.EnableRobotsTxtHoneypot {
+		for _, ap := range cfg.AllowPatterns {
+			if strings.Contains(strings.ToLower(ap), "_rw_trap") {
+				report.Issues = append(report.Issues, AuditIssue{
+					Code:        "RW-A031",
+					Severity:    SeverityWarning,
+					Title:       "Honeypot Trap Shadowed by Allow Pattern",
+					Message:     fmt.Sprintf("allowPattern %q matches dynamic robots.txt trap prefix ('/_rw_trap_'). This will prevent crawler traps from blocking and banning scrapers.", ap),
+					Pattern:     ap,
+					Field:       "allowPatterns",
+					Remediation: "Remove or adjust allowPatterns so they do not overlap with '/_rw_trap_'.",
+				})
+			}
+		}
+	}
+
 	report.finalize(false)
 	return report
 }
